@@ -21,7 +21,7 @@ test("mobile shell exposes only the approved navigation", async ({ page }) => {
   await expect(navigation.getByRole("link")).toHaveText(["首页", "需求", "资源", "我的"]);
 });
 
-test("admin shell is independently reachable behind the bootstrap admin gate", async ({ page }) => {
+test("admin shell is independently reachable behind the unified permission service", async ({ page }) => {
   await login(page, e2eUsers.admin.phone, e2eUsers.admin.password);
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "管理后台基础骨架" })).toBeVisible();

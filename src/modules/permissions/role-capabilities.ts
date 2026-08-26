@@ -1,0 +1,234 @@
+import type { RoleCode } from "@/generated/prisma/client";
+import type { Capability } from "./capability-registry";
+
+export const INTERNAL_BASE_CAPABILITIES = [
+  "enterprise.view",
+  "member.view",
+  "policy.view",
+  "talent.view",
+  "demand.view",
+  "contacts.view",
+  "presence.current.view",
+  "message.view.self",
+  "message.read.self",
+  "todo.view.self",
+  "todo.complete.by_business",
+  "announcement.view",
+  "announcement.confirm",
+  "ai.assistant.use",
+] as const satisfies readonly Capability[];
+
+export const TEAM_COORDINATOR_CAPABILITIES = [
+  "team.overview.view",
+  "presence.current.team_view",
+  "trip.team.create",
+  "report.monthly.team_view",
+  "report.monthly.team_download",
+  "demand.team_coordinator.remind",
+] as const satisfies readonly Capability[];
+
+const MEMBER_CURRENT_CAPABILITIES = [
+  "demand.lead.create",
+  "demand.claim",
+  "demand.collaboration.apply",
+  "demand.collaboration.manage",
+  "demand.progress.add",
+  "demand.close.submit",
+  "enterprise.correct_request",
+  "member.profile.self_edit",
+  "talent.submit",
+  "talent.correct_request",
+  "presence.report.self",
+  "presence.history.self_view",
+  "trip.view",
+  "trip.create",
+  "trip.edit",
+  "trip.cancel",
+  "trip.result.add",
+  "visit.view",
+  "visit.supplement",
+  "visit.lead.create",
+  "reimbursement.create",
+  "reimbursement.view.self",
+  "reimbursement.edit.self",
+  "reimbursement.submit",
+  "reimbursement.withdraw",
+  "help.create",
+  "help.view",
+  "help.withdraw",
+] as const satisfies readonly Capability[];
+
+const MEMBER_ALUMNI_CAPABILITIES = [
+  "enterprise.correct_request",
+  "member.profile.self_edit",
+  "talent.submit",
+  "talent.correct_request",
+  "presence.report.self",
+  "presence.history.self_view",
+  "trip.view",
+  "trip.create",
+  "trip.edit",
+  "trip.cancel",
+  "trip.result.add",
+  "reimbursement.view.self",
+] as const satisfies readonly Capability[];
+
+const TOWNSHIP_CAPABILITIES = [
+  "demand.lead.verify",
+  "demand.formal.create",
+  "demand.submit_review",
+  "demand.progress.add",
+  "demand.close.submit",
+  "demand.cancel",
+  "demand.outcome.fill",
+  "enterprise.create_application",
+  "enterprise.correct_request",
+  "enterprise.contact.manage",
+  "talent.submit",
+  "talent.correct_request",
+  "talent.contact.start",
+  "talent.contact.update",
+  "talent.contact.complete",
+  "talent.contact.withdraw",
+  "trip.view",
+  "trip.create",
+  "trip.edit",
+  "trip.cancel",
+  "trip.result.add",
+  "visit.view",
+  "visit.supplement",
+  "visit.lead.create",
+  "report.view",
+  "report.monthly.download",
+  "report.export",
+  "export.create",
+] as const satisfies readonly Capability[];
+
+const DEPARTMENT_CAPABILITIES = [
+  "enterprise.correct_request",
+  "talent.submit",
+  "talent.correct_request",
+  "trip.view",
+  "trip.create",
+  "trip.edit",
+  "trip.cancel",
+  "trip.result.add",
+  "visit.view",
+  "report.view",
+  "report.monthly.download",
+  "report.export",
+  "export.create",
+] as const satisfies readonly Capability[];
+
+export const ADMIN_CAPABILITIES = [
+  "admin.shell.access",
+  "demand.lead.verify",
+  "demand.formal.create",
+  "demand.submit_review",
+  "demand.review",
+  "demand.publish_direct",
+  "demand.close.review",
+  "demand.cancel",
+  "demand.correct_formal",
+  "demand.recommendation.manage",
+  "demand.outcome.review",
+  "enterprise.create_formal",
+  "enterprise.edit_formal",
+  "enterprise.disable",
+  "enterprise.merge",
+  "enterprise.map.manage",
+  "member.manage",
+  "member.batch.manage",
+  "member.dispatch_org.manage",
+  "member.map.manage",
+  "talent.review",
+  "talent.edit_formal",
+  "talent.contact_person.change",
+  "talent.merge",
+  "policy.create",
+  "policy.edit",
+  "policy.publish",
+  "policy.withdraw",
+  "policy.replacement.manage",
+  "organization.manage",
+  "appointment.manage",
+  "account.basic_manage",
+  "department_township_relation.manage",
+  "presence.history.admin_view",
+  "presence.correct.admin",
+  "trip.correct.admin",
+  "visit.correct.admin",
+  "reimbursement.apply.grant",
+  "help.view",
+  "help.assign",
+  "help.transfer_to_org",
+  "help.reassign",
+  "announcement.create",
+  "announcement.edit",
+  "announcement.publish",
+  "announcement.scope.change",
+  "announcement.archive",
+  "report.view",
+  "report.monthly.download",
+  "report.export",
+  "import.execute",
+  "export.create",
+  "ai.metrics.view",
+] as const satisfies readonly Capability[];
+
+const SUPER_ADMIN_CAPABILITIES = [
+  ...ADMIN_CAPABILITIES,
+  "demand.owner.transfer",
+  "group_leader.assign",
+  "minister.assign",
+  "account.high_privilege_manage",
+  "role.high_privilege.assign",
+  "reimbursement.manage.grant",
+  "audit.full_view",
+  "backup.manage",
+  "backup.restore",
+  "system.high_privilege_manage",
+  "system.health.view",
+  "ai.service.manage",
+] as const satisfies readonly Capability[];
+
+export const ROLE_CAPABILITIES: Readonly<Record<RoleCode, readonly Capability[]>> = {
+  MEMBER_CURRENT: MEMBER_CURRENT_CAPABILITIES,
+  MEMBER_ALUMNI_PLATFORM: MEMBER_ALUMNI_CAPABILITIES,
+  GROUP_LEADER: TEAM_COORDINATOR_CAPABILITIES,
+  MINISTER: TEAM_COORDINATOR_CAPABILITIES,
+  TOWNSHIP_STAFF: TOWNSHIP_CAPABILITIES,
+  DEPARTMENT_STAFF: DEPARTMENT_CAPABILITIES,
+  ADMIN: ADMIN_CAPABILITIES,
+  SUPER_ADMIN: SUPER_ADMIN_CAPABILITIES,
+  LEADER_STAGE2: [],
+};
+
+export const SENSITIVE_PERMISSION_CAPABILITIES: Readonly<Record<string, readonly Capability[]>> = {
+  "reimbursement.apply": ["reimbursement.create"],
+  "reimbursement.manage": [
+    "reimbursement.manage.review",
+    "reimbursement.manage.return",
+    "reimbursement.manage.paper_received",
+    "reimbursement.manage.finance_submitted",
+    "reimbursement.manage.correct",
+    "reimbursement.manage.export",
+  ],
+  "ai.service_manage": ["ai.service.manage"],
+};
+
+export function resolveCapabilities(
+  roles: readonly RoleCode[],
+  specialPermissions: ReadonlySet<string>,
+): Set<Capability> {
+  const capabilities = new Set<Capability>(INTERNAL_BASE_CAPABILITIES);
+  for (const role of roles) {
+    for (const capability of ROLE_CAPABILITIES[role]) capabilities.add(capability);
+  }
+  for (const permission of specialPermissions) {
+    for (const capability of SENSITIVE_PERMISSION_CAPABILITIES[permission] ?? []) {
+      capabilities.add(capability);
+    }
+  }
+  return capabilities;
+}
