@@ -63,6 +63,10 @@ updated_at
 XQ-2026-000128
 ```
 
+## 2.1 Batch current uniqueness
+
+MySQL 普通唯一约束无法安全表达“仅 `is_current = true` 的行唯一”。M0-002 不伪造该约束；后续 Batch Service 必须在事务中锁定批次切换范围，先清除旧 current，再设置新 current，并在提交前验证恰好一条 current。所有批次切换必须走该 Service，保留审计并编写并发集成测试。
+
 # 3. Account
 
 ```text

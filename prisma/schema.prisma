@@ -1,0 +1,433 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum PersonStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum AccountStatus {
+  PENDING_ENABLE
+  UNACTIVATED
+  NORMAL
+  DISABLED
+}
+
+enum OrganizationType {
+  TOWNSHIP_ORG
+  DEPARTMENT
+  DISPATCH_UNIT
+  POST_UNIT
+  OTHER_INTERNAL
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AdministrativeAreaType {
+  COUNTY
+  TOWNSHIP
+  PARK
+  HIGH_TECH_ZONE
+  DEVELOPMENT_ZONE
+  OTHER_AREA
+}
+
+enum RoleCode {
+  MEMBER_CURRENT
+  MEMBER_ALUMNI_PLATFORM
+  GROUP_LEADER
+  MINISTER
+  TOWNSHIP_STAFF
+  DEPARTMENT_STAFF
+  ADMIN
+  SUPER_ADMIN
+  LEADER_STAGE2
+}
+
+enum BatchStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+}
+
+enum JobStatus {
+  WAITING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+model Person {
+  id                            String                   @id @default(uuid()) @db.Char(36)
+  name                          String                   @db.VarChar(80)
+  personStatus                  PersonStatus             @default(ACTIVE) @map("person_status")
+  createdAt                     DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                     DateTime                 @updatedAt @map("updated_at") @db.DateTime(3)
+  account                       Account?
+  phoneChanges                  AccountPhoneHistory[]    @relation("PhoneChangeAccount")
+  appointments                  Appointment[]
+  roleAssignments               RoleAssignment[]         @relation("RoleAssignmentPerson")
+  grantedRoleAssignments        RoleAssignment[]         @relation("RoleAssignmentGrantor")
+  specialPermissionGrants       SpecialPermissionGrant[] @relation("PermissionGrantPerson")
+  grantedSpecialPermissions     SpecialPermissionGrant[] @relation("PermissionGrantGrantor")
+  batchMemberships              BatchMembership[]
+  groupLeaderAssignments        GroupLeaderAssignment[]  @relation("GroupLeaderPerson")
+  grantedGroupLeaderAssignments GroupLeaderAssignment[]  @relation("GroupLeaderGrantor")
+  auditLogs                     AuditLog[]
+  stateTransitions              StateTransitionHistory[]
+
+  @@index([personStatus])
+  @@map("persons")
+}
+
+model Account {
+  id                         String                @id @default(uuid()) @db.Char(36)
+  personId                   String                @unique @map("person_id") @db.Char(36)
+  phone                      String                @unique @db.VarChar(20)
+  passwordHash               String                @map("password_hash") @db.VarChar(255)
+  status                     AccountStatus         @default(PENDING_ENABLE)
+  forcePasswordChange        Boolean               @default(false) @map("force_password_change")
+  firstPasswordChangedAt     DateTime?             @map("first_password_changed_at") @db.DateTime(3)
+  confidentialityConfirmedAt DateTime?             @map("confidentiality_confirmed_at") @db.DateTime(3)
+  permissionVersion          BigInt                @default(1) @map("permission_version") @db.UnsignedBigInt
+  lastLoginAt                DateTime?             @map("last_login_at") @db.DateTime(3)
+  createdAt                  DateTime              @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                  DateTime              @updatedAt @map("updated_at") @db.DateTime(3)
+  person                     Person                @relation(fields: [personId], references: [id], onDelete: Restrict)
+  phoneHistory               AccountPhoneHistory[]
+  sessions                   Session[]
+  auditLogs                  AuditLog[]
+
+  @@index([status])
+  @@map("accounts")
+}
+
+model AccountPhoneHistory {
+  id                String   @id @default(uuid()) @db.Char(36)
+  accountId         String   @map("account_id") @db.Char(36)
+  oldPhone          String   @map("old_phone") @db.VarChar(20)
+  newPhone          String   @map("new_phone") @db.VarChar(20)
+  reason            String   @db.VarChar(500)
+  changedByPersonId String   @map("changed_by_person_id") @db.Char(36)
+  changedAt         DateTime @default(now()) @map("changed_at") @db.DateTime(3)
+  account           Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  changedByPerson   Person   @relation("PhoneChangeAccount", fields: [changedByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, changedAt])
+  @@index([changedByPersonId, changedAt])
+  @@map("account_phone_history")
+}
+
+model Session {
+  id                String    @id @default(uuid()) @db.Char(36)
+  accountId         String    @map("account_id") @db.Char(36)
+  tokenHash         String    @unique @map("token_hash") @db.Char(64)
+  deviceId          String    @map("device_id") @db.VarChar(255)
+  deviceName        String?   @map("device_name") @db.VarChar(100)
+  userAgent         String?   @map("user_agent") @db.VarChar(500)
+  ipLast            String?   @map("ip_last") @db.VarChar(45)
+  permissionVersion BigInt    @map("permission_version") @db.UnsignedBigInt
+  expiresAt         DateTime  @map("expires_at") @db.DateTime(3)
+  revokedAt         DateTime? @map("revoked_at") @db.DateTime(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([accountId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Organization {
+  id                       String                       @id @default(uuid()) @db.Char(36)
+  name                     String                       @db.VarChar(200)
+  type                     OrganizationType
+  parentId                 String?                      @map("parent_id") @db.Char(36)
+  status                   RecordStatus                 @default(ACTIVE)
+  phone                    String?                      @db.VarChar(30)
+  address                  String?                      @db.VarChar(500)
+  latitude                 Decimal?                     @db.Decimal(10, 7)
+  longitude                Decimal?                     @db.Decimal(11, 7)
+  createdAt                DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  parent                   Organization?                @relation("OrganizationHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children                 Organization[]               @relation("OrganizationHierarchy")
+  areaMappings             OrganizationAreaMapping[]
+  appointments             Appointment[]
+  departmentAreaRelations  DepartmentTownshipRelation[]
+  dispatchBatchMemberships BatchMembership[]            @relation("DispatchOrganization")
+  postBatchMemberships     BatchMembership[]            @relation("PostOrganization")
+
+  @@index([parentId])
+  @@index([type, status])
+  @@index([name])
+  @@map("organizations")
+}
+
+model AdministrativeArea {
+  id                   String                       @id @default(uuid()) @db.Char(36)
+  name                 String                       @db.VarChar(200)
+  type                 AdministrativeAreaType
+  parentId             String?                      @map("parent_id") @db.Char(36)
+  status               RecordStatus                 @default(ACTIVE)
+  sortOrder            Int                          @default(0) @map("sort_order")
+  createdAt            DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  parent               AdministrativeArea?          @relation("AdministrativeAreaHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children             AdministrativeArea[]         @relation("AdministrativeAreaHierarchy")
+  organizationMappings OrganizationAreaMapping[]
+  departmentRelations  DepartmentTownshipRelation[]
+
+  @@index([parentId])
+  @@index([type, status, sortOrder])
+  @@index([name])
+  @@map("administrative_areas")
+}
+
+model OrganizationAreaMapping {
+  id             String             @id @default(uuid()) @db.Char(36)
+  organizationId String             @map("organization_id") @db.Char(36)
+  areaId         String             @map("area_id") @db.Char(36)
+  effectiveAt    DateTime           @map("effective_at") @db.DateTime(3)
+  expiredAt      DateTime?          @map("expired_at") @db.DateTime(3)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.DateTime(3)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  area           AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, effectiveAt, expiredAt])
+  @@index([areaId, effectiveAt, expiredAt])
+  @@map("organization_area_mappings")
+}
+
+model Appointment {
+  id             String       @id @default(uuid()) @db.Char(36)
+  personId       String       @map("person_id") @db.Char(36)
+  organizationId String       @map("organization_id") @db.Char(36)
+  positionTitle  String       @map("position_title") @db.VarChar(100)
+  effectiveAt    DateTime     @map("effective_at") @db.DateTime(3)
+  expiredAt      DateTime?    @map("expired_at") @db.DateTime(3)
+  isPrimary      Boolean      @default(false) @map("is_primary")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  person         Person       @relation(fields: [personId], references: [id], onDelete: Restrict)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([organizationId, effectiveAt, expiredAt])
+  @@map("appointments")
+}
+
+model DepartmentTownshipRelation {
+  id                       String             @id @default(uuid()) @db.Char(36)
+  departmentOrganizationId String             @map("department_organization_id") @db.Char(36)
+  areaId                   String             @map("area_id") @db.Char(36)
+  effectiveAt              DateTime           @map("effective_at") @db.DateTime(3)
+  expiredAt                DateTime?          @map("expired_at") @db.DateTime(3)
+  createdAt                DateTime           @default(now()) @map("created_at") @db.DateTime(3)
+  departmentOrganization   Organization       @relation(fields: [departmentOrganizationId], references: [id], onDelete: Restrict)
+  area                     AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
+
+  @@index([departmentOrganizationId, effectiveAt, expiredAt])
+  @@index([areaId, effectiveAt, expiredAt])
+  @@map("department_township_relations")
+}
+
+model RoleAssignment {
+  id                String    @id @default(uuid()) @db.Char(36)
+  personId          String    @map("person_id") @db.Char(36)
+  roleCode          RoleCode  @map("role_code")
+  effectiveAt       DateTime  @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime? @map("expired_at") @db.DateTime(3)
+  grantedByPersonId String?   @map("granted_by_person_id") @db.Char(36)
+  reason            String?   @db.VarChar(500)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  person            Person    @relation("RoleAssignmentPerson", fields: [personId], references: [id], onDelete: Restrict)
+  grantedByPerson   Person?   @relation("RoleAssignmentGrantor", fields: [grantedByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([roleCode, effectiveAt, expiredAt])
+  @@index([grantedByPersonId])
+  @@map("role_assignments")
+}
+
+model SpecialPermissionGrant {
+  id                String    @id @default(uuid()) @db.Char(36)
+  personId          String    @map("person_id") @db.Char(36)
+  permissionCode    String    @map("permission_code") @db.VarChar(100)
+  effectiveAt       DateTime  @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime? @map("expired_at") @db.DateTime(3)
+  reason            String    @db.VarChar(500)
+  grantedByPersonId String    @map("granted_by_person_id") @db.Char(36)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  person            Person    @relation("PermissionGrantPerson", fields: [personId], references: [id], onDelete: Restrict)
+  grantedByPerson   Person    @relation("PermissionGrantGrantor", fields: [grantedByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([permissionCode, effectiveAt, expiredAt])
+  @@index([grantedByPersonId])
+  @@map("special_permission_grants")
+}
+
+model Batch {
+  id                     String                  @id @default(uuid()) @db.Char(36)
+  name                   String                  @db.VarChar(100)
+  year                   Int                     @db.UnsignedSmallInt
+  startDate              DateTime                @map("start_date") @db.Date
+  endDate                DateTime?               @map("end_date") @db.Date
+  status                 BatchStatus             @default(PLANNED)
+  isCurrent              Boolean                 @default(false) @map("is_current")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
+  memberships            BatchMembership[]
+  groupLeaderAssignments GroupLeaderAssignment[]
+
+  @@index([status, isCurrent])
+  @@index([year])
+  @@map("batches")
+}
+
+model BatchMembership {
+  id                     String        @id @default(uuid()) @db.Char(36)
+  personId               String        @map("person_id") @db.Char(36)
+  batchId                String        @map("batch_id") @db.Char(36)
+  dispatchOrganizationId String?       @map("dispatch_organization_id") @db.Char(36)
+  postOrganizationId     String?       @map("post_organization_id") @db.Char(36)
+  positionTitle          String?       @map("position_title") @db.VarChar(100)
+  startDate              DateTime      @map("start_date") @db.Date
+  endDate                DateTime?     @map("end_date") @db.Date
+  status                 String        @db.VarChar(32)
+  createdAt              DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.DateTime(3)
+  person                 Person        @relation(fields: [personId], references: [id], onDelete: Restrict)
+  batch                  Batch         @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  dispatchOrganization   Organization? @relation("DispatchOrganization", fields: [dispatchOrganizationId], references: [id], onDelete: Restrict)
+  postOrganization       Organization? @relation("PostOrganization", fields: [postOrganizationId], references: [id], onDelete: Restrict)
+
+  @@unique([personId, batchId])
+  @@index([batchId, status])
+  @@index([dispatchOrganizationId])
+  @@index([postOrganizationId])
+  @@map("batch_memberships")
+}
+
+model GroupLeaderAssignment {
+  id                String    @id @default(uuid()) @db.Char(36)
+  personId          String    @map("person_id") @db.Char(36)
+  batchId           String    @map("batch_id") @db.Char(36)
+  effectiveAt       DateTime  @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime? @map("expired_at") @db.DateTime(3)
+  grantedByPersonId String    @map("granted_by_person_id") @db.Char(36)
+  reason            String    @db.VarChar(500)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  person            Person    @relation("GroupLeaderPerson", fields: [personId], references: [id], onDelete: Restrict)
+  batch             Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  grantedByPerson   Person    @relation("GroupLeaderGrantor", fields: [grantedByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([batchId, effectiveAt, expiredAt])
+  @@index([grantedByPersonId])
+  @@map("group_leader_assignments")
+}
+
+model BusinessSequence {
+  id           String   @id @default(uuid()) @db.Char(36)
+  prefix       String   @db.VarChar(10)
+  year         Int      @db.UnsignedSmallInt
+  currentValue BigInt   @default(0) @map("current_value") @db.UnsignedBigInt
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@unique([prefix, year])
+  @@map("business_sequences")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Char(36)
+  actorPersonId  String?  @map("actor_person_id") @db.Char(36)
+  actorAccountId String?  @map("actor_account_id") @db.Char(36)
+  actionCode     String   @map("action_code") @db.VarChar(100)
+  entityType     String   @map("entity_type") @db.VarChar(100)
+  entityId       String?  @map("entity_id") @db.Char(36)
+  beforeJson     Json?    @map("before_json")
+  afterJson      Json?    @map("after_json")
+  reason         String?  @db.VarChar(500)
+  ip             String?  @db.VarChar(45)
+  device         String?  @db.VarChar(255)
+  requestId      String?  @map("request_id") @db.VarChar(100)
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  actorPerson    Person?  @relation(fields: [actorPersonId], references: [id], onDelete: Restrict)
+  actorAccount   Account? @relation(fields: [actorAccountId], references: [id], onDelete: Restrict)
+
+  @@index([actorPersonId, createdAt])
+  @@index([actorAccountId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([requestId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model StateTransitionHistory {
+  id            String   @id @default(uuid()) @db.Char(36)
+  entityType    String   @map("entity_type") @db.VarChar(100)
+  entityId      String   @map("entity_id") @db.Char(36)
+  fromState     String?  @map("from_state") @db.VarChar(100)
+  toState       String   @map("to_state") @db.VarChar(100)
+  actionCode    String   @map("action_code") @db.VarChar(100)
+  actorPersonId String?  @map("actor_person_id") @db.Char(36)
+  reason        String?  @db.VarChar(500)
+  metadataJson  Json?    @map("metadata_json")
+  requestId     String?  @map("request_id") @db.VarChar(100)
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  actorPerson   Person?  @relation(fields: [actorPersonId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorPersonId, createdAt])
+  @@index([requestId])
+  @@map("state_transition_history")
+}
+
+model OutboxEvent {
+  id            String    @id @default(uuid()) @db.Char(36)
+  eventType     String    @map("event_type") @db.VarChar(100)
+  aggregateType String    @map("aggregate_type") @db.VarChar(100)
+  aggregateId   String    @map("aggregate_id") @db.Char(36)
+  payloadJson   Json      @map("payload_json")
+  dedupeKey     String?   @unique @map("dedupe_key") @db.VarChar(191)
+  occurredAt    DateTime  @default(now()) @map("occurred_at") @db.DateTime(3)
+  publishedAt   DateTime? @map("published_at") @db.DateTime(3)
+  attempts      Int       @default(0) @db.UnsignedInt
+  lastError     String?   @map("last_error") @db.Text
+
+  @@index([publishedAt, occurredAt])
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@map("outbox_events")
+}
+
+model JobTask {
+  id             String    @id @default(uuid()) @db.Char(36)
+  jobType        String    @map("job_type") @db.VarChar(100)
+  payloadJson    Json      @map("payload_json")
+  status         JobStatus @default(WAITING)
+  priority       Int       @default(0)
+  idempotencyKey String    @unique @map("idempotency_key") @db.VarChar(191)
+  scheduledAt    DateTime  @map("scheduled_at") @db.DateTime(3)
+  lockedAt       DateTime? @map("locked_at") @db.DateTime(3)
+  lockedBy       String?   @map("locked_by") @db.VarChar(100)
+  retryCount     Int       @default(0) @map("retry_count") @db.UnsignedInt
+  maxRetries     Int       @default(3) @map("max_retries") @db.UnsignedInt
+  finishedAt     DateTime? @map("finished_at") @db.DateTime(3)
+  lastError      String?   @map("last_error") @db.Text
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([status, scheduledAt, priority])
+  @@index([lockedAt])
+  @@map("job_tasks")
+}
