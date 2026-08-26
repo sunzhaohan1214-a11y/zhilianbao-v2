@@ -153,7 +153,7 @@ export async function consumeLoginRateLimit(input: { phone: string; ip: string; 
       const [bucket] = await tx.$queryRaw<Array<{
         id: string;
         windowStart: Date;
-        attemptCount: number;
+        attemptCount: number | bigint;
         blockedUntil: Date | null;
         lastLoggedAt: Date | null;
       }>>`
@@ -174,7 +174,7 @@ export async function consumeLoginRateLimit(input: { phone: string; ip: string; 
       }
 
       const expiredWindow = now.getTime() - bucket.windowStart.getTime() >= windowMs;
-      const nextCount = expiredWindow ? 1 : bucket.attemptCount + 1;
+      const nextCount = expiredWindow ? 1 : Number(bucket.attemptCount) + 1;
       const blockedUntil = nextCount > policy.maximum ? new Date(now.getTime() + windowMs) : null;
       if (blockedUntil) {
         limited = true;
