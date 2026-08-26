@@ -8,26 +8,26 @@ Codex 进入仓库时先读取根目录 `AGENTS.md`，再按 AGENTS 指示读取
 
 人工审查 / 技术交接建议按以下顺序：
 
-1. `PRD-v1.2.md`
+1. `PRD-v1.3.md`
 2. `ARCHITECTURE-v1.0.md`
-3. `PERMISSIONS-v1.2.md`
-4. `STATE-MACHINES-v1.0.md`
-5. `DATA-MODEL-v1.1.md`
-6. `DATA-DICTIONARY-v1.0.md`
+3. `PERMISSIONS-v1.3.md`
+4. `STATE-MACHINES-v1.1.md`
+5. `DATA-MODEL-v1.2.md`
+6. `DATA-DICTIONARY-v1.1.md`
 7. `FORM-SPEC-v1.0.md`
-8. `FIELD-PERMISSIONS-v1.0.md`
+8. `FIELD-PERMISSIONS-v1.1.md`
 9. `DATABASE-CONSTRAINTS-v1.0.md`
-10. `API-SPEC-v1.0.md`
-11. `MESSAGE-TODO-MATRIX-v1.0.md`
-12. `UI-SPEC-v1.0.md`
+10. `API-SPEC-v1.1.md`
+11. `MESSAGE-TODO-MATRIX-v1.1.md`
+12. `UI-SPEC-v1.1.md`
 13. `REIMBURSEMENT-RULES-v1.0.md`
 14. `AI-OCR-SPEC-v1.0.md`
 15. `MAP-SPEC-v1.0.md`
 16. `SECURITY-SPEC-v1.0.md`
 17. `MIGRATION-PLAN-v1.0.md`
-18. `TEST-PLAN-v1.0.md`
+18. `TEST-PLAN-v1.1.md`
 19. `OPERATIONS-v1.0.md`
-20. `IMPLEMENTATION-PLAN-v1.0.md`
+20. `IMPLEMENTATION-PLAN-v1.1.md`
 21. `AGENTS.md`
 
 ## 2. 权威层级
@@ -90,6 +90,7 @@ Vitest+Playwright
 Local/Test/Prod
 GitHub唯一代码真源
 WorkBuddy部署
+GROUP_LEADER与MINISTER独立角色映射同一团队协调能力包
 ```
 
 ## 5. 开发是否可以开始

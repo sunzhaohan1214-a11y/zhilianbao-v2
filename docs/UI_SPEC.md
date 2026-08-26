@@ -1,6 +1,6 @@
 # 智链宝 V2.0 — UI_SPEC.md
 
-> 版本：DESIGN v1.0  
+> 版本：DESIGN v1.1
 > 状态：视觉与交互基线  
 > 说明：锁定信息架构、页面结构、组件语言和交互原则。Logo、荷宝最终矢量资产可替换，但不得因此改变页面结构。
 
@@ -196,7 +196,7 @@ BrandLogo
 顶部栏
 荷宝 AI
 公告
-团长全团概览（仅团长）
+团队协调角色全团概览（仅 GROUP_LEADER / MINISTER）
 当前在宝
 今日行程
 我的待办
@@ -231,9 +231,9 @@ BrandLogo
 
 没有则隐藏。
 
-### 团长全团概览
+### 团队协调角色全团概览
 
-仅团长：
+仅 `GROUP_LEADER` 或 `MINISTER`：
 
 ```text
 待对接
@@ -243,6 +243,15 @@ BrandLogo
 ```
 
 紧凑，不做大仪表盘。
+
+两个角色共用同一概览组件和能力判断，不复制页面逻辑。需要展示角色身份时：
+
+```text
+GROUP_LEADER → 团长
+MINISTER → 部长
+```
+
+不得把部长显示成团长；同一人员多角色仍不要求切换身份。
 
 ### 当前在宝
 
@@ -421,7 +430,7 @@ AI推荐（有权时）
 专业方向
 ```
 
-团长仅轻量标签。
+团长、部长均使用轻量且彼此独立的身份标签。
 
 详情：
 
@@ -859,4 +868,4 @@ canceled/withdrawn
 14. Logo与Mascot资产替换不能破坏布局；
 15. 所有重要页面必须有 Loading/Empty/Error/Forbidden。
 
-**UI_SPEC.md DESIGN v1.0 END**
+**UI_SPEC.md DESIGN v1.1 END**
