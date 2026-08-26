@@ -165,6 +165,11 @@ describe("M0-004 real MySQL actor and scope resolution", () => {
     expect(inactiveArea.townshipAreaIds).toEqual([]);
     expect(inactiveArea.effectiveRoles).not.toContain("TOWNSHIP_STAFF");
     expect(inactiveArea.capabilities.has("demand.formal.create")).toBe(false);
+    await expect(authorizeActor({
+      actor: inactiveArea,
+      action: "demand.formal.create",
+      resource: { resourceType: "demand", areaId: areaA.id },
+    })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     await prisma.administrativeArea.update({ where: { id: areaA.id }, data: { status: "ACTIVE" } });
 
     await prisma.appointment.update({ where: { id: appointment.id }, data: { expiredAt: new Date(Date.now() - 1) } });
@@ -386,6 +391,7 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
     const superActor = await freshActor(superFixture);
     const target = await accountFixture("role lifecycle target");
     const currentEffectiveAt = new Date(Date.now() - 60_000);
+    const currentScheduledEnd = new Date(Date.now() + 43_200_000);
     const futureEffectiveAt = new Date(Date.now() + 86_400_000);
     const [currentGrant, futureGrant] = await Promise.all([
       prisma.roleAssignment.create({
@@ -393,6 +399,7 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
           personId: target.person.id,
           roleCode: "MINISTER",
           effectiveAt: currentEffectiveAt,
+          expiredAt: currentScheduledEnd,
           grantedByPersonId: superActor.personId,
           reason: "current lifecycle fixture",
         },
@@ -437,6 +444,7 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
       currentGrantsExpiredAtRevokeTime: [{ id: currentGrant.id, expiredAt: expect.any(String) }],
       futureGrantsCanceledAtEffectiveTime: [{ id: futureGrant.id, expiredAt: futureEffectiveAt.toISOString() }],
     });
+    expect(audit.reason).toBe("cancel current and scheduled minister grants");
 
     const futureOnlyTarget = await accountFixture("future-only role target");
     const futureOnlyEffectiveAt = new Date(Date.now() + 172_800_000);
@@ -470,6 +478,7 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
     const superActor = await freshActor(superFixture);
     const target = await accountFixture("special lifecycle target");
     const currentEffectiveAt = new Date(Date.now() - 60_000);
+    const currentScheduledEnd = new Date(Date.now() + 43_200_000);
     const futureEffectiveAt = new Date(Date.now() + 86_400_000);
     const [currentGrant, futureGrant] = await Promise.all([
       prisma.specialPermissionGrant.create({
@@ -477,6 +486,7 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
           personId: target.person.id,
           permissionCode: "reimbursement.apply",
           effectiveAt: currentEffectiveAt,
+          expiredAt: currentScheduledEnd,
           reason: "current special lifecycle fixture",
           grantedByPersonId: superActor.personId,
         },
@@ -520,6 +530,7 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
       currentGrantsExpiredAtRevokeTime: [{ id: currentGrant.id, expiredAt: expect.any(String) }],
       futureGrantsCanceledAtEffectiveTime: [{ id: futureGrant.id, expiredAt: futureEffectiveAt.toISOString() }],
     });
+    expect(audit.reason).toBe("cancel current and scheduled reimbursement grants");
   });
 
   it("serializes truly concurrent duplicate role and special grants", async () => {
