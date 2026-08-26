@@ -531,6 +531,32 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
       futureGrantsCanceledAtEffectiveTime: [{ id: futureGrant.id, expiredAt: futureEffectiveAt.toISOString() }],
     });
     expect(audit.reason).toBe("cancel current and scheduled reimbursement grants");
+
+    const futureOnlyTarget = await accountFixture("future-only special target");
+    const futureOnlyEffectiveAt = new Date(Date.now() + 172_800_000);
+    const futureOnlyGrant = await prisma.specialPermissionGrant.create({
+      data: {
+        personId: futureOnlyTarget.person.id,
+        permissionCode: "reimbursement.apply",
+        effectiveAt: futureOnlyEffectiveAt,
+        reason: "future-only special lifecycle fixture",
+        grantedByPersonId: superActor.personId,
+      },
+    });
+    const futureOnlyVersion = (await prisma.account.findUniqueOrThrow({
+      where: { id: futureOnlyTarget.account.id },
+    })).permissionVersion;
+    const futureOnlyRevoked = await revokeReimbursementApply({
+      actor: superActor,
+      targetPersonId: futureOnlyTarget.person.id,
+      reason: "cancel future-only reimbursement grant",
+    });
+    expect(futureOnlyRevoked.currentGrantIds).toEqual([]);
+    expect(futureOnlyRevoked.futureGrantIds).toEqual([futureOnlyGrant.id]);
+    expect((await prisma.specialPermissionGrant.findUniqueOrThrow({ where: { id: futureOnlyGrant.id } })).expiredAt)
+      .toEqual(futureOnlyEffectiveAt);
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: futureOnlyTarget.account.id } })).permissionVersion)
+      .toBe(futureOnlyVersion + BigInt(1));
   });
 
   it("serializes truly concurrent duplicate role and special grants", async () => {
