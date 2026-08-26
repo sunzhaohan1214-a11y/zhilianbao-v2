@@ -2,12 +2,20 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { isAuthError } from "@/modules/identity/errors";
+import { isPermissionError } from "@/modules/permissions/permission-errors";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
 }
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
+  if (isPermissionError(error)) {
+    return NextResponse.json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details ?? {} },
+      requestId,
+    }, { status: error.status });
+  }
   if (isAuthError(error)) {
     return NextResponse.json({
       ok: false,

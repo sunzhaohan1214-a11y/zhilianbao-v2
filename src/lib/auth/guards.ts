@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentSession } from "./current-session";
 import { canAccessBusiness, type CurrentSession } from "@/modules/identity/session-service";
+import { authorize } from "@/modules/permissions/permission-service";
 
 export async function requireBusinessPageSession(): Promise<CurrentSession> {
   const session = await getCurrentSession();
@@ -11,7 +12,6 @@ export async function requireBusinessPageSession(): Promise<CurrentSession> {
   return session;
 }
 
-export function isBootstrapAdmin(session: CurrentSession): boolean {
-  // M0-004 replaces this deliberately narrow, default-deny bootstrap gate.
-  return session.roles.some((role) => role === "ADMIN" || role === "SUPER_ADMIN");
+export async function requireAdminShellPermission(session: CurrentSession) {
+  return authorize({ session, action: "admin.shell.access" });
 }

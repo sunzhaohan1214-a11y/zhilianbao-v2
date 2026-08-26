@@ -52,20 +52,24 @@ test("a reset account is restricted to forced password change", async ({ page })
   await expect(page).toHaveURL(/\/account\/change-password$/);
 });
 
-test("bootstrap admin gate denies ordinary users and permits current ADMIN", async ({ browser }) => {
-  const ordinaryContext = await browser.newContext();
-  const ordinary = await ordinaryContext.newPage();
-  await login(ordinary, e2eUsers.normal.phone, e2eUsers.normal.password);
-  await ordinary.goto("/admin");
-  await expect(ordinary.getByRole("heading", { name: "当前账号不能进入管理后台" })).toBeVisible();
-  await ordinaryContext.close();
+test("unified permission service protects the admin shell for every key role", async ({ browser }) => {
+  for (const user of [e2eUsers.normal, e2eUsers.minister, e2eUsers.groupLeader]) {
+    const deniedContext = await browser.newContext();
+    const denied = await deniedContext.newPage();
+    await login(denied, user.phone, user.password);
+    await denied.goto("/admin");
+    await expect(denied.getByRole("heading", { name: "当前账号不能进入管理后台" })).toBeVisible();
+    await deniedContext.close();
+  }
 
-  const adminContext = await browser.newContext();
-  const admin = await adminContext.newPage();
-  await login(admin, e2eUsers.admin.phone, e2eUsers.admin.password);
-  await admin.goto("/admin");
-  await expect(admin.getByRole("heading", { name: "管理后台基础骨架" })).toBeVisible();
-  await adminContext.close();
+  for (const user of [e2eUsers.admin, e2eUsers.superAdmin]) {
+    const allowedContext = await browser.newContext();
+    const allowed = await allowedContext.newPage();
+    await login(allowed, user.phone, user.password);
+    await allowed.goto("/admin");
+    await expect(allowed.getByRole("heading", { name: "管理后台基础骨架" })).toBeVisible();
+    await allowedContext.close();
+  }
 });
 
 test("security page shows own devices without token hashes", async ({ page }) => {

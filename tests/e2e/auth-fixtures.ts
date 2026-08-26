@@ -6,6 +6,9 @@ export const e2eUsers = {
   normal: { personId: "10000000-0000-4000-8000-000000000002", accountId: "20000000-0000-4000-8000-000000000002", phone: "13800001002", password: "Normal-pass-123" },
   admin: { personId: "10000000-0000-4000-8000-000000000003", accountId: "20000000-0000-4000-8000-000000000003", phone: "13800001003", password: "Admin-pass-123" },
   forced: { personId: "10000000-0000-4000-8000-000000000004", accountId: "20000000-0000-4000-8000-000000000004", phone: "13800001004", password: "001004" },
+  minister: { personId: "10000000-0000-4000-8000-000000000005", accountId: "20000000-0000-4000-8000-000000000005", phone: "13800001005", password: "Minister-pass-123" },
+  groupLeader: { personId: "10000000-0000-4000-8000-000000000006", accountId: "20000000-0000-4000-8000-000000000006", phone: "13800001006", password: "Leader-pass-123" },
+  superAdmin: { personId: "10000000-0000-4000-8000-000000000007", accountId: "20000000-0000-4000-8000-000000000007", phone: "13800001007", password: "Super-pass-123" },
 } as const;
 
 export async function seedAuthFixtures() {
@@ -49,14 +52,19 @@ export async function seedAuthFixtures() {
       },
     });
   }
-  await prisma.roleAssignment.deleteMany({ where: { personId: e2eUsers.admin.personId } });
-  await prisma.roleAssignment.create({
-    data: {
-      personId: e2eUsers.admin.personId,
-      roleCode: "ADMIN",
+  await prisma.roleAssignment.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
+  await prisma.roleAssignment.createMany({
+    data: [
+      { personId: e2eUsers.admin.personId, roleCode: "ADMIN" as const },
+      { personId: e2eUsers.minister.personId, roleCode: "MINISTER" as const },
+      { personId: e2eUsers.groupLeader.personId, roleCode: "GROUP_LEADER" as const },
+      { personId: e2eUsers.superAdmin.personId, roleCode: "SUPER_ADMIN" as const },
+    ].map(({ personId, roleCode }) => ({
+      personId,
+      roleCode,
       effectiveAt: new Date(Date.now() - 60_000),
-      grantedByPersonId: e2eUsers.admin.personId,
-      reason: "M0-003 E2E bootstrap admin fixture",
-    },
+      grantedByPersonId: e2eUsers.superAdmin.personId,
+      reason: "M0-004 unified permission E2E fixture",
+    })),
   });
 }
