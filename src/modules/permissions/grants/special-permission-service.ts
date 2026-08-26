@@ -131,43 +131,70 @@ export async function grantSpecialPermission(input: GrantSpecialPermissionInput)
 export async function revokeSpecialPermission(input: SpecialPermissionMutationInput) {
   requireSpecialGrantAuthority(input.actor, input.permissionCode);
   const reason = requireReason(input.reason);
-  const now = new Date();
   const prisma = getPrismaClient();
   return prisma.$transaction(async (tx) => {
     await lockPermissionTarget(tx, input.targetPersonId);
-    const active = await tx.specialPermissionGrant.findMany({
+    const now = new Date();
+    const revocableCandidates = await tx.specialPermissionGrant.findMany({
       where: {
         personId: input.targetPersonId,
         permissionCode: input.permissionCode,
-        ...effectiveAt(now),
+        OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
       },
-      select: { id: true },
+      select: { id: true, effectiveAt: true, expiredAt: true },
     });
-    if (active.length === 0) {
-      throw new PermissionError("PERMISSION_CONFLICT", "目标人员没有可撤销的活动敏感权限", {
+    const current = revocableCandidates.filter(({ effectiveAt, expiredAt }) =>
+      effectiveAt <= now && (expiredAt === null || expiredAt > now));
+    const future = revocableCandidates.filter(({ effectiveAt, expiredAt }) =>
+      effectiveAt > now && (expiredAt === null || expiredAt > effectiveAt));
+    const revocable = [...current, ...future];
+    if (revocable.length === 0) {
+      throw new PermissionError("PERMISSION_CONFLICT", "目标人员没有可撤销的当前或未来敏感权限", {
         permissionCode: input.permissionCode,
       });
     }
-    await tx.specialPermissionGrant.updateMany({
-      where: { id: { in: active.map(({ id }) => id) } },
-      data: { expiredAt: now },
-    });
+    if (current.length > 0) {
+      await tx.specialPermissionGrant.updateMany({
+        where: { id: { in: current.map(({ id }) => id) } },
+        data: { expiredAt: now },
+      });
+    }
+    await Promise.all(future.map((grant) => tx.specialPermissionGrant.update({
+      where: { id: grant.id },
+      data: { expiredAt: grant.effectiveAt },
+    })));
     await bumpPermissionVersion(input.targetPersonId, tx);
     await writeGrantAudit(tx, {
       actor: input.actor,
       actionCode: "SPECIAL_PERMISSION_REVOKED",
       entityType: "SPECIAL_PERMISSION_GRANT",
-      entityId: active[0].id,
+      entityId: revocable[0].id,
       reason,
       before: {
         targetPersonId: input.targetPersonId,
         permissionCode: input.permissionCode,
-        activeGrantIds: active.map(({ id }) => id),
+        currentGrantIds: current.map(({ id }) => id),
+        futureGrantIds: future.map(({ id }) => id),
       },
-      after: { expiredAt: now.toISOString() },
+      after: {
+        revokedAt: now.toISOString(),
+        currentGrantsExpiredAtRevokeTime: current.map(({ id }) => ({
+          id,
+          expiredAt: now.toISOString(),
+        })),
+        futureGrantsCanceledAtEffectiveTime: future.map(({ id, effectiveAt }) => ({
+          id,
+          expiredAt: effectiveAt.toISOString(),
+        })),
+      },
       context: input.context,
     });
-    return { revokedIds: active.map(({ id }) => id), expiredAt: now };
+    return {
+      revokedIds: revocable.map(({ id }) => id),
+      currentGrantIds: current.map(({ id }) => id),
+      futureGrantIds: future.map(({ id }) => id),
+      expiredAt: now,
+    };
   });
 }
 

@@ -160,6 +160,13 @@ describe("M0-004 real MySQL actor and scope resolution", () => {
       resource: { resourceType: "demand", areaId: areaB.id },
     })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE" });
 
+    await prisma.administrativeArea.update({ where: { id: areaA.id }, data: { status: "INACTIVE" } });
+    const inactiveArea = await freshActor(fixture);
+    expect(inactiveArea.townshipAreaIds).toEqual([]);
+    expect(inactiveArea.effectiveRoles).not.toContain("TOWNSHIP_STAFF");
+    expect(inactiveArea.capabilities.has("demand.formal.create")).toBe(false);
+    await prisma.administrativeArea.update({ where: { id: areaA.id }, data: { status: "ACTIVE" } });
+
     await prisma.appointment.update({ where: { id: appointment.id }, data: { expiredAt: new Date(Date.now() - 1) } });
     const expired = await freshActor(fixture);
     expect(expired.effectiveRoles).not.toContain("TOWNSHIP_STAFF");
@@ -196,6 +203,12 @@ describe("M0-004 real MySQL actor and scope resolution", () => {
     });
     const updated = await freshActor(fixture);
     expect(updated.departmentAreaIds).toEqual([areaA.id]);
+
+    await prisma.administrativeArea.update({ where: { id: areaA.id }, data: { status: "INACTIVE" } });
+    const inactiveArea = await freshActor(fixture);
+    expect(inactiveArea.departmentAreaIds).toEqual([]);
+    expect(inactiveArea.effectiveRoles).not.toContain("DEPARTMENT_STAFF");
+    expect(inactiveArea.capabilities.has("demand.formal.create")).toBe(false);
   });
 
   it("requires current membership and group-leader support while minister stays independent", async () => {
@@ -225,6 +238,49 @@ describe("M0-004 real MySQL actor and scope resolution", () => {
       },
     });
     expect((await freshActor(member)).capabilities.has("team.overview.view")).toBe(true);
+
+    await prisma.batch.update({ where: { id: currentBatchId }, data: { status: "CLOSED" } });
+    try {
+      const closedBatch = await freshActor(member);
+      expect(closedBatch.currentBatchId).toBeUndefined();
+      expect(closedBatch.currentBatchMember).toBe(false);
+      expect(closedBatch.configurationIssues).toContain("CURRENT_BATCH_COUNT_INVALID");
+      expect(closedBatch.effectiveRoles).not.toContain("MEMBER_CURRENT");
+      expect(closedBatch.effectiveRoles).not.toContain("GROUP_LEADER");
+      expect(closedBatch.capabilities.has("demand.claim")).toBe(false);
+      expect(closedBatch.capabilities.has("team.overview.view")).toBe(false);
+    } finally {
+      await prisma.batch.update({ where: { id: currentBatchId }, data: { status: "ACTIVE" } });
+    }
+
+    const secondCurrentBatch = await prisma.batch.create({
+      data: {
+        name: `M0-004 second current ${randomUUID()}`,
+        year: 2027,
+        startDate: new Date("2027-01-01T00:00:00.000Z"),
+        endDate: new Date("2028-01-01T00:00:00.000Z"),
+        status: "ACTIVE",
+        isCurrent: true,
+      },
+    });
+    batchIds.push(secondCurrentBatch.id);
+    try {
+      const ambiguousBatch = await freshActor(member);
+      expect(ambiguousBatch.currentBatchId).toBeUndefined();
+      expect(ambiguousBatch.currentBatchMember).toBe(false);
+      expect(ambiguousBatch.configurationIssues).toContain("CURRENT_BATCH_COUNT_INVALID");
+      expect(ambiguousBatch.effectiveRoles).not.toContain("MEMBER_CURRENT");
+      expect(ambiguousBatch.effectiveRoles).not.toContain("GROUP_LEADER");
+      expect(ambiguousBatch.capabilities.has("demand.claim")).toBe(false);
+      expect(ambiguousBatch.capabilities.has("team.overview.view")).toBe(false);
+    } finally {
+      await prisma.batch.update({ where: { id: secondCurrentBatch.id }, data: { isCurrent: false } });
+    }
+
+    const restoredBatch = await freshActor(member);
+    expect(restoredBatch.effectiveRoles).toEqual(expect.arrayContaining(["MEMBER_CURRENT", "GROUP_LEADER"]));
+    expect(restoredBatch.capabilities.has("demand.claim")).toBe(true);
+    expect(restoredBatch.capabilities.has("team.overview.view")).toBe(true);
 
     const minister = await accountFixture("minister");
     await addRole(minister.person.id, "MINISTER");
@@ -322,6 +378,148 @@ describe("M0-004 grant, revoke, concurrency, audit, and session invalidation", (
     });
     expect((await freshActor(alumni)).capabilities.has("reimbursement.create")).toBe(false);
     expect((await prisma.specialPermissionGrant.findUniqueOrThrow({ where: { id: applyGrant.id } })).expiredAt).not.toBeNull();
+  });
+
+  it("revokes current and future role grants in one mutation and cancels future-only grants", async () => {
+    const superFixture = await accountFixture("role lifecycle super");
+    await addRole(superFixture.person.id, "SUPER_ADMIN");
+    const superActor = await freshActor(superFixture);
+    const target = await accountFixture("role lifecycle target");
+    const currentEffectiveAt = new Date(Date.now() - 60_000);
+    const futureEffectiveAt = new Date(Date.now() + 86_400_000);
+    const [currentGrant, futureGrant] = await Promise.all([
+      prisma.roleAssignment.create({
+        data: {
+          personId: target.person.id,
+          roleCode: "MINISTER",
+          effectiveAt: currentEffectiveAt,
+          grantedByPersonId: superActor.personId,
+          reason: "current lifecycle fixture",
+        },
+      }),
+      prisma.roleAssignment.create({
+        data: {
+          personId: target.person.id,
+          roleCode: "MINISTER",
+          effectiveAt: futureEffectiveAt,
+          grantedByPersonId: superActor.personId,
+          reason: "future lifecycle fixture",
+        },
+      }),
+    ]);
+    const versionBefore = (await prisma.account.findUniqueOrThrow({ where: { id: target.account.id } })).permissionVersion;
+    const requestId = randomUUID();
+    const revoked = await revokeRole({
+      actor: superActor,
+      targetPersonId: target.person.id,
+      roleCode: "MINISTER",
+      reason: "cancel current and scheduled minister grants",
+      context: { requestId },
+    });
+    expect(new Set(revoked.currentGrantIds)).toEqual(new Set([currentGrant.id]));
+    expect(new Set(revoked.futureGrantIds)).toEqual(new Set([futureGrant.id]));
+    const [currentAfter, futureAfter, accountAfter, audit] = await Promise.all([
+      prisma.roleAssignment.findUniqueOrThrow({ where: { id: currentGrant.id } }),
+      prisma.roleAssignment.findUniqueOrThrow({ where: { id: futureGrant.id } }),
+      prisma.account.findUniqueOrThrow({ where: { id: target.account.id } }),
+      prisma.auditLog.findFirstOrThrow({ where: { actionCode: "ROLE_REVOKED", requestId } }),
+    ]);
+    expect(currentAfter.expiredAt?.getTime()).toBeGreaterThanOrEqual(currentEffectiveAt.getTime());
+    expect(currentAfter.expiredAt?.getTime()).toBeLessThan(futureEffectiveAt.getTime());
+    expect(futureAfter.expiredAt).toEqual(futureEffectiveAt);
+    expect(accountAfter.permissionVersion).toBe(versionBefore + BigInt(1));
+    expect(audit.beforeJson).toMatchObject({
+      currentGrantIds: [currentGrant.id],
+      futureGrantIds: [futureGrant.id],
+    });
+    expect(audit.afterJson).toMatchObject({
+      revokedAt: expect.any(String),
+      currentGrantsExpiredAtRevokeTime: [{ id: currentGrant.id, expiredAt: expect.any(String) }],
+      futureGrantsCanceledAtEffectiveTime: [{ id: futureGrant.id, expiredAt: futureEffectiveAt.toISOString() }],
+    });
+
+    const futureOnlyTarget = await accountFixture("future-only role target");
+    const futureOnlyEffectiveAt = new Date(Date.now() + 172_800_000);
+    const futureOnlyGrant = await prisma.roleAssignment.create({
+      data: {
+        personId: futureOnlyTarget.person.id,
+        roleCode: "MINISTER",
+        effectiveAt: futureOnlyEffectiveAt,
+        grantedByPersonId: superActor.personId,
+        reason: "future-only lifecycle fixture",
+      },
+    });
+    const futureOnlyVersion = (await prisma.account.findUniqueOrThrow({ where: { id: futureOnlyTarget.account.id } })).permissionVersion;
+    const futureOnlyRevoked = await revokeRole({
+      actor: superActor,
+      targetPersonId: futureOnlyTarget.person.id,
+      roleCode: "MINISTER",
+      reason: "cancel future-only minister grant",
+    });
+    expect(futureOnlyRevoked.currentGrantIds).toEqual([]);
+    expect(futureOnlyRevoked.futureGrantIds).toEqual([futureOnlyGrant.id]);
+    expect((await prisma.roleAssignment.findUniqueOrThrow({ where: { id: futureOnlyGrant.id } })).expiredAt)
+      .toEqual(futureOnlyEffectiveAt);
+    expect((await prisma.account.findUniqueOrThrow({ where: { id: futureOnlyTarget.account.id } })).permissionVersion)
+      .toBe(futureOnlyVersion + BigInt(1));
+  });
+
+  it("revokes current and future special-permission grants in one mutation", async () => {
+    const superFixture = await accountFixture("special lifecycle super");
+    await addRole(superFixture.person.id, "SUPER_ADMIN");
+    const superActor = await freshActor(superFixture);
+    const target = await accountFixture("special lifecycle target");
+    const currentEffectiveAt = new Date(Date.now() - 60_000);
+    const futureEffectiveAt = new Date(Date.now() + 86_400_000);
+    const [currentGrant, futureGrant] = await Promise.all([
+      prisma.specialPermissionGrant.create({
+        data: {
+          personId: target.person.id,
+          permissionCode: "reimbursement.apply",
+          effectiveAt: currentEffectiveAt,
+          reason: "current special lifecycle fixture",
+          grantedByPersonId: superActor.personId,
+        },
+      }),
+      prisma.specialPermissionGrant.create({
+        data: {
+          personId: target.person.id,
+          permissionCode: "reimbursement.apply",
+          effectiveAt: futureEffectiveAt,
+          reason: "future special lifecycle fixture",
+          grantedByPersonId: superActor.personId,
+        },
+      }),
+    ]);
+    const versionBefore = (await prisma.account.findUniqueOrThrow({ where: { id: target.account.id } })).permissionVersion;
+    const requestId = randomUUID();
+    const revoked = await revokeReimbursementApply({
+      actor: superActor,
+      targetPersonId: target.person.id,
+      reason: "cancel current and scheduled reimbursement grants",
+      context: { requestId },
+    });
+    expect(new Set(revoked.currentGrantIds)).toEqual(new Set([currentGrant.id]));
+    expect(new Set(revoked.futureGrantIds)).toEqual(new Set([futureGrant.id]));
+    const [currentAfter, futureAfter, accountAfter, audit] = await Promise.all([
+      prisma.specialPermissionGrant.findUniqueOrThrow({ where: { id: currentGrant.id } }),
+      prisma.specialPermissionGrant.findUniqueOrThrow({ where: { id: futureGrant.id } }),
+      prisma.account.findUniqueOrThrow({ where: { id: target.account.id } }),
+      prisma.auditLog.findFirstOrThrow({ where: { actionCode: "SPECIAL_PERMISSION_REVOKED", requestId } }),
+    ]);
+    expect(currentAfter.expiredAt?.getTime()).toBeGreaterThanOrEqual(currentEffectiveAt.getTime());
+    expect(currentAfter.expiredAt?.getTime()).toBeLessThan(futureEffectiveAt.getTime());
+    expect(futureAfter.expiredAt).toEqual(futureEffectiveAt);
+    expect(accountAfter.permissionVersion).toBe(versionBefore + BigInt(1));
+    expect(audit.beforeJson).toMatchObject({
+      currentGrantIds: [currentGrant.id],
+      futureGrantIds: [futureGrant.id],
+    });
+    expect(audit.afterJson).toMatchObject({
+      revokedAt: expect.any(String),
+      currentGrantsExpiredAtRevokeTime: [{ id: currentGrant.id, expiredAt: expect.any(String) }],
+      futureGrantsCanceledAtEffectiveTime: [{ id: futureGrant.id, expiredAt: futureEffectiveAt.toISOString() }],
+    });
   });
 
   it("serializes truly concurrent duplicate role and special grants", async () => {

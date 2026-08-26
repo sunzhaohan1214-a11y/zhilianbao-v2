@@ -24,7 +24,7 @@ export async function loadPermissionGraph(accountId: string, now: Date) {
         select: { permissionCode: true },
       }),
       prisma.batch.findMany({
-        where: { isCurrent: true },
+        where: { isCurrent: true, status: "ACTIVE" },
         select: { id: true },
       }),
       prisma.appointment.findMany({
@@ -35,11 +35,11 @@ export async function loadPermissionGraph(accountId: string, now: Date) {
               id: true,
               type: true,
               areaMappings: {
-                where: effectiveAt(now),
+                where: { ...effectiveAt(now), area: { status: "ACTIVE" } },
                 select: { areaId: true },
               },
               departmentAreaRelations: {
-                where: effectiveAt(now),
+                where: { ...effectiveAt(now), area: { status: "ACTIVE" } },
                 select: { areaId: true },
               },
             },

@@ -1,6 +1,5 @@
 import type { Prisma, RoleCode } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
-import { effectiveAt } from "../effective";
 import { PermissionError } from "../permission-errors";
 import { bumpPermissionVersion } from "../permission-invalidation";
 import { lockPermissionTarget } from "../repository/permission-repository";
@@ -107,34 +106,69 @@ export async function grantRole(input: GrantRoleInput) {
 export async function revokeRole(input: RoleMutationInput) {
   requireRoleGrantAuthority(input.actor, input.roleCode);
   const reason = requireReason(input.reason);
-  const now = new Date();
   const prisma = getPrismaClient();
   return prisma.$transaction(async (tx) => {
     await lockPermissionTarget(tx, input.targetPersonId);
-    const active = await tx.roleAssignment.findMany({
-      where: { personId: input.targetPersonId, roleCode: input.roleCode, ...effectiveAt(now) },
+    const now = new Date();
+    const revocableCandidates = await tx.roleAssignment.findMany({
+      where: {
+        personId: input.targetPersonId,
+        roleCode: input.roleCode,
+        OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
+      },
       select: { id: true, effectiveAt: true, expiredAt: true },
     });
-    if (active.length === 0) {
-      throw new PermissionError("PERMISSION_CONFLICT", "目标人员没有可撤销的活动角色授权", {
+    const current = revocableCandidates.filter(({ effectiveAt, expiredAt }) =>
+      effectiveAt <= now && (expiredAt === null || expiredAt > now));
+    const future = revocableCandidates.filter(({ effectiveAt, expiredAt }) =>
+      effectiveAt > now && (expiredAt === null || expiredAt > effectiveAt));
+    const revocable = [...current, ...future];
+    if (revocable.length === 0) {
+      throw new PermissionError("PERMISSION_CONFLICT", "目标人员没有可撤销的当前或未来角色授权", {
         roleCode: input.roleCode,
       });
     }
-    await tx.roleAssignment.updateMany({
-      where: { id: { in: active.map(({ id }) => id) } },
-      data: { expiredAt: now },
-    });
+    if (current.length > 0) {
+      await tx.roleAssignment.updateMany({
+        where: { id: { in: current.map(({ id }) => id) } },
+        data: { expiredAt: now },
+      });
+    }
+    await Promise.all(future.map((grant) => tx.roleAssignment.update({
+      where: { id: grant.id },
+      data: { expiredAt: grant.effectiveAt },
+    })));
     await bumpPermissionVersion(input.targetPersonId, tx);
     await writeGrantAudit(tx, {
       actor: input.actor,
       actionCode: "ROLE_REVOKED",
       entityType: "ROLE_ASSIGNMENT",
-      entityId: active[0].id,
+      entityId: revocable[0].id,
       reason,
-      before: { targetPersonId: input.targetPersonId, roleCode: input.roleCode, activeGrantIds: active.map(({ id }) => id) },
-      after: { expiredAt: now.toISOString() },
+      before: {
+        targetPersonId: input.targetPersonId,
+        roleCode: input.roleCode,
+        currentGrantIds: current.map(({ id }) => id),
+        futureGrantIds: future.map(({ id }) => id),
+      },
+      after: {
+        revokedAt: now.toISOString(),
+        currentGrantsExpiredAtRevokeTime: current.map(({ id }) => ({
+          id,
+          expiredAt: now.toISOString(),
+        })),
+        futureGrantsCanceledAtEffectiveTime: future.map(({ id, effectiveAt }) => ({
+          id,
+          expiredAt: effectiveAt.toISOString(),
+        })),
+      },
       context: input.context,
     });
-    return { revokedIds: active.map(({ id }) => id), expiredAt: now };
+    return {
+      revokedIds: revocable.map(({ id }) => id),
+      currentGrantIds: current.map(({ id }) => id),
+      futureGrantIds: future.map(({ id }) => id),
+      expiredAt: now,
+    };
   });
 }
