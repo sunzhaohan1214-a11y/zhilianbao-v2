@@ -148,6 +148,9 @@ export const ACTION_REGISTRY = {
   "ai.conversation.other_full_view": { neverAllow: true },
 
   "team.overview.view": { defaultScope: "GLOBAL_PUBLISHED" },
+  "attachment.upload": {},
+  "attachment.temporary_self_access": { defaultScope: "SELF" },
+  "attachment.abort_self": { defaultScope: "SELF" },
   "audit.full_view": { defaultScope: "SYSTEM", superAdminOnly: true },
   "backup.manage": { defaultScope: "SYSTEM", superAdminOnly: true },
   "backup.restore": { defaultScope: "SYSTEM", superAdminOnly: true },

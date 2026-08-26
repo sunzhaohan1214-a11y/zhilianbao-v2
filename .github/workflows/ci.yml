@@ -43,6 +43,7 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     env:
+      APP_ENV: test
       DATABASE_URL: mysql://root:ci-root-password@127.0.0.1:3306/zhilianbao_v2_e2e_test
       APP_BASE_URL: http://127.0.0.1:3000
       ADMIN_CONTACT_PHONE: 0514-XXXXXXXX
@@ -94,4 +95,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --tag zhilianbao-v2:m0-003 .
+      - run: docker build --tag zhilianbao-v2:m0-005 .

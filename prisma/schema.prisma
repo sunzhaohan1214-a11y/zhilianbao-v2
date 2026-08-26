@@ -73,6 +73,35 @@ enum AuthRateLimitDimension {
   DEVICE
 }
 
+enum AttachmentStorageProvider {
+  TENCENT_COS
+}
+
+enum AttachmentUploadStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  ABORTED
+  FAILED
+}
+
+enum AttachmentScanStatus {
+  PENDING
+  SCANNING
+  PASSED
+  REJECTED
+  FAILED
+}
+
+enum AttachmentPermissionLevel {
+  PARENT_AUTHORIZED
+  SENSITIVE_PARENT
+}
+
+enum AttachmentAccessAction {
+  PREVIEW
+  DOWNLOAD
+}
+
 model Person {
   id                            String                   @id @default(uuid()) @db.Char(36)
   name                          String                   @db.VarChar(80)
@@ -91,6 +120,9 @@ model Person {
   grantedGroupLeaderAssignments GroupLeaderAssignment[]  @relation("GroupLeaderGrantor")
   auditLogs                     AuditLog[]
   stateTransitions              StateTransitionHistory[]
+  uploadedAttachments           Attachment[]             @relation("AttachmentUploader")
+  createdAttachmentLinks        AttachmentLink[]          @relation("AttachmentLinkCreator")
+  attachmentAccessLogs          AttachmentAccessLog[]     @relation("AttachmentAccessPerson")
 
   @@index([personStatus])
   @@map("persons")
@@ -452,4 +484,74 @@ model JobTask {
   @@index([status, scheduledAt, priority])
   @@index([lockedAt])
   @@map("job_tasks")
+}
+
+model Attachment {
+  id                 String                    @id @default(uuid()) @db.Char(36)
+  originalFilename   String                    @map("original_filename") @db.VarChar(255)
+  extension          String                    @db.VarChar(16)
+  declaredMimeType   String                    @map("declared_mime_type") @db.VarChar(191)
+  detectedMimeType   String?                   @map("detected_mime_type") @db.VarChar(191)
+  detectedFileType   String?                   @map("detected_file_type") @db.VarChar(32)
+  expectedSizeBytes  BigInt                    @map("expected_size_bytes") @db.UnsignedBigInt
+  actualSizeBytes    BigInt?                   @map("actual_size_bytes") @db.UnsignedBigInt
+  sha256             String?                   @db.Char(64)
+  storageProvider    AttachmentStorageProvider @default(TENCENT_COS) @map("storage_provider")
+  bucket             String                    @db.VarChar(255)
+  region             String                    @db.VarChar(64)
+  stagingObjectKey   String?                   @map("staging_object_key") @db.VarChar(1024)
+  objectKey          String?                   @map("object_key") @db.VarChar(1024)
+  uploadStatus       AttachmentUploadStatus    @default(PENDING_UPLOAD) @map("upload_status")
+  scanStatus         AttachmentScanStatus      @default(PENDING) @map("scan_status")
+  scanReason         String?                   @map("scan_reason") @db.VarChar(255)
+  isTemporary        Boolean                   @default(true) @map("is_temporary")
+  permissionLevel    AttachmentPermissionLevel @default(PARENT_AUTHORIZED) @map("permission_level")
+  uploadedByPersonId String                    @map("uploaded_by_person_id") @db.Char(36)
+  uploadExpiresAt    DateTime?                 @map("upload_expires_at") @db.DateTime(3)
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  uploadedByPerson   Person                    @relation("AttachmentUploader", fields: [uploadedByPersonId], references: [id], onDelete: Restrict)
+  links              AttachmentLink[]
+  accessLogs         AttachmentAccessLog[]
+
+  @@index([uploadedByPersonId, isTemporary, uploadStatus])
+  @@index([uploadStatus, scanStatus])
+  @@index([uploadExpiresAt, isTemporary])
+  @@index([sha256])
+  @@map("attachments")
+}
+
+model AttachmentLink {
+  id                String     @id @default(uuid()) @db.Char(36)
+  attachmentId      String     @map("attachment_id") @db.Char(36)
+  entityType        String     @map("entity_type") @db.VarChar(100)
+  entityId          String     @map("entity_id") @db.Char(36)
+  relationType      String     @map("relation_type") @db.VarChar(100)
+  createdByPersonId String     @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  attachment        Attachment @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  createdByPerson   Person     @relation("AttachmentLinkCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([attachmentId, entityType, entityId, relationType])
+  @@index([entityType, entityId])
+  @@index([createdByPersonId, createdAt])
+  @@map("attachment_links")
+}
+
+model AttachmentAccessLog {
+  id           String                 @id @default(uuid()) @db.Char(36)
+  attachmentId String                 @map("attachment_id") @db.Char(36)
+  personId     String                 @map("person_id") @db.Char(36)
+  action       AttachmentAccessAction
+  ip           String                 @db.VarChar(45)
+  device       String?                @db.VarChar(255)
+  requestId    String?                @map("request_id") @db.VarChar(100)
+  createdAt    DateTime               @default(now()) @map("created_at") @db.DateTime(3)
+  attachment   Attachment             @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  person       Person                 @relation("AttachmentAccessPerson", fields: [personId], references: [id], onDelete: Restrict)
+
+  @@index([attachmentId, createdAt])
+  @@index([personId, createdAt])
+  @@index([requestId])
+  @@map("attachment_access_logs")
 }
