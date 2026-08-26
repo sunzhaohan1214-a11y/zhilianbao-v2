@@ -67,6 +67,12 @@ enum JobStatus {
   CANCELED
 }
 
+enum AuthRateLimitDimension {
+  PHONE
+  IP
+  DEVICE
+}
+
 model Person {
   id                            String                   @id @default(uuid()) @db.Char(36)
   name                          String                   @db.VarChar(80)
@@ -145,6 +151,22 @@ model Session {
   @@index([accountId, revokedAt, expiresAt])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+model AuthRateLimitBucket {
+  id           String                 @id @default(uuid()) @db.Char(36)
+  dimension    AuthRateLimitDimension
+  keyHash      String                 @map("key_hash") @db.Char(64)
+  windowStart  DateTime               @map("window_start") @db.DateTime(3)
+  attemptCount Int                    @default(0) @map("attempt_count") @db.UnsignedInt
+  blockedUntil DateTime?              @map("blocked_until") @db.DateTime(3)
+  lastLoggedAt DateTime?              @map("last_logged_at") @db.DateTime(3)
+  updatedAt    DateTime               @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@unique([dimension, keyHash])
+  @@index([blockedUntil])
+  @@index([updatedAt])
+  @@map("auth_rate_limit_buckets")
 }
 
 model Organization {

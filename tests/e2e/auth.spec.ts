@@ -1,0 +1,77 @@
+import { expect, test, type Page } from "@playwright/test";
+import { seedAuthFixtures, e2eUsers } from "./auth-fixtures";
+
+test.describe.configure({ mode: "serial" });
+
+async function login(page: Page, phone: string, password: string) {
+  await page.goto("/login");
+  await page.getByLabel("手机号").fill(phone);
+  await page.getByLabel("密码", { exact: true }).fill(password);
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => candidate.url().endsWith("/api/v2/auth/login") && candidate.request().method() === "POST"),
+    page.getByRole("button", { name: "登录" }).click(),
+  ]);
+  expect(response.ok()).toBe(true);
+  await expect(page).not.toHaveURL(/\/login$/);
+}
+
+test.beforeEach(async () => {
+  await seedAuthFixtures();
+});
+
+test("unauthenticated business access is redirected to login", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "登录智链宝" })).toBeVisible();
+});
+
+test("first activation changes password, confirms confidentiality, then supports normal relogin", async ({ page }) => {
+  const user = e2eUsers.unactivated;
+  await login(page, user.phone, user.password);
+  await expect(page).toHaveURL(/\/account\/activate$/);
+  await page.getByLabel("新密码", { exact: true }).fill("Activated-pass-123");
+  await page.getByLabel("确认新密码").fill("Activated-pass-123");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "完成激活" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { name: "首页" })).toBeVisible();
+
+  await page.goto("/account/security");
+  await page.getByRole("button", { name: "退出当前设备" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await login(page, user.phone, "Activated-pass-123");
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("a reset account is restricted to forced password change", async ({ page }) => {
+  const user = e2eUsers.forced;
+  await login(page, user.phone, user.password);
+  await expect(page).toHaveURL(/\/account\/change-password$/);
+  await expect(page.getByRole("heading", { name: "请先修改密码" })).toBeVisible();
+  await page.goto("/demands");
+  await expect(page).toHaveURL(/\/account\/change-password$/);
+});
+
+test("bootstrap admin gate denies ordinary users and permits current ADMIN", async ({ browser }) => {
+  const ordinaryContext = await browser.newContext();
+  const ordinary = await ordinaryContext.newPage();
+  await login(ordinary, e2eUsers.normal.phone, e2eUsers.normal.password);
+  await ordinary.goto("/admin");
+  await expect(ordinary.getByRole("heading", { name: "当前账号不能进入管理后台" })).toBeVisible();
+  await ordinaryContext.close();
+
+  const adminContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  await login(admin, e2eUsers.admin.phone, e2eUsers.admin.password);
+  await admin.goto("/admin");
+  await expect(admin.getByRole("heading", { name: "管理后台基础骨架" })).toBeVisible();
+  await adminContext.close();
+});
+
+test("security page shows own devices without token hashes", async ({ page }) => {
+  await login(page, e2eUsers.normal.phone, e2eUsers.normal.password);
+  await page.goto("/account/security");
+  await expect(page.getByText("当前设备", { exact: true })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("tokenHash");
+  await expect(page.getByRole("button", { name: "退出全部设备" })).toBeVisible();
+});
