@@ -71,7 +71,7 @@ test("bootstrap admin gate denies ordinary users and permits current ADMIN", asy
 test("security page shows own devices without token hashes", async ({ page }) => {
   await login(page, e2eUsers.normal.phone, e2eUsers.normal.password);
   await page.goto("/account/security");
-  await expect(page.getByText("当前设备")).toBeVisible();
+  await expect(page.getByText("当前设备", { exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("tokenHash");
   await expect(page.getByRole("button", { name: "退出全部设备" })).toBeVisible();
 });
