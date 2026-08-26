@@ -1,6 +1,6 @@
 # 智链宝 V2.0 — IMPLEMENTATION_PLAN.md
 
-> 版本：v1.0  
+> 版本：v1.1
 > 状态：Codex实施顺序基线  
 > 原则：第一阶段最终一次性完整上线；M0–M3只是内部建设顺序。
 
@@ -82,6 +82,8 @@ StateTransitionHistory
 OutboxEvent
 JobTask
 ```
+
+`MINISTER` 使用现有 `RoleAssignment(role_code = MINISTER)`，不新增部长账号、档案或任命表；`GroupLeaderAssignment` 继续只表达团长与批次的关系。本说明只约束后续 M0.2 实现，本次文档任务不开始 M0.2。
 
 输出首个 Prisma Migration。
 
@@ -213,7 +215,7 @@ AI失败不阻止业务。
 
 - 进展；
 - stale派生；
-- 团长7天提醒；
+- 团长与部长共享的团队协调提醒（7天限频）；
 - 提交办结；
 - 管理员核实；
 - 退回；
@@ -520,4 +522,4 @@ M1-009 home
 
 逐步推进更可靠。
 
-**IMPLEMENTATION_PLAN.md v1.0 END**
+**IMPLEMENTATION_PLAN.md v1.1 END**

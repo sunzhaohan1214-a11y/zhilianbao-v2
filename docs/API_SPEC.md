@@ -1,6 +1,6 @@
 # 智链宝 V2.0 — API_SPEC.md
 
-> 版本：v1.0  
+> 版本：v1.1
 > 状态：开发基线  
 > 原则：API 只暴露业务动作，不允许客户端自由写 status / owner / audit 字段。
 
@@ -127,7 +127,7 @@ POST /admin/people/:personId/reimbursement-apply/disable
 
 平台注册往届报销申请权限允许 `ADMIN` / `SUPER_ADMIN` 按人开启或关闭，但管理员因此**不会获得报销内容查看权**。
 
-管理员、超级管理员、报销管理、团长、第二阶段领导等高权限账号授权动作仍由服务端要求 `SUPER_ADMIN`。
+管理员、超级管理员、报销管理、团长、部长、第二阶段领导等高权限账号授权动作仍由服务端要求 `SUPER_ADMIN`。部长必须以独立 `MINISTER` 授权，不得由职位名称或 `GROUP_LEADER` 代替。
 
 ---
 
@@ -651,4 +651,4 @@ pageSize=20
 11. 不以 200 + `"success":false` 隐藏真实HTTP错误；
 12. 不做全量数据返回后前端过滤权限。
 
-**API_SPEC.md v1.0 END**
+**API_SPEC.md v1.1 END**

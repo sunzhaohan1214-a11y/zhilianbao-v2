@@ -1,6 +1,6 @@
 # 智链宝 V2.0 — MESSAGE_TODO_MATRIX.md
 
-> 版本：v1.0  
+> 版本：v1.1
 > 状态：开发基线  
 > 定义：消息 = 发生了什么；待办 = 当前用户现在需要做什么。
 
@@ -11,7 +11,7 @@
 3. 同一业务 + 同一 TodoType + 同一人最多一个 OPEN；
 4. 业务状态变化后失效待办自动 `CLOSED_INVALID`；
 5. 自动提醒每一轮状态事件只发一次，不按天刷屏；
-6. 团长“久未更新”手动提醒同一需求 7 天限频；
+6. 团长或部长通过团队协调能力手动提醒“久未更新”需求，同一需求 7 天限频；
 7. “需确认公告”同时产生消息 + 待办；
 8. 被加入行程只产生消息，不产生待办；
 9. 首页只展示 OPEN、当前可执行的前3条待办；
@@ -107,13 +107,13 @@ CANCEL/MERGE
 
 ---
 
-# 7. 需求进展与团长提醒
+# 7. 需求进展与团队协调角色提醒
 
 | Event | 消息 | Todo |
 |---|---|---|
 | `DEMAND_PROGRESS_ADDED` | 主责/协同/镇区相关人按需 | 无 |
 | `DEMAND_BECAME_STALE` | 主责、管理员、负责镇区 | 主责/责任方 `DEMAND_UPDATE_STALE` |
-| `GROUP_LEADER_STALE_REMINDER` | 主责 | 主责现有 `DEMAND_UPDATE_STALE` 更新提示，不重复建多个 | 7天限频 |
+| `TEAM_COORDINATOR_STALE_REMINDER` | 主责 | 主责现有 `DEMAND_UPDATE_STALE` 更新提示，不重复建多个；团长或部长均适用，7天限频，消息与审计记录实际角色 |
 
 久未更新是派生条件，不改状态。
 
@@ -337,4 +337,4 @@ TRIP_UPDATED:{tripId}:{recipient}
 9. 不因为AI推荐就强制分配需求；
 10. 不让消息生成失败回滚已经成功的业务事务；使用Outbox补偿。
 
-**MESSAGE_TODO_MATRIX.md v1.0 END**
+**MESSAGE_TODO_MATRIX.md v1.1 END**

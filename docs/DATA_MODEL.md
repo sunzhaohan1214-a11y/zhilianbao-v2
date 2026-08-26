@@ -1,13 +1,14 @@
 # 智链宝 V2.0 — DATA_MODEL.md
 
-> 版本：v1.1  
+> 版本：v1.2
 > 状态：开发基线（已确认）  
 > 产品版本：智链宝 V2.0  
-> 上游规格：PRD v1.2、PERMISSIONS.md v1.0、STATE_MACHINES.md v1.0、TECH v1.0  
+> 上游规格：PRD v1.3、PERMISSIONS.md v1.3、STATE_MACHINES.md v1.1、TECH v1.0
 > 用途：定义 V2 的核心实体、实体边界、主外键关系、历史/版本/快照策略和关键数据库约束。  
 > 注意：本文件是“实体关系模型”，不是最终字段字典；字段类型、长度、是否必填、索引细节在 DATA_DICTIONARY.md / Prisma Schema 中继续细化。
 
 > v1.1 技术校正：依据 PRD §22.2，将“组织”与“行政区域 / 地图边界”拆为独立实体，增加 `AdministrativeArea` 与 `OrganizationAreaMapping`；企业正式归属改为引用 `responsible_area_id`。此调整不改变已确认产品规则，只避免后续地图和组织权限耦合。
+> v1.2 角色校正：`RoleAssignment.role_code` 增加独立 `MINISTER`；部长复用既有人员、账号与角色授权历史，不新增部长账号或档案实体，也不复用团长批次任命记录。
 
 
 ---
@@ -27,7 +28,7 @@ Account
 - `Person` 是不可变业务主体；
 - `Account` 是登录载体；
 - 人员姓名、手机号、任职、角色不能混成一张“用户表”；
-- 同一人员延任、调岗、兼任、成为团长、成为管理员，都不能重新创建人员；
+- 同一人员延任、调岗、兼任、成为团长、成为部长、成为管理员，都不能重新创建人员；
 - 历史往届可有 `Person` 档案但没有 `Account`；
 - 外部人才不是内部 `Person`，使用独立 `Talent`；
 - 企业不是平台用户，不创建 `Account`。
@@ -176,6 +177,7 @@ CLOSED
 - 部门负责镇区；
 - 团员批次；
 - 团长任命；
+- 部长角色授权；
 - 高权限授权；
 - 需求主责；
 - 协同人员；
@@ -327,6 +329,7 @@ Person 不因为以下变化而新建：
 - 从在任变往届；
 - 延任；
 - 成为团长；
+- 成为部长；
 - 成为管理员。
 
 历史业务署名全部关联 `person_id`。
@@ -527,8 +530,13 @@ DEPARTMENT_STAFF
 ADMIN
 SUPER_ADMIN
 GROUP_LEADER
+MINISTER
 LEADER_STAGE2
 ```
+
+`GROUP_LEADER` 与 `MINISTER` 是两个独立角色代码，可在权限层共同映射 `TEAM_COORDINATOR_CAPABILITIES`，不得在数据层合并为同一角色。`MINISTER` 的高权限授权必须保存 `effective_at`、`expired_at`、`granted_by_person_id` 和 `reason`；角色撤销保留历史记录。
+
+部长继续使用既有 `Person + Account`。不得新增 `MinisterAccount`、`MinisterProfile` 或其他重复人员实体，也不得通过 `Appointment.title = "部长"` 自动创建角色授权。
 
 但业务中的“需求主责”“办事求助主办人”不是系统角色，不得塞进 RoleAssignment。
 
@@ -559,6 +567,7 @@ ai.service_manage
 - 部门负责镇区；
 - 批次；
 - 团长；
+- 部长；
 - 特殊授权；
 - 手机号等需要重新登录的安全变化。
 
@@ -621,6 +630,8 @@ expired_at
 并验证该人员存在同批次有效 `BatchMembership`。
 
 团长使用本人 Account，不创建团长账号。
+
+`GroupLeaderAssignment` 只表达团长与当前批次的任命关系，不承载部长身份。部长通过 `RoleAssignment(role_code = MINISTER)` 显式授权；本版本不假设部长必须是当前批次在任团员。
 
 ---
 
@@ -2732,4 +2743,4 @@ DATA_DICTIONARY.md
 
 ---
 
-**DATA_MODEL.md v1.1 END**
+**DATA_MODEL.md v1.2 END**

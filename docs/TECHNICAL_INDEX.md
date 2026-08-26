@@ -8,27 +8,29 @@ Codex 进入仓库时先读取根目录 `AGENTS.md`，再按 AGENTS 指示读取
 
 人工审查 / 技术交接建议按以下顺序：
 
-1. `PRD-v1.2.md`
-2. `ARCHITECTURE-v1.0.md`
-3. `PERMISSIONS-v1.2.md`
-4. `STATE-MACHINES-v1.0.md`
-5. `DATA-MODEL-v1.1.md`
-6. `DATA-DICTIONARY-v1.0.md`
-7. `FORM-SPEC-v1.0.md`
-8. `FIELD-PERMISSIONS-v1.0.md`
-9. `DATABASE-CONSTRAINTS-v1.0.md`
-10. `API-SPEC-v1.0.md`
-11. `MESSAGE-TODO-MATRIX-v1.0.md`
-12. `UI-SPEC-v1.0.md`
-13. `REIMBURSEMENT-RULES-v1.0.md`
-14. `AI-OCR-SPEC-v1.0.md`
-15. `MAP-SPEC-v1.0.md`
-16. `SECURITY-SPEC-v1.0.md`
-17. `MIGRATION-PLAN-v1.0.md`
-18. `TEST-PLAN-v1.0.md`
-19. `OPERATIONS-v1.0.md`
-20. `IMPLEMENTATION-PLAN-v1.0.md`
-21. `AGENTS.md`
+1. `PRD.md`（当前文档版本 v1.3）
+2. `ARCHITECTURE.md`（TECH v1.0）
+3. `PERMISSIONS.md`（当前文档版本 v1.3）
+4. `STATE_MACHINES.md`（当前文档版本 v1.1）
+5. `DATA_MODEL.md`（当前文档版本 v1.2）
+6. `DATA_DICTIONARY.md`（当前文档版本 v1.1）
+7. `FORM_SPEC.md`（当前文档版本 v1.0）
+8. `FIELD_PERMISSIONS.md`（当前文档版本 v1.1）
+9. `DATABASE_CONSTRAINTS.md`（当前文档版本 v1.0）
+10. `API_SPEC.md`（当前文档版本 v1.1）
+11. `MESSAGE_TODO_MATRIX.md`（当前文档版本 v1.1）
+12. `UI_SPEC.md`（DESIGN v1.1）
+13. `REIMBURSEMENT_RULES.md`（当前文档版本 v1.0）
+14. `AI_OCR_SPEC.md`（当前文档版本 v1.0）
+15. `MAP_SPEC.md`（当前文档版本 v1.0）
+16. `SECURITY_SPEC.md`（当前文档版本 v1.0）
+17. `MIGRATION_PLAN.md`（当前文档版本 v1.0）
+18. `TEST_PLAN.md`（当前文档版本 v1.1）
+19. `OPERATIONS.md`（当前文档版本 v1.0）
+20. `IMPLEMENTATION_PLAN.md`（当前文档版本 v1.1）
+21. 根目录 `AGENTS.md`
+
+> 仓库内规格文件使用稳定文件名，版本号记录在文件内容中；不要根据文档版本号自行拼接不存在的文件名。
 
 ## 2. 权威层级
 
@@ -90,6 +92,7 @@ Vitest+Playwright
 Local/Test/Prod
 GitHub唯一代码真源
 WorkBuddy部署
+GROUP_LEADER与MINISTER独立角色映射同一团队协调能力包
 ```
 
 ## 5. 开发是否可以开始

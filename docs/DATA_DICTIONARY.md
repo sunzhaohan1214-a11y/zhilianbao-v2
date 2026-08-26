@@ -1,8 +1,8 @@
 # 智链宝 V2.0 — DATA_DICTIONARY.md
 
-> 版本：v1.0  
+> 版本：v1.1
 > 状态：开发基线  
-> 上游：PRD v1.2、PERMISSIONS v1.0、STATE_MACHINES v1.0、DATA_MODEL v1.1  
+> 上游：PRD v1.3、PERMISSIONS v1.3、STATE_MACHINES v1.1、DATA_MODEL v1.2
 > 说明：本文件固定核心字段、校验、默认值、敏感等级与统计语义。最终 Prisma 字段长度可在不改变业务语义的前提下微调。
 
 ## 0. 通用约定
@@ -195,13 +195,29 @@ expired_at
 | 字段 | 规则 |
 |---|---|
 | `person_id` |  |
-| `role_code` | 固定产品角色 |
+| `role_code` | 固定产品角色；包含独立 `GROUP_LEADER` 与 `MINISTER` |
 | `effective_at` |  |
 | `expired_at` |  |
 | `granted_by_person_id` | 高权限必填 |
 | `reason` | 高权限必填 |
 
 核心角色代码以 PERMISSIONS.md 为准。
+
+第一阶段固定角色枚举包含：
+
+```text
+MEMBER_CURRENT
+MEMBER_ALUMNI_PLATFORM
+GROUP_LEADER
+MINISTER
+TOWNSHIP_STAFF
+DEPARTMENT_STAFF
+ADMIN
+SUPER_ADMIN
+LEADER_STAGE2
+```
+
+`MINISTER` 属于显式高权限角色，`effective_at`、`granted_by_person_id` 和 `reason` 必填，`expired_at` 表示授权失效时间。职位文本“部长”不等于角色授权。
 
 ## 3.2 SpecialPermissionGrant
 
@@ -1313,4 +1329,4 @@ DemandOutcomeRound.review_status = APPROVED
 → 保留 rule_version
 ```
 
-**DATA_DICTIONARY.md v1.0 END**
+**DATA_DICTIONARY.md v1.1 END**
