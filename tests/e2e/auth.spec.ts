@@ -7,7 +7,12 @@ async function login(page: Page, phone: string, password: string) {
   await page.goto("/login");
   await page.getByLabel("手机号").fill(phone);
   await page.getByLabel("密码", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "登录" }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse((candidate) => candidate.url().endsWith("/api/v2/auth/login") && candidate.request().method() === "POST"),
+    page.getByRole("button", { name: "登录" }).click(),
+  ]);
+  expect(response.ok()).toBe(true);
+  await expect(page).not.toHaveURL(/\/login$/);
 }
 
 test.beforeEach(async () => {
