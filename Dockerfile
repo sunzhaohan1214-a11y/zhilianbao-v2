@@ -9,6 +9,7 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+COPY --from=deps /app/src/generated/prisma ./src/generated/prisma
 RUN npm run build
 
 FROM node:24-alpine AS runner
