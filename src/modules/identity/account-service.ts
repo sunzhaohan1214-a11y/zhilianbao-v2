@@ -71,11 +71,16 @@ export async function restoreAccountToPendingEnable(accountId: string) {
 
 export async function resetPasswordToInitial(accountId: string) {
   const prisma = getPrismaClient();
-  const account = await prisma.account.findUniqueOrThrow({ where: { id: accountId } });
-  const passwordHash = await hashPassword(initialPasswordFromPhone(account.phone));
+  const accountSnapshot = await prisma.account.findUniqueOrThrow({ where: { id: accountId } });
+  const phoneSnapshot = accountSnapshot.phone;
+  const passwordHash = await hashPassword(initialPasswordFromPhone(phoneSnapshot));
   const now = new Date();
   return prisma.$transaction(async (tx) => {
     await lockAccount(tx, accountId);
+    const account = await tx.account.findUniqueOrThrow({ where: { id: accountId } });
+    if (account.phone !== phoneSnapshot) {
+      throw new AuthError("ACCOUNT_PHONE_CHANGED", "手机号已发生变化，请重试密码重置", 409);
+    }
     const updated = await tx.account.update({
       where: { id: accountId },
       data: { passwordHash, forcePasswordChange: true },

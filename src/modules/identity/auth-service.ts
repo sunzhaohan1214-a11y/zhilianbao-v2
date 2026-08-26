@@ -4,10 +4,11 @@ import { hashPassword, validateNewPassword, verifyDummyPassword, verifyPassword 
 import { normalizePhone } from "./phone";
 import type { AuthRequestContext } from "./request-context";
 import {
-  consumeLoginRateLimit,
+  checkLoginRateLimit,
   issueSessionAtomically,
   issueSessionInTransaction,
   lockAccount,
+  recordLoginFailure,
   resetSuccessfulLoginRateLimits,
   writeAudit,
 } from "./repository/auth-repository";
@@ -21,11 +22,11 @@ function nextStep(account: { status: string; forcePasswordChange: boolean }) {
 
 export async function login(input: { phone: string; password: string }, context: AuthRequestContext) {
   const phone = normalizePhone(input.phone);
-  const rate = await consumeLoginRateLimit({ phone, ip: context.ip, deviceId: context.deviceId });
+  const rate = await checkLoginRateLimit({ phone, ip: context.ip, deviceId: context.deviceId });
   if (rate.limited) {
     if (rate.shouldAudit) await writeAudit({
       actionCode: "AUTH_LOGIN_RATE_LIMITED",
-      after: { dimensions: ["PHONE", "IP", "DEVICE"] },
+      after: { dimensions: rate.dimensions },
       ip: context.ip,
       device: context.deviceId,
       requestId: context.requestId,
@@ -39,6 +40,7 @@ export async function login(input: { phone: string; password: string }, context:
     ? await verifyPassword(account.passwordHash, input.password)
     : (await verifyDummyPassword(input.password), false);
   if (!account || !validPassword) {
+    await recordLoginFailure({ phone, ip: context.ip, deviceId: context.deviceId });
     await writeAudit({
       actionCode: "AUTH_LOGIN_FAILED",
       accountId: account?.id,

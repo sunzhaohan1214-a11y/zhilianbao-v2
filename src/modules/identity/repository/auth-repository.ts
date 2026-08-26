@@ -117,6 +117,16 @@ export async function writeAudit(input: {
 
 type RatePolicy = { dimension: AuthRateLimitDimension; value: string; maximum: number };
 
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+
+function loginRatePolicies(input: { phone: string; ip: string; deviceId: string }): RatePolicy[] {
+  return [
+    { dimension: "PHONE", value: input.phone, maximum: 5 },
+    { dimension: "IP", value: input.ip, maximum: 30 },
+    { dimension: "DEVICE", value: input.deviceId, maximum: 10 },
+  ];
+}
+
 function rateLimitSecret(): string {
   const configured = process.env.AUTH_RATE_LIMIT_SECRET;
   if (configured) return configured;
@@ -128,19 +138,45 @@ function rateKey(dimension: AuthRateLimitDimension, value: string): string {
   return createHash("sha256").update(`${rateLimitSecret()}:${dimension}:${value}`).digest("hex");
 }
 
-export async function consumeLoginRateLimit(input: { phone: string; ip: string; deviceId: string }) {
-  const policies: RatePolicy[] = [
-    { dimension: "PHONE", value: input.phone, maximum: 5 },
-    { dimension: "IP", value: input.ip, maximum: 30 },
-    { dimension: "DEVICE", value: input.deviceId, maximum: 10 },
-  ];
+export async function checkLoginRateLimit(input: { phone: string; ip: string; deviceId: string }) {
+  const policies = loginRatePolicies(input);
   const now = new Date();
-  const windowMs = 15 * 60 * 1000;
   const prisma = getPrismaClient();
 
   return prisma.$transaction(async (tx) => {
-    let limited = false;
     let shouldAudit = false;
+    const dimensions: AuthRateLimitDimension[] = [];
+    for (const policy of policies) {
+      const keyHash = rateKey(policy.dimension, policy.value);
+      const [bucket] = await tx.$queryRaw<Array<{
+        id: string;
+        blockedUntil: Date | null;
+        lastLoggedAt: Date | null;
+      }>>`
+        SELECT id, blocked_until AS blockedUntil, last_logged_at AS lastLoggedAt
+        FROM auth_rate_limit_buckets
+        WHERE dimension = ${policy.dimension} AND key_hash = ${keyHash}
+        FOR UPDATE
+      `;
+
+      if (bucket?.blockedUntil && bucket.blockedUntil > now) {
+        dimensions.push(policy.dimension);
+        if (!bucket.lastLoggedAt || now.getTime() - bucket.lastLoggedAt.getTime() >= 5 * 60 * 1000) {
+          shouldAudit = true;
+          await tx.authRateLimitBucket.update({ where: { id: bucket.id }, data: { lastLoggedAt: now } });
+        }
+      }
+    }
+    return { limited: dimensions.length > 0, shouldAudit, dimensions };
+  });
+}
+
+export async function recordLoginFailure(input: { phone: string; ip: string; deviceId: string }): Promise<void> {
+  const policies = loginRatePolicies(input);
+  const now = new Date();
+  const prisma = getPrismaClient();
+
+  await prisma.$transaction(async (tx) => {
     for (const policy of policies) {
       const keyHash = rateKey(policy.dimension, policy.value);
       await tx.$executeRaw`
@@ -155,42 +191,28 @@ export async function consumeLoginRateLimit(input: { phone: string; ip: string; 
         windowStart: Date;
         attemptCount: number | bigint;
         blockedUntil: Date | null;
-        lastLoggedAt: Date | null;
       }>>`
         SELECT id, window_start AS windowStart, attempt_count AS attemptCount,
-               blocked_until AS blockedUntil, last_logged_at AS lastLoggedAt
+               blocked_until AS blockedUntil
         FROM auth_rate_limit_buckets
         WHERE dimension = ${policy.dimension} AND key_hash = ${keyHash}
         FOR UPDATE
       `;
 
-      if (bucket.blockedUntil && bucket.blockedUntil > now) {
-        limited = true;
-        if (!bucket.lastLoggedAt || now.getTime() - bucket.lastLoggedAt.getTime() >= 5 * 60 * 1000) {
-          shouldAudit = true;
-          await tx.authRateLimitBucket.update({ where: { id: bucket.id }, data: { lastLoggedAt: now } });
-        }
-        continue;
-      }
-
-      const expiredWindow = now.getTime() - bucket.windowStart.getTime() >= windowMs;
+      if (bucket.blockedUntil && bucket.blockedUntil > now) continue;
+      const expiredWindow = now.getTime() - bucket.windowStart.getTime() >= LOGIN_RATE_LIMIT_WINDOW_MS;
       const nextCount = expiredWindow ? 1 : Number(bucket.attemptCount) + 1;
-      const blockedUntil = nextCount > policy.maximum ? new Date(now.getTime() + windowMs) : null;
-      if (blockedUntil) {
-        limited = true;
-        shouldAudit = true;
-      }
+      const blockedUntil = nextCount >= policy.maximum ? new Date(now.getTime() + LOGIN_RATE_LIMIT_WINDOW_MS) : null;
       await tx.authRateLimitBucket.update({
         where: { id: bucket.id },
         data: {
           windowStart: expiredWindow ? now : bucket.windowStart,
           attemptCount: nextCount,
           blockedUntil,
-          lastLoggedAt: blockedUntil ? now : bucket.lastLoggedAt,
+          lastLoggedAt: blockedUntil ? null : undefined,
         },
       });
     }
-    return { limited, shouldAudit };
   });
 }
 

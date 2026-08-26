@@ -5,6 +5,7 @@ import { disableAccount, enableAccount, provisionAccount, resetPasswordToInitial
 import { changePassword, completeFirstActivation, listOwnSessions, login, logoutAll, logoutCurrent, revokeOwnSession } from "@/modules/identity/auth-service";
 import { hashPassword, initialPasswordFromPhone, verifyPassword } from "@/modules/identity/password/password";
 import type { AuthRequestContext } from "@/modules/identity/request-context";
+import { lockAccount } from "@/modules/identity/repository/auth-repository";
 import { getCurrentSessionByToken } from "@/modules/identity/session-service";
 
 const prisma = getPrismaClient();
@@ -81,7 +82,9 @@ describe("M0-003 account lifecycle and password integration", () => {
     const fixture = await normalAccount();
     const first = await login({ phone: fixture.phone, password: fixture.password }, context("reset-a"));
     const second = await login({ phone: fixture.phone, password: fixture.password }, context("reset-b"));
-    await resetPasswordToInitial(fixture.account.id);
+    const reset = await resetPasswordToInitial(fixture.account.id);
+    expect(reset.forcePasswordChange).toBe(true);
+    expect(await verifyPassword(reset.passwordHash, initialPasswordFromPhone(fixture.phone))).toBe(true);
     expect(await getCurrentSessionByToken(first.rawToken)).toBeNull();
     expect(await getCurrentSessionByToken(second.rawToken)).toBeNull();
 
@@ -103,6 +106,38 @@ describe("M0-003 account lifecycle and password integration", () => {
     const changed = await changePassword({ current, oldPassword: fixture.password, newPassword: "next-normal-password", context: activeContext });
     expect(await getCurrentSessionByToken(issued.rawToken)).toBeNull();
     expect(await getCurrentSessionByToken(changed.rawToken)).not.toBeNull();
+  });
+
+  it("aborts reset when the phone changes between the snapshot and Account lock", async () => {
+    const fixture = await normalAccount();
+    const active = await login({ phone: fixture.phone, password: fixture.password }, context("reset-race"));
+    const original = await prisma.account.findUniqueOrThrow({ where: { id: fixture.account.id } });
+    const nextPhone = phone();
+    let releasePhoneUpdate!: () => void;
+    let markLocked!: () => void;
+    const phoneUpdateAllowed = new Promise<void>((resolve) => { releasePhoneUpdate = resolve; });
+    const accountLocked = new Promise<void>((resolve) => { markLocked = resolve; });
+
+    const phoneUpdate = prisma.$transaction(async (tx) => {
+      await lockAccount(tx, fixture.account.id);
+      markLocked();
+      await phoneUpdateAllowed;
+      await tx.account.update({ where: { id: fixture.account.id }, data: { phone: nextPhone } });
+    });
+    await accountLocked;
+
+    const resetAttempt = resetPasswordToInitial(fixture.account.id);
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    const resetRejected = expect(resetAttempt).rejects.toMatchObject({ code: "ACCOUNT_PHONE_CHANGED", status: 409 });
+    releasePhoneUpdate();
+    await phoneUpdate;
+    await resetRejected;
+
+    const current = await prisma.account.findUniqueOrThrow({ where: { id: fixture.account.id } });
+    expect(current.phone).toBe(nextPhone);
+    expect(current.passwordHash).toBe(original.passwordHash);
+    expect(current.forcePasswordChange).toBe(false);
+    expect(await getCurrentSessionByToken(active.rawToken)).not.toBeNull();
   });
 });
 
@@ -132,6 +167,49 @@ describe("M0-003 device and session integration", () => {
     await expect(login({ phone: fixture.phone, password: "wrong-password" }, { ...rateContext, requestId: randomUUID() })).rejects.toMatchObject({ code: "AUTH_RATE_LIMITED", status: 429 });
     await expect(login({ phone: fixture.phone, password: "wrong-password" }, { ...rateContext, requestId: randomUUID() })).rejects.toMatchObject({ code: "AUTH_RATE_LIMITED", status: 429 });
     expect(await prisma.auditLog.count({ where: { actionCode: "AUTH_LOGIN_RATE_LIMITED" } })).toBe(rateAuditBefore + 1);
+  });
+
+  it("allows 45 successful accounts behind one shared NAT without increasing IP failures", async () => {
+    const sharedIp = `10.240.${Math.floor(ipCounter / 250)}.${ipCounter % 250}`;
+    const password = "shared-nat-password";
+    const passwordHash = await hashPassword(password);
+    const fixtures: Array<{ phone: string; deviceId: string }> = [];
+    for (let index = 0; index < 45; index += 1) {
+      const owner = await person(`shared-nat-${index}`);
+      const accountPhone = phone();
+      await prisma.account.create({
+        data: {
+          personId: owner.id,
+          phone: accountPhone,
+          passwordHash,
+          status: "NORMAL",
+          firstPasswordChangedAt: new Date(),
+          confidentialityConfirmedAt: new Date(),
+        },
+      });
+      fixtures.push({ phone: accountPhone, deviceId: `shared-nat-device-${index}` });
+    }
+
+    for (const fixture of fixtures) {
+      await expect(login(
+        { phone: fixture.phone, password },
+        { ...context(fixture.deviceId), ip: sharedIp },
+      )).resolves.toMatchObject({ nextStep: "HOME" });
+    }
+  });
+
+  it("blocks many different invalid credentials from one IP", async () => {
+    const sharedIp = `10.241.${Math.floor(ipCounter / 250)}.${ipCounter % 250}`;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await expect(login(
+        { phone: phone(), password: "wrong-password" },
+        { ...context(`ip-failure-${attempt}`), ip: sharedIp },
+      )).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
+    }
+    await expect(login(
+      { phone: phone(), password: "wrong-password" },
+      { ...context("ip-failure-blocked"), ip: sharedIp },
+    )).rejects.toMatchObject({ code: "AUTH_RATE_LIMITED", status: 429 });
   });
 
   it("serializes genuinely concurrent device logins on the Account row", async () => {

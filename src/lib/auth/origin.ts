@@ -1,13 +1,14 @@
 import { AuthError } from "@/modules/identity/errors";
 
 function expectedOrigins(request: Request): Set<string> {
-  const url = new URL(request.url);
-  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim();
-  const host = request.headers.get("x-forwarded-host")?.split(",")[0].trim()
-    ?? request.headers.get("host")
-    ?? url.host;
-  const origins = new Set([`${forwardedProto ?? url.protocol.replace(":", "")}://${host}`, url.origin]);
-  if (process.env.APP_BASE_URL) origins.add(new URL(process.env.APP_BASE_URL).origin);
+  const configuredBaseUrl = process.env.APP_BASE_URL;
+  if (process.env.NODE_ENV === "production") {
+    if (!configuredBaseUrl) throw new Error("APP_BASE_URL is required in production");
+    return new Set([new URL(configuredBaseUrl).origin]);
+  }
+
+  const origins = new Set([new URL(request.url).origin]);
+  if (configuredBaseUrl) origins.add(new URL(configuredBaseUrl).origin);
   return origins;
 }
 
@@ -22,7 +23,15 @@ export function assertTrustedMutationOrigin(request: Request): void {
       candidate = null;
     }
   }
-  if (!candidate || !expectedOrigins(request).has(candidate)) {
+  let candidateOrigin: string | null = null;
+  if (candidate) {
+    try {
+      candidateOrigin = new URL(candidate).origin;
+    } catch {
+      candidateOrigin = null;
+    }
+  }
+  if (!candidateOrigin || !expectedOrigins(request).has(candidateOrigin)) {
     throw new AuthError("UNTRUSTED_ORIGIN", "请求来源校验失败", 403);
   }
 }
