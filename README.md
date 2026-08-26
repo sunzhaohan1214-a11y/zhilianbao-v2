@@ -1,36 +1,57 @@
-# 智链宝 V2.0 开发基线包
+# 智链宝 V2.0
 
-该包已经完成 V2.0 第一阶段进入 Codex 开发前所需的产品/技术规格化。
+智链宝 V2.0 的模块化单体工程。本分支只实现 M0-001 Project Skeleton，不包含数据库与正式业务逻辑。
 
-## 正确开工方式
+## 技术栈
 
-1. GitHub 建私有仓库。
-2. 把本包根目录 `AGENTS.md` 与 `docs/` 放入仓库。
-3. 把 `CODEX-FIRST-PROMPT.md` 作为 Codex 第一个任务。
-4. 只实现 M0-001，不要一次开发全部系统。
-5. 每个功能 branch → CI → PR → TEST → 验收 → merge。
-6. WorkBuddy 只部署 GitHub 中已合并/打Tag的版本。
+- Next.js 16、React 19、TypeScript strict
+- Tailwind CSS 4
+- Vitest、Playwright
+- npm + `package-lock.json`
+- Next.js standalone Docker 镜像
 
-## 核心技术
+## 本地启动
 
-- 单仓库模块化单体
-- Next.js + React + TypeScript
-- Mobile / PC Admin 双 UI
-- TDSQL-C MySQL + Prisma Migrate
-- DB Session + 五层权限
-- COS 私有对象存储
-- Transactional Outbox
-- MySQL Job Queue + Worker
-- AI/OCR/Search Adapter
-- 腾讯地图 + 自有 GeoJSON
-- 第一阶段不微服务、不Redis
-- Vitest + Playwright
+需要 Node.js 24 LTS 与 npm 11。
 
-## 当前唯一明确待财务制度补充
+```bash
+npm ci
+npm run dev
+```
 
-交通补助 / 伙食补助精确计发天数规则。
+浏览器访问：
 
-在制度明确前：
-- 保留80元/天、100元/天参考标准；
-- 由用户按真实制度手工填写天数和金额；
-- Codex不得自行编计算公式。
+- Mobile H5：`http://localhost:3000/`
+- PC Admin：`http://localhost:3000/admin`
+- 健康检查：`http://localhost:3000/health`
+- 就绪检查：`http://localhost:3000/ready`
+
+## 检查、测试与构建
+
+```bash
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run test:e2e:critical
+npm run build
+```
+
+Playwright 首次运行前需要安装浏览器：
+
+```bash
+npx playwright install chromium
+```
+
+## Docker
+
+```bash
+docker build -t zhilianbao-v2:m0-001 .
+docker run --rm -p 3000:3000 zhilianbao-v2:m0-001
+```
+
+容器内服务监听 `0.0.0.0:3000`。
+
+## 开发规范
+
+开始任何任务前必须阅读 [AGENTS.md](./AGENTS.md) 及其指定的开发基线。后续任务继续遵守一个任务、一个分支、一个可审查 PR 的工作方式。
