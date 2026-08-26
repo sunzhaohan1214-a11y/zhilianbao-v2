@@ -1,0 +1,31 @@
+import { randomUUID } from "node:crypto";
+import { NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { isAuthError } from "@/modules/identity/errors";
+
+export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
+  return NextResponse.json({ ok: true, data, requestId }, { status });
+}
+
+export function apiError(error: unknown, requestId: string = randomUUID()) {
+  if (isAuthError(error)) {
+    return NextResponse.json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details ?? {} },
+      requestId,
+    }, { status: error.status });
+  }
+  if (error instanceof ZodError) {
+    return NextResponse.json({
+      ok: false,
+      error: { code: "VALIDATION_ERROR", message: "请求参数不正确", details: error.flatten() },
+      requestId,
+    }, { status: 400 });
+  }
+  console.error("Unhandled API error", { requestId, error: error instanceof Error ? error.message : "unknown" });
+  return NextResponse.json({
+    ok: false,
+    error: { code: "INTERNAL_ERROR", message: "服务暂时不可用", details: {} },
+    requestId,
+  }, { status: 500 });
+}
