@@ -1,0 +1,27 @@
+# MANIFEST
+
+- `AGENTS.md`
+- `CODEX-FIRST-PROMPT.md`
+- `README.md`
+- `WORKBUDDY-DEPLOYMENT-CHECKLIST.md`
+- `docs/AI_OCR_SPEC.md`
+- `docs/API_SPEC.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DATABASE_CONSTRAINTS.md`
+- `docs/DATA_DICTIONARY.md`
+- `docs/DATA_MODEL.md`
+- `docs/FIELD_PERMISSIONS.md`
+- `docs/FORM_SPEC.md`
+- `docs/IMPLEMENTATION_PLAN.md`
+- `docs/MAP_SPEC.md`
+- `docs/MESSAGE_TODO_MATRIX.md`
+- `docs/MIGRATION_PLAN.md`
+- `docs/OPERATIONS.md`
+- `docs/PERMISSIONS.md`
+- `docs/PRD.md`
+- `docs/REIMBURSEMENT_RULES.md`
+- `docs/SECURITY_SPEC.md`
+- `docs/STATE_MACHINES.md`
+- `docs/TECHNICAL_INDEX.md`
+- `docs/TEST_PLAN.md`
+- `docs/UI_SPEC.md`

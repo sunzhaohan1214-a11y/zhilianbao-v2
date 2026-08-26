@@ -1,0 +1,523 @@
+# 智链宝 V2.0 — IMPLEMENTATION_PLAN.md
+
+> 版本：v1.0  
+> 状态：Codex实施顺序基线  
+> 原则：第一阶段最终一次性完整上线；M0–M3只是内部建设顺序。
+
+# 1. 开工前
+
+GitHub：
+
+```text
+创建私有 repo
+保护 main
+启用PR
+启用CI
+```
+
+根目录准备：
+
+```text
+AGENTS.md
+docs/*
+.env.example
+Dockerfile
+package.json
+package-lock.json
+```
+
+禁止先写业务页面再补权限/数据结构。
+
+---
+
+# 2. M0 基础底座
+
+目标：
+
+> 多角色、一人一账号、权限、附件、审计、Worker 跑通。
+
+## M0.1 Project Skeleton
+
+- Next.js；
+- TypeScript；
+- Tailwind；
+- Mobile/Admin layout；
+- ESLint；
+- Vitest；
+- Playwright；
+- Docker standalone；
+- health/ready。
+
+Gate：
+
+```text
+npm ci
+lint
+typecheck
+test
+build
+Docker启动
+```
+
+## M0.2 Database Foundation
+
+建立：
+
+```text
+Person
+Account
+Session
+Organization
+AdministrativeArea
+OrganizationAreaMapping
+Appointment
+DepartmentTownshipRelation
+RoleAssignment
+SpecialPermissionGrant
+Batch
+BatchMembership
+GroupLeaderAssignment
+AuditLog
+StateTransitionHistory
+OutboxEvent
+JobTask
+```
+
+输出首个 Prisma Migration。
+
+Gate：
+
+> 空库 migrate deploy 成功；重复 deploy 无异常。
+
+## M0.3 Auth
+
+- 手机号登录；
+- 待启用；
+- 未激活；
+- 首次改密；
+- 保密确认；
+- 30天Session；
+- 2设备；
+- 第3台踢最老；
+- 重置；
+- 全部退出。
+
+Gate：
+
+> Auth E2E全通过。
+
+## M0.4 Permission
+
+实现五层Permission。
+
+先做最小页面：
+
+> 权限诊断测试页只在TEST环境使用。
+
+Gate：
+
+- 多角色；
+- 镇区；
+- 部门；
+- ADMIN；
+- SUPER_ADMIN；
+- 敏感权限；
+
+负向测试全部通过。
+
+## M0.5 Attachment
+
+- COS；
+- Upload intent；
+- Complete；
+- Short URL；
+- MIME/magic；
+- 扫描Adapter；
+- AccessLog。
+
+## M0.6 Worker / Outbox
+
+- Job claim；
+- retry；
+- idempotency；
+- Outbox consumer。
+
+Gate：
+
+> 重复Worker不重复产生业务结果。
+
+**M0完成条件：多角色权限和一人多角色验证通过。**
+
+---
+
+# 3. M1 核心闭环
+
+目标：
+
+> 一条真实需求从发现到成效完整走通。
+
+## M1.1 Enterprise
+
+先企业，因为Demand依赖正式Enterprise。
+
+- 企业；
+- 联系人；
+- 新增/纠错申请；
+- 版本；
+- 停用；
+- 合并基础；
+- 列表/详情。
+
+## M1.2 Demand Lead
+
+- 公开表单；
+- 走访来源接口先预留；
+- 待关联企业；
+- 核验；
+- 补充；
+- 合并；
+- 关闭；
+- 转正式草稿；
+- 原来源快照。
+
+## M1.3 Formal Demand
+
+- 草稿；
+- 提交审核；
+- 退回；
+- 发布；
+- 详情；
+- 状态历史。
+
+## M1.4 Claim / Collaboration
+
+- 原子认领；
+- 协同申请/邀请；
+- 退出/移除；
+- owner history。
+
+Gate：
+
+> 并发认领测试。
+
+## M1.5 AI Recommendation
+
+- current member候选池；
+- AI排序理由；
+- evidence snapshot；
+- alumni补充路径。
+
+AI失败不阻止业务。
+
+## M1.6 Progress / Close
+
+- 进展；
+- stale派生；
+- 团长7天提醒；
+- 提交办结；
+- 管理员核实；
+- 退回；
+- 办结。
+
+## M1.7 Outcome
+
+- 跟踪计划；
+- 多轮；
+- 镇区填报；
+- 管理员审核；
+- 统计字段。
+
+## M1.8 Home
+
+等真实数据已有后做首页，避免做假Dashboard。
+
+按UI_SPEC顺序。
+
+**M1完成条件：一条需求端到端走通。**
+
+---
+
+# 4. M2 资源与日常工作
+
+可以部分并行。
+
+## M2.1 Member / Contacts
+
+- 在任/往届；
+- 能力画像；
+- 批次；
+- 派出单位；
+- 通讯录。
+
+## M2.2 Map
+
+- AdministrativeArea；
+- GeoJSON；
+- 企业地图；
+- 团员地图；
+- NavigationAdapter。
+
+## M2.3 Presence
+
+- 来离宝；
+- 当前在宝。
+
+## M2.4 Trip / Visit
+
+- 一周行程；
+- 多节点；
+- 参与人；
+- 共享结果；
+- 每企业生成Visit；
+- Visit→多Lead。
+
+Gate：
+
+> 行程结果重复提交不重复生成走访。
+
+## M2.5 Talent
+
+- 人才申请；
+- 正式人才；
+- 原推荐人；
+- 当前联系人；
+- 多镇区轮次；
+- Progress；
+- AI简历提取。
+
+## M2.6 Policy
+
+- 主政策文件；
+- 补充附件；
+- AI提取；
+- 人工确认；
+- 发布；
+- 双状态；
+- 替代关系。
+
+**M2完成条件：资源可查，行程可转需求线索。**
+
+---
+
+# 5. M3 保障与上线
+
+## M3.1 Reimbursement
+
+必须严格按 REIMBURSEMENT_RULES。
+
+先表单/状态，再OCR。
+
+不要反过来以OCR驱动业务模型。
+
+## M3.2 Help
+
+- 类别含餐饮；
+- 转组织；
+- 唯一主办人；
+- expected date；
+- reopen。
+
+## M3.3 Announcement / Message / Todo
+
+虽然M0有Outbox，此阶段完成完整UI和全部矩阵。
+
+## M3.4 Reporting
+
+固定五张月度台账。
+
+不含报销/求助。
+
+不排名。
+
+## M3.5 Import / Export
+
+统一 Import Engine。
+
+字段映射/预览/去重/错误/快照。
+
+## M3.6 V1 Migration
+
+按 MIGRATION_PLAN：
+
+- 样本；
+- 全量演练；
+- 对账。
+
+## M3.7 System Admin
+
+- 参数；
+- Map boundary；
+- AI status；
+- Storage health；
+- Audit；
+- Backup/Restore UI。
+
+## M3.8 Hardening
+
+- Performance；
+- Security；
+- AI eval；
+- Browser；
+- weak network；
+- restore drill。
+
+**M3完成条件：全部第一阶段模块完成集成验收。**
+
+---
+
+# 6. 第一阶段正式UAT
+
+角色：
+
+```text
+SUPER_ADMIN
+ADMIN
+reimbursement manager
+group leader
+township A
+township B
+department
+3–5 members
+```
+
+跑完整清单。
+
+---
+
+# 7. 正式迁移和上线
+
+```text
+V1 freeze
+→ final backup
+→ final incremental migration
+→ reconciliation
+→ PROD snapshot
+→ deploy
+→ smoke
+→ release V2
+→ shut down V1
+```
+
+---
+
+# 8. M4第二阶段（不和V2.0首发混做）
+
+基础数据稳定约1个月后：
+
+- 领导工作台；
+- LeadershipAssignment正式启用；
+- 督办；
+- 岗位交接UI；
+- AI月报/总结。
+
+第一阶段只留底层模型。
+
+---
+
+# 9. Codex任务拆分粒度
+
+一个PR原则：
+
+> 一个清晰业务能力。
+
+好：
+
+```text
+feat(auth): first login flow
+feat(demand): atomic claim
+feat(trip): complete trip and create visits
+```
+
+不好：
+
+```text
+feat: build all V2
+```
+
+避免数千行无法Review。
+
+---
+
+# 10. 每个模块开发顺序
+
+统一：
+
+```text
+Data model
+→ Migration
+→ Repository
+→ Domain Service
+→ Permission
+→ Event
+→ API
+→ UI
+→ Unit
+→ Integration
+→ E2E
+```
+
+不先做漂亮页面再补服务端。
+
+---
+
+# 11. 变更控制
+
+若用户后续提出新想法：
+
+```text
+ChatGPT分析
+→ 判断是否改变PRD
+→ 规格更新
+→ 新Git任务
+→ Codex分支
+→ TEST
+→ Merge
+→ Deploy
+```
+
+不在生产服务器临时改。
+
+---
+
+# 12. 第一批建议Git Issues
+
+```text
+M0-001 scaffold
+M0-002 prisma foundation
+M0-003 auth session
+M0-004 permission service
+M0-005 attachment service
+M0-006 audit/outbox/jobs
+M0-007 mobile shell
+M0-008 admin shell
+
+M1-001 enterprise
+M1-002 demand lead
+M1-003 demand review
+M1-004 demand claim
+M1-005 collaboration
+M1-006 recommendation
+M1-007 progress/close
+M1-008 outcome
+M1-009 home
+```
+
+后续再按模块继续拆。
+
+---
+
+# 13. 正式开工门槛
+
+现在这些文件齐全后，可以进入 Codex M0。
+
+开工时第一条 Codex Prompt 不应该是：
+
+> “帮我把智链宝全部开发出来。”
+
+应该是：
+
+> “阅读AGENTS.md和全部docs，只实现M0-001项目脚手架，不实现业务模块。完成后运行lint/typecheck/test/build并提交结果。”
+
+逐步推进更可靠。
+
+**IMPLEMENTATION_PLAN.md v1.0 END**
