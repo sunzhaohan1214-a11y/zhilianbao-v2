@@ -143,9 +143,6 @@ export class AttachmentService {
   }) {
     await authorizeActor({ actor: input.actor, action: "attachment.temporary_self_access" });
     const attachment = await this.requireAttachment(input.attachmentId);
-    if (attachment.uploadStatus !== "UPLOADED" || attachment.scanStatus !== "PASSED" || !attachment.objectKey) {
-      throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "文件尚未通过安全检查");
-    }
     if (attachment.isTemporary) {
       await authorizeActor({
         actor: input.actor,
@@ -159,6 +156,9 @@ export class AttachmentService {
         action: input.action,
       });
       if (!allowed) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "无权访问此附件");
+    }
+    if (attachment.uploadStatus !== "UPLOADED" || attachment.scanStatus !== "PASSED" || !attachment.objectKey) {
+      throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "文件尚未通过安全检查");
     }
 
     const url = await this.storage.createSignedGetUrl(attachment.objectKey, this.config.signedUrlTtlSeconds);

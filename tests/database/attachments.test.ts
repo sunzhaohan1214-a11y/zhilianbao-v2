@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentCleanupService } from "@/modules/attachment/attachment-cleanup-service";
 import { AttachmentLinkService } from "@/modules/attachment/attachment-link-service";
@@ -135,6 +135,130 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
     expect(await prisma.jobTask.count({ where: { idempotencyKey: `attachment-scan:${intent.attachmentId}` } })).toBe(1);
   });
 
+  it("authorizes attachment objects before exposing state and keeps failed access side-effect free", async () => {
+    const owner = await createActor("access-order-owner");
+    const denied = await createActor("access-order-denied");
+    const registry = new AttachmentParentAuthorizerRegistry();
+    registry.register("TEST_RESOURCE", { authorize: ({ actor }) => actor.personId === owner.personId });
+    const runtime = services(new FakeCleanScanner(), registry);
+    const signedUrl = vi.spyOn(runtime.storage, "createSignedGetUrl");
+
+    const temporaryPending = await intentAndUpload({ actor: owner, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor: owner, attachmentId: temporaryPending.attachmentId });
+    await expect(runtime.service.access({
+      actor: owner,
+      attachmentId: temporaryPending.attachmentId,
+      action: "PREVIEW",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT", status: 409 });
+    await expect(runtime.service.access({
+      actor: denied,
+      attachmentId: temporaryPending.attachmentId,
+      action: "PREVIEW",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    expect(signedUrl).not.toHaveBeenCalled();
+    expect(await prisma.attachmentAccessLog.count({ where: { attachmentId: temporaryPending.attachmentId } })).toBe(0);
+
+    const temporaryRejected = await intentAndUpload({
+      actor: owner,
+      service: runtime.service,
+      storage: runtime.storage,
+      content: Buffer.from("MZ disguised executable"),
+    });
+    await runtime.service.complete({ actor: owner, attachmentId: temporaryRejected.attachmentId });
+    await runtime.scanService.processAttachmentScan(temporaryRejected.attachmentId);
+    await expect(runtime.service.access({
+      actor: owner,
+      attachmentId: temporaryRejected.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT", status: 409 });
+    await expect(runtime.service.access({
+      actor: denied,
+      attachmentId: temporaryRejected.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    expect(signedUrl).not.toHaveBeenCalled();
+    expect(await prisma.attachmentAccessLog.count({ where: { attachmentId: temporaryRejected.attachmentId } })).toBe(0);
+
+    const temporaryPassed = await intentAndUpload({ actor: owner, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor: owner, attachmentId: temporaryPassed.attachmentId });
+    await runtime.scanService.processAttachmentScan(temporaryPassed.attachmentId);
+    await expect(runtime.service.access({
+      actor: owner,
+      attachmentId: temporaryPassed.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).resolves.toMatchObject({ ttlSeconds: 300 });
+    await expect(runtime.service.access({
+      actor: denied,
+      attachmentId: temporaryPassed.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    expect(signedUrl).toHaveBeenCalledTimes(1);
+    expect(await prisma.attachmentAccessLog.count({ where: { attachmentId: temporaryPassed.attachmentId } })).toBe(1);
+    signedUrl.mockClear();
+
+    const linkedPending = await intentAndUpload({ actor: owner, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor: owner, attachmentId: linkedPending.attachmentId });
+    await runtime.linkService.linkAttachment({
+      attachmentId: linkedPending.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: owner.personId,
+    });
+    await expect(runtime.service.access({
+      actor: owner,
+      attachmentId: linkedPending.attachmentId,
+      action: "PREVIEW",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT", status: 409 });
+    await expect(runtime.service.access({
+      actor: denied,
+      attachmentId: linkedPending.attachmentId,
+      action: "PREVIEW",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_FORBIDDEN", status: 403 });
+    expect(signedUrl).not.toHaveBeenCalled();
+    expect(await prisma.attachmentAccessLog.count({ where: { attachmentId: linkedPending.attachmentId } })).toBe(0);
+
+    const linkedPassed = await intentAndUpload({ actor: owner, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor: owner, attachmentId: linkedPassed.attachmentId });
+    await runtime.scanService.processAttachmentScan(linkedPassed.attachmentId);
+    await runtime.linkService.linkAttachment({
+      attachmentId: linkedPassed.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: owner.personId,
+    });
+    await expect(runtime.service.access({
+      actor: owner,
+      attachmentId: linkedPassed.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).resolves.toMatchObject({ ttlSeconds: 300 });
+    await expect(runtime.service.access({
+      actor: denied,
+      attachmentId: linkedPassed.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_FORBIDDEN", status: 403 });
+    await expect(runtime.service.access({
+      actor: { ...denied, hasSystem: true },
+      attachmentId: linkedPassed.attachmentId,
+      action: "DOWNLOAD",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_FORBIDDEN", status: 403 });
+    expect(signedUrl).toHaveBeenCalledTimes(1);
+    expect(await prisma.attachmentAccessLog.count({ where: { attachmentId: linkedPassed.attachmentId } })).toBe(1);
+    signedUrl.mockRestore();
+  });
+
   it("rejects intent over 50MB and rejects actual staging content over 50MB", async () => {
     const actor = await createActor("size");
     const runtime = services();
@@ -186,7 +310,9 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
 
   it("enforces link state gates while preserving failed links for abort and cleanup", async () => {
     const actor = await createActor("link-state-gate");
-    const runtime = services();
+    const registry = new AttachmentParentAuthorizerRegistry();
+    registry.register("TEST_RESOURCE", { authorize: ({ actor: accessActor }) => accessActor.personId === actor.personId });
+    const runtime = services(new FakeCleanScanner(), registry);
 
     const pending = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
     await expect(runtime.linkService.linkAttachment({
