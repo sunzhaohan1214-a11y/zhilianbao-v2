@@ -142,6 +142,7 @@ export async function seedAuthFixtures() {
   await prisma.memberCapabilityProfile.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.groupLeaderAssignment.deleteMany({ where: { OR: [{ personId: { in: users.map(({ personId }) => personId) } }, { grantedByPersonId: { in: users.map(({ personId }) => personId) } }] } });
   await prisma.batchMembership.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
+  await prisma.batch.deleteMany({ where: { name: "E2E 延任批次", id: { notIn: [enterpriseE2e.batchId, enterpriseE2e.pastBatchId] } } });
   await prisma.appointment.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.session.deleteMany({ where: { accountId: { in: users.map(({ accountId }) => accountId) } } });
   await prisma.authRateLimitBucket.deleteMany();
