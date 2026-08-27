@@ -8,14 +8,10 @@ test.setTimeout(120_000);
 
 async function login(page: Page, user: { phone: string; password: string }) {
   await page.context().clearCookies();
-  await page.goto("/login");
-  await page.getByLabel("手机号").fill(user.phone);
-  await page.getByLabel("密码", { exact: true }).fill(user.password);
-  await Promise.all([
-    page.waitForResponse((response) => response.url().endsWith("/api/v2/auth/login")),
-    page.getByRole("button", { name: "登录" }).click(),
-  ]);
-  await page.waitForURL((url) => url.pathname === "/");
+  const response = await page.request.post("/api/v2/auth/login", {
+    data: { phone: user.phone, password: user.password },
+  });
+  expect(response.status()).toBe(200);
 }
 
 async function post(page: Page, path: string, body: unknown, headers: Record<string, string> = {}) {
@@ -88,6 +84,7 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   expect(coreMassAssignment.status).toBe(400);
   await page.getByPlaceholder("退回原因（退回时必填）").fill("请补充量化目标和实施边界");
   await page.getByRole("button", { name: "退回修改" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await expect(page.getByText("退回修改", { exact: true }).first()).toBeVisible();
 
   await login(page, e2eUsers.township);
