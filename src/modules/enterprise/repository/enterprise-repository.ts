@@ -42,7 +42,7 @@ export class EnterpriseRepository {
     const [areas, tags] = await Promise.all([
       this.prisma.administrativeArea.findMany({
         where: { status: "ACTIVE" },
-        orderBy: [{ level: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
         select: { id: true, name: true, type: true },
       }),
       this.prisma.enterpriseTag.findMany({
