@@ -845,7 +845,7 @@ model VisitDemandLeadIdempotency {
   visit         EnterpriseVisit @relation(fields: [visitId], references: [id], onDelete: Restrict)
   demandLead    DemandLead      @relation(fields: [demandLeadId], references: [id], onDelete: Restrict)
 
-  @@unique([actorPersonId, visitId, keyHash])
+  @@unique([actorPersonId, visitId, keyHash], map: "visit_lead_actor_visit_key_uk")
   @@index([demandLeadId])
   @@map("visit_demand_lead_idempotency")
 }

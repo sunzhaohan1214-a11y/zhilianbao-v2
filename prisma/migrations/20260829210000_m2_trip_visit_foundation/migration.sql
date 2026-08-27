@@ -134,7 +134,7 @@ CREATE TABLE `visit_demand_lead_idempotency` (
   `demand_lead_id` CHAR(36) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE INDEX `visit_demand_lead_idempotency_actor_person_id_visit_id_key_hash_key` (`actor_person_id`, `visit_id`, `key_hash`),
+  UNIQUE INDEX `visit_lead_actor_visit_key_uk` (`actor_person_id`, `visit_id`, `key_hash`),
   INDEX `visit_demand_lead_idempotency_demand_lead_id_idx` (`demand_lead_id`),
   CONSTRAINT `visit_demand_lead_idempotency_actor_person_id_fkey` FOREIGN KEY (`actor_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `visit_demand_lead_idempotency_visit_id_fkey` FOREIGN KEY (`visit_id`) REFERENCES `enterprise_visits` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
