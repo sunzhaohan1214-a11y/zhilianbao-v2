@@ -10,6 +10,7 @@ export const e2eUsers = {
   groupLeader: { personId: "10000000-0000-4000-8000-000000000006", accountId: "20000000-0000-4000-8000-000000000006", phone: "13800001006", password: "Leader-pass-123" },
   superAdmin: { personId: "10000000-0000-4000-8000-000000000007", accountId: "20000000-0000-4000-8000-000000000007", phone: "13800001007", password: "Super-pass-123" },
   township: { personId: "10000000-0000-4000-8000-000000000008", accountId: "20000000-0000-4000-8000-000000000008", phone: "13800001008", password: "Township-pass-123" },
+  alumni: { personId: "10000000-0000-4000-8000-000000000009", accountId: "20000000-0000-4000-8000-000000000009", phone: "13800001009", password: "Alumni-pass-123" },
 } as const;
 
 export const enterpriseE2e = {
@@ -21,6 +22,7 @@ export const enterpriseE2e = {
   contactId: "70000000-0000-4000-8000-000000000001",
   pastBatchId: "50000000-0000-4000-8000-000000000002",
   industryId: "80000000-0000-4000-8000-000000000001",
+  presenceId: "80000000-0000-4000-8000-000000000001",
 } as const;
 
 export async function seedAuthFixtures() {
@@ -29,6 +31,7 @@ export async function seedAuthFixtures() {
   const prisma = getPrismaClient();
   const users = Object.values(e2eUsers);
   const enterpriseWhere = { createdByPersonId: { in: users.map(({ personId }) => personId) } };
+  await prisma.presenceReport.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.enterprise.updateMany({ where: enterpriseWhere, data: { status: "NORMAL", mergedIntoId: null, primaryContactId: null } });
   await prisma.enterpriseChangeRequest.deleteMany({ where: { OR: [{ submitterPersonId: { in: users.map(({ personId }) => personId) } }, { reviewerPersonId: { in: users.map(({ personId }) => personId) } }] } });
   await prisma.enterpriseVersion.deleteMany({ where: { enterprise: enterpriseWhere } });
@@ -89,6 +92,7 @@ export async function seedAuthFixtures() {
       { personId: e2eUsers.superAdmin.personId, roleCode: "SUPER_ADMIN" as const },
       { personId: e2eUsers.normal.personId, roleCode: "MEMBER_CURRENT" as const },
       { personId: e2eUsers.township.personId, roleCode: "TOWNSHIP_STAFF" as const },
+      { personId: e2eUsers.alumni.personId, roleCode: "MEMBER_ALUMNI_PLATFORM" as const },
     ].map(({ personId, roleCode }) => ({
       personId,
       roleCode,
@@ -108,9 +112,15 @@ export async function seedAuthFixtures() {
   await prisma.batchMembership.createMany({ data: [
     ...[e2eUsers.normal, e2eUsers.minister, e2eUsers.groupLeader].map((fixture) => ({ personId: fixture.personId, batchId: enterpriseE2e.batchId, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: "ACTIVE" })),
     { personId: e2eUsers.admin.personId, batchId: enterpriseE2e.pastBatchId, startDate: new Date("2025-01-01"), endDate: new Date("2025-12-31"), status: "COMPLETED" },
+    { personId: e2eUsers.alumni.personId, batchId: enterpriseE2e.batchId, startDate: new Date("2025-01-01"), endDate: new Date("2025-12-31"), status: "INACTIVE" },
   ] });
   await prisma.groupLeaderAssignment.create({ data: { personId: e2eUsers.groupLeader.personId, batchId: enterpriseE2e.batchId, effectiveAt: new Date("2026-01-01"), grantedByPersonId: e2eUsers.superAdmin.personId, reason: "E2E current group leader" } });
   await prisma.memberIndustry.upsert({ where: { id: enterpriseE2e.industryId }, create: { id: enterpriseE2e.industryId, name: "智能制造" }, update: { name: "智能制造", status: "ACTIVE" } });
+  await prisma.presenceReport.upsert({
+    where: { id: enterpriseE2e.presenceId },
+    create: { id: enterpriseE2e.presenceId, personId: e2eUsers.alumni.personId, arrivalAt: new Date("2026-09-12T01:00:00Z"), expectedDepartureAt: new Date("2026-09-12T10:00:00Z"), note: "E2E 往届历史种子" },
+    update: { personId: e2eUsers.alumni.personId, arrivalAt: new Date("2026-09-12T01:00:00Z"), expectedDepartureAt: new Date("2026-09-12T10:00:00Z"), note: "E2E 往届历史种子", origin: null, canceledAt: null, cancelReason: null },
+  });
   for (const [id, name] of [[enterpriseE2e.areaAId, "安宜镇"], [enterpriseE2e.areaBId, "射阳湖镇"]] as const) {
     await prisma.administrativeArea.upsert({ where: { id }, create: { id, name, type: "TOWNSHIP" }, update: { name, status: "ACTIVE" } });
   }
