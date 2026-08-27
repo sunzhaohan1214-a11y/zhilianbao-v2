@@ -66,8 +66,8 @@ CREATE TABLE `demand_collaborators` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
   CONSTRAINT `demand_collaborators_active_key_check` CHECK (
-    (`status` = 'ACTIVE' AND `active_key` = 1 AND `expired_at` IS NULL AND `ended_by_person_id` IS NULL)
-    OR (`status` <> 'ACTIVE' AND `active_key` IS NULL AND `expired_at` IS NOT NULL AND `ended_by_person_id` IS NOT NULL)
+    (`status` = 'ACTIVE' AND `active_key` = 1 AND `expired_at` IS NULL)
+    OR (`status` <> 'ACTIVE' AND `active_key` IS NULL AND `expired_at` IS NOT NULL)
   ),
   UNIQUE INDEX `demand_collaborators_source_request_id_key` (`source_request_id`),
   UNIQUE INDEX `demand_collaborators_demand_person_active_key` (`demand_id`, `person_id`, `active_key`),
