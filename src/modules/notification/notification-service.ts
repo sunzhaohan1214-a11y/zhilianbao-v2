@@ -13,6 +13,7 @@ export class NotificationService {
     DEMAND: "DEMAND",
     HELP: "HELP_REQUEST",
     TRIP: "TRIP",
+    REIMBURSEMENT: "REIMBURSEMENT",
   } as const;
 
   async listMessages(input: { actor: PermissionActor; query: unknown }) {

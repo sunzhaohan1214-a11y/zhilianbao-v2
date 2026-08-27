@@ -21,19 +21,23 @@ export class InvoiceOcrService {
     const prisma = getPrismaClient();
     const invoice = await prisma.reimbursementInvoice.findUnique({ where: { id: invoiceId }, include: { reimbursement: { select: { type: true } }, attachment: true } });
     if (!invoice || !["QUEUED", "PROCESSING", "FAILED"].includes(invoice.ocrStatus)) return;
-    await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: "PROCESSING" } });
+    const claimed = await prisma.reimbursementInvoice.updateMany({
+      where: { id: invoice.id, ocrStatus: { in: ["QUEUED", "PROCESSING", "FAILED"] } },
+      data: { ocrStatus: "PROCESSING" },
+    });
+    if (claimed.count !== 1) return;
     try {
       if (!invoice.attachment.objectKey || invoice.attachment.scanStatus !== "PASSED") throw new Error("INVOICE_ATTACHMENT_NOT_READY");
       const body = await getAttachmentRuntime().storage.readObject(invoice.attachment.objectKey);
       const result = await this.provider.extract({ body, filename: invoice.attachment.originalFilename, mimeType: invoice.attachment.detectedMimeType ?? invoice.attachment.declaredMimeType });
       const classification = classifyInvoiceOcr(result.documentKind, invoice.reimbursement.type);
       const confidenceWarning = result.confidence !== undefined && result.confidence < 0.8 ? "OCR 置信度较低，请逐项核对" : null;
-      await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: "READY", suggestedExpenseType: classification.suggestedExpenseType,
+      await prisma.reimbursementInvoice.updateMany({ where: { id: invoice.id, ocrStatus: "PROCESSING" }, data: { ocrStatus: "READY", suggestedExpenseType: classification.suggestedExpenseType,
         ocrRawJson: { raw: result.raw, extracted: { documentKind: result.documentKind, invoiceNo: result.invoiceNo, invoiceDate: result.invoiceDate,
           amount: result.amount, seller: result.seller }, confidence: result.confidence } as Prisma.InputJsonValue,
         ocrWarning: [classification.warning, confidenceWarning].filter(Boolean).join("；") || null } });
     } catch (error) {
-      await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: error instanceof InvoiceOcrUnavailableError ? "DEGRADED" : "FAILED",
+      await prisma.reimbursementInvoice.updateMany({ where: { id: invoice.id, ocrStatus: "PROCESSING" }, data: { ocrStatus: error instanceof InvoiceOcrUnavailableError ? "DEGRADED" : "FAILED",
         ocrWarning: error instanceof InvoiceOcrUnavailableError ? "专业票据 OCR 未配置，已降级为人工录入" : "OCR 识别失败，请人工录入" } });
       if (!(error instanceof InvoiceOcrUnavailableError)) throw error;
     }

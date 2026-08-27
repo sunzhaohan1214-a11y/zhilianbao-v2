@@ -66,7 +66,7 @@ test("09 taxi and dining OCR warnings cannot become travel actual, and subsidies
   for (const [index, warning] of ["出租车/网约车票据不得计入出行交通费实报实销", "餐饮票据不能作为出行报销费用"].entries()) {
     const attachment = await prisma.attachment.create({ data: { originalFilename: `negative-${index}.pdf`, extension: "pdf", declaredMimeType: "application/pdf", expectedSizeBytes: BigInt(8), actualSizeBytes: BigInt(8), bucket: "test", region: "test", objectKey: `negative/${crypto.randomUUID()}.pdf`, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, uploadedByPersonId: e2eUsers.normal.personId } });
     const invoice = await prisma.reimbursementInvoice.create({ data: { reimbursementId: item.json.data.id, attachmentId: attachment.id, ocrStatus: "READY", ocrWarning: warning } });
-    const result = await api(page, `/api/v2/reimbursement-invoices/${invoice.id}/confirm`, { expenseType: "TRAVEL_TRANSPORT_ACTUAL", amount: "20" }); expect(result.status).toBe(422);
+    const result = await api(page, `/api/v2/reimbursement-invoices/${invoice.id}/confirm`, { expenseType: index === 0 ? "TRAVEL_TRANSPORT_ACTUAL" : "TRAVEL_LODGING", amount: "20" }); expect(result.status).toBe(422);
   }
   const subsidy = await api(page, `/api/v2/reimbursements/${item.json.data.id}/update`, { type: "TRAVEL", reason: "OCR 负例", expenses: [{ expenseType: "TRAVEL_MEAL_SUBSIDY", amount: "100", source: "OCR", referenceRate: "100", claimedDays: "1" }] }); expect(subsidy.status).toBe(422);
 });
@@ -82,7 +82,17 @@ test("10 export requires reimbursement manager permission and password reauthent
 test("11 ADMIN grants and revokes alumni apply without gaining content visibility", async ({ page }) => {
   await login(page, e2eUsers.admin); const enabled = await api(page, `/api/v2/admin/people/${e2eUsers.alumni.personId}/reimbursement-apply/enable`, { reason: "专项往届报销" }); expect(enabled.status).toBe(201);
   await page.context().clearCookies(); await login(page, e2eUsers.alumni); const created = await create(page, "往届专项报销"); expect(created.status).toBe(201);
+  const id = created.json.data.id;
+  expect((await api(page, `/api/v2/reimbursements/${id}/update`, body("往届专项编辑"))).status).toBe(200);
+  expect((await api(page, `/api/v2/reimbursements/${id}/submit`, {}, { "Idempotency-Key": crypto.randomUUID() })).status).toBe(200);
+  expect((await api(page, `/api/v2/reimbursements/${id}/withdraw`, {})).status).toBe(200);
+  expect((await api(page, `/api/v2/reimbursements/${id}/submit`, {}, { "Idempotency-Key": crypto.randomUUID() })).status).toBe(200);
   await page.context().clearCookies(); await login(page, e2eUsers.admin); expect((await api(page, `/api/v2/reimbursements/${created.json.data.id}`)).status).toBe(404);
   expect((await api(page, `/api/v2/admin/people/${e2eUsers.alumni.personId}/reimbursement-apply/disable`, { reason: "专项结束" })).status).toBe(200);
-  await page.context().clearCookies(); await login(page, e2eUsers.alumni); expect((await create(page, "撤权后不得新建")).status).toBe(403); expect((await api(page, `/api/v2/reimbursements/${created.json.data.id}`)).status).toBe(200);
+  await page.context().clearCookies(); await login(page, e2eUsers.alumni);
+  expect((await create(page, "撤权后不得新建")).status).toBe(403);
+  expect((await api(page, `/api/v2/reimbursements/${id}/update`, body("撤权后不得编辑"))).status).toBe(403);
+  expect((await api(page, `/api/v2/reimbursements/${id}/submit`, {}, { "Idempotency-Key": crypto.randomUUID() })).status).toBe(403);
+  expect((await api(page, `/api/v2/reimbursements/${id}/withdraw`, {})).status).toBe(403);
+  const history = await api(page, `/api/v2/reimbursements/${id}`); expect(history.status).toBe(200); expect(history.json.data.timeline.length).toBeGreaterThanOrEqual(5);
 });

@@ -13,7 +13,7 @@ const exactBooleanSchema = z.union([
 export const notificationListSchema = paginationSchema.extend({
   unread: exactBooleanSchema.optional(),
   type: z.string().trim().min(1).max(100).optional(),
-  module: z.enum(["ANNOUNCEMENT", "DEMAND", "HELP", "TRIP"]).optional(),
+  module: z.enum(["ANNOUNCEMENT", "DEMAND", "HELP", "TRIP", "REIMBURSEMENT"]).optional(),
 }).strict();
 
 export const todoListSchema = paginationSchema.extend({

@@ -9,6 +9,8 @@ import { buildReimbursementPdf, buildReimbursementXlsx } from "@/modules/reimbur
 import { ReimbursementOcrJobHandler } from "@/modules/jobs/handlers/reimbursement-ocr-handler";
 import { ReimbursementExportJobHandler } from "@/modules/jobs/handlers/reimbursement-export-handler";
 import { isSubmitIdempotencyUniqueConflict } from "@/modules/reimbursement/errors";
+import { resolveCapabilities } from "@/modules/permissions/role-capabilities";
+import { OUTBOX_EVENT_TYPES, outboxPayloadSchemas } from "@/modules/outbox/outbox-types";
 
 describe("B-M3-001 reimbursement rules", () => {
   it("accepts only the exact four travel expense types", () => {
@@ -36,6 +38,23 @@ describe("B-M3-001 reimbursement rules", () => {
     expect(reimbursementExportSchema.safeParse({ format: "XLSX", reimbursementIds: [crypto.randomUUID(), crypto.randomUUID()] }).success).toBe(true);
   });
 
+  it("maps reimbursement.apply to the complete applicant mutation chain while alumni retain self history viewing", () => {
+    const capabilities = resolveCapabilities(["MEMBER_ALUMNI_PLATFORM"], new Set(["reimbursement.apply"]));
+    expect([...capabilities]).toEqual(expect.arrayContaining([
+      "reimbursement.create", "reimbursement.view.self", "reimbursement.edit.self", "reimbursement.submit", "reimbursement.withdraw",
+    ]));
+    expect(resolveCapabilities(["MEMBER_ALUMNI_PLATFORM"], new Set()).has("reimbursement.view.self")).toBe(true);
+    expect(resolveCapabilities(["MEMBER_ALUMNI_PLATFORM"], new Set()).has("reimbursement.submit")).toBe(false);
+  });
+
+  it("declares strict privacy-minimal reimbursement outbox payloads", () => {
+    expect(OUTBOX_EVENT_TYPES).toEqual(expect.arrayContaining(["REIMBURSEMENT_SUBMITTED", "REIMBURSEMENT_STATE_CORRECTED"]));
+    const payload = { reimbursementId: crypto.randomUUID(), applicantPersonId: crypto.randomUUID(), managerRecipientIds: [crypto.randomUUID()], eventKey: "v1" };
+    expect(outboxPayloadSchemas.REIMBURSEMENT_SUBMITTED.safeParse(payload).success).toBe(true);
+    expect(outboxPayloadSchemas.REIMBURSEMENT_SUBMITTED.safeParse({ ...payload, amount: "999.00" }).success).toBe(false);
+    expect(outboxPayloadSchemas.REIMBURSEMENT_RETURNED.safeParse({ ...payload, reason: "private" }).success).toBe(false);
+  });
+
   it("uses deterministic professional-provider fake results in tests", async () => {
     const provider = new DeterministicFakeInvoiceOcrProvider();
     await expect(provider.extract({ body: Buffer.from("ride"), filename: "taxi.pdf", mimeType: "application/pdf" })).resolves.toMatchObject({ documentKind: "RIDE_HAILING", amount: "100.00" });
@@ -54,6 +73,17 @@ describe("B-M3-001 reimbursement rules", () => {
         invoiceSnapshotJson: [{ confirmedInvoiceNo: "INV-001" }], totalAmount: { toString: () => "728.50" }, submittedAt: new Date("2026-08-27T00:00:00Z") } };
     const pdfBytes = await buildReimbursementPdf(item as never); const pdf = await PDFDocument.load(pdfBytes); expect(pdf.getPage(0).getSize()).toMatchObject({ width: 595.28, height: 841.89 }); expect(pdf.getTitle()).toBe("报销明细汇总表"); expect(pdf.getSubject()).toBe("仅供内部材料核对，不作为正式财务凭证"); expect(pdfBytes.byteLength).toBeGreaterThan(10_000);
     const xlsxBytes = await buildReimbursementXlsx([item as never]); const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(xlsxBytes as never); expect(workbook.getWorksheet("报销清单")?.getCell("E2").value).toBe("Frozen reason"); expect(workbook.getWorksheet("报销清单")?.getCell("G2").value).toBe(728.5);
+  });
+
+  it("renders every large-record expense, invoice and trip node across multiple A4 pages", async () => {
+    const expenseSnapshotJson = Array.from({ length: 40 }, (_, index) => ({ expenseType: "TRAVEL_TRANSPORT_ACTUAL", amount: `${index + 1}.00`, description: `完整费用明细-${index + 1}-${"说明".repeat(30)}` }));
+    const invoiceSnapshotJson = Array.from({ length: 30 }, (_, index) => ({ confirmedInvoiceNo: `LONG-INVOICE-${String(index + 1).padStart(3, "0")}` }));
+    const nodes = Array.from({ length: 24 }, (_, index) => ({ locationName: `行程节点-${index + 1}`, content: `完整工作内容-${index + 1}-${"内容".repeat(24)}` }));
+    const item = { businessNo: "BX-2026-009999", type: "TRAVEL", status: "PAPER_RECEIVED", applicant: { name: "Applicant" }, linkedTrip: null, expenses: [], invoices: [], totalAmount: { toString: () => "820.00" }, lastSubmittedAt: new Date(),
+      currentSubmissionVersion: { reasonSnapshot: "多页完整性回归", tripSnapshotJson: { title: "长行程", nodes, participants: [] }, expenseSnapshotJson, invoiceSnapshotJson, totalAmount: { toString: () => "820.00" }, submittedAt: new Date() } };
+    const pdf = await PDFDocument.load(await buildReimbursementPdf(item as never));
+    expect(pdf.getPageCount()).toBeGreaterThan(1);
+    for (const page of pdf.getPages()) expect(page.getSize()).toMatchObject({ width: 595.28, height: 841.89 });
   });
 
   it("dispatches OCR and export work through dedicated worker handlers", async () => {

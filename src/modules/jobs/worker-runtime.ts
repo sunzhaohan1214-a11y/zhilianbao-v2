@@ -8,6 +8,7 @@ import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/annou
 import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-notification-handler";
 import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
 import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
+import { ReimbursementNotificationHandler, type ReimbursementEventType } from "@/modules/outbox/handlers/reimbursement-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
@@ -85,6 +86,9 @@ export class WorkerRuntime {
     outboxHandlers.register("TRIP_RESULT_DUE_SCHEDULED", new TripResultDueScheduledHandler(this.jobs));
     outboxHandlers.register("TRIP_CANCELED", new TripLifecycleHandler("TRIP_CANCELED"));
     outboxHandlers.register("TRIP_RESULT_SUBMITTED", new TripLifecycleHandler("TRIP_RESULT_SUBMITTED"));
+    for (const eventType of ["REIMBURSEMENT_SUBMITTED", "REIMBURSEMENT_RETURNED", "REIMBURSEMENT_VERIFIED", "REIMBURSEMENT_PAPER_RECEIVED", "REIMBURSEMENT_PAPER_INCOMPLETE", "REIMBURSEMENT_FINANCE_SUBMITTED", "REIMBURSEMENT_WITHDRAWN", "REIMBURSEMENT_STATE_CORRECTED"] as const satisfies readonly ReimbursementEventType[]) {
+      outboxHandlers.register(eventType, new ReimbursementNotificationHandler(eventType));
+    }
     this.outbox = dependencies?.outbox ?? new OutboxConsumer(outboxHandlers, config.outboxMaxAttempts, logger);
   }
 

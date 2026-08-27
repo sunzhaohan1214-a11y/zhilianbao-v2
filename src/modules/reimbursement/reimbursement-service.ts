@@ -1,13 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type ReimbursementExpenseType, type ReimbursementStatus } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { JobRepository } from "@/modules/jobs/job-repository";
+import { OutboxRepository } from "@/modules/outbox/outbox-repository";
+import type { ReimbursementEventType } from "@/modules/outbox/handlers/reimbursement-notification-handler";
 import { writeReimbursementAudit, writeReimbursementTransition, type ReimbursementMutationContext } from "./audit";
 import { ACTIVITY_EXPENSE_TYPES, EDITABLE_STATUSES, SUBSIDY_EXPENSE_TYPES, TRAVEL_EXPENSE_TYPES } from "./constants";
 import { ReimbursementError, isSubmitIdempotencyUniqueConflict } from "./errors";
 import { actorCanManageReimbursements, ReimbursementRepository, type ReimbursementTransaction } from "./repository/reimbursement-repository";
 import { addInvoiceSchema, confirmInvoiceSchema, reasonSchema, reimbursementDraftSchema, stateCorrectionSchema } from "./schemas";
+import { activeReimbursementManagers } from "./active-reimbursement-managers";
 
 type Input = { actor: PermissionActor; context?: ReimbursementMutationContext };
 type Draft = ReturnType<typeof reimbursementDraftSchema.parse>;
@@ -55,7 +58,19 @@ const CORRECTIONS: Record<string, readonly string[]> = {
 };
 
 export class ReimbursementService {
+  private readonly outbox = new OutboxRepository();
   constructor(private readonly repository = new ReimbursementRepository(), private readonly jobs = new JobRepository()) {}
+
+  private async notify(tx: ReimbursementTransaction, item: { id: string; applicantPersonId: string }, eventType: ReimbursementEventType, eventKey: string, toState?: ReimbursementStatus) {
+    const managerRecipientIds = await activeReimbursementManagers(tx);
+    await this.outbox.append({
+      eventType,
+      aggregateType: "REIMBURSEMENT",
+      aggregateId: item.id,
+      payload: { reimbursementId: item.id, applicantPersonId: item.applicantPersonId, managerRecipientIds, eventKey, ...(toState ? { toState } : {}) },
+      dedupeKey: `${eventType}:${item.id}:${eventKey}`,
+    }, tx);
+  }
 
   private async locked(tx: ReimbursementTransaction, id: string) {
     try { await this.repository.lock(tx, id); }
@@ -115,7 +130,9 @@ export class ReimbursementService {
 
   async create(input: Input & { body: unknown }) {
     await authorizeActor({ actor: input.actor, action: "reimbursement.create" });
-    if (!input.actor.currentBatchMember && !input.actor.specialPermissions.has("reimbursement.apply")) throw new ReimbursementError("REIMBURSEMENT_APPLICANT_INELIGIBLE", "仅当前团员或获专项授权的往届团员可发起报销");
+    if (!input.actor.currentBatchMember && (!input.actor.effectiveRoles.includes("MEMBER_ALUMNI_PLATFORM") || !input.actor.specialPermissions.has("reimbursement.apply"))) {
+      throw new ReimbursementError("REIMBURSEMENT_APPLICANT_INELIGIBLE", "仅当前团员或获专项授权的有效平台往届团员可发起报销");
+    }
     const body = reimbursementDraftSchema.parse(input.body); validateReimbursementExpenses(body.type, body.expenses);
     return this.repository.transaction(async (tx) => {
       if (!await tx.person.count({ where: { id: input.actor.personId, personStatus: "ACTIVE", account: { is: { status: "NORMAL" } } } })) {
@@ -200,13 +217,16 @@ export class ReimbursementService {
     return this.repository.transaction(async (tx) => {
       const item = await this.locked(tx, input.reimbursementId); this.ensureOwner(item, input.actor);
       if (!EDITABLE_STATUSES.includes(item.status as typeof EDITABLE_STATUSES[number])) throw new ReimbursementError("REIMBURSEMENT_STATE_CONFLICT", "当前状态不能确认票据");
+      const invoice = await tx.reimbursementInvoice.findFirst({ where: { id: input.invoiceId, reimbursementId: item.id } });
+      if (!invoice) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "票据不存在");
+      if (invoice.ocrStatus === "CONFIRMED") return invoice;
       if (item.type === "TRAVEL" && !TRAVEL_EXPENSE_TYPES.includes(body.expenseType as typeof TRAVEL_EXPENSE_TYPES[number])) throw new ReimbursementError("REIMBURSEMENT_EXPENSE_INVALID", "出行报销票据只能归入四类出行费用");
       if (item.type === "ACTIVITY" && !ACTIVITY_EXPENSE_TYPES.includes(body.expenseType as typeof ACTIVITY_EXPENSE_TYPES[number])) throw new ReimbursementError("REIMBURSEMENT_EXPENSE_INVALID", "活动报销票据类型不正确");
       if (SUBSIDY_EXPENSE_TYPES.includes(body.expenseType as typeof SUBSIDY_EXPENSE_TYPES[number])) throw new ReimbursementError("REIMBURSEMENT_EXPENSE_INVALID", "交通和伙食补贴不得由 OCR 票据生成");
-      const invoice = await tx.reimbursementInvoice.findFirst({ where: { id: input.invoiceId, reimbursementId: item.id } });
-      if (!invoice) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "票据不存在");
-      if (item.type === "TRAVEL" && invoice.ocrWarning && /出租车|网约车|餐饮/.test(invoice.ocrWarning) && body.expenseType === "TRAVEL_TRANSPORT_ACTUAL") {
-        throw new ReimbursementError("REIMBURSEMENT_EXPENSE_INVALID", "出租车、网约车或餐饮票据不能计入出行交通费实报实销");
+      if (["QUEUED", "PROCESSING"].includes(invoice.ocrStatus)) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "票据识别处理中，暂不能人工确认");
+      if (!["NOT_REQUESTED", "READY", "DEGRADED", "FAILED"].includes(invoice.ocrStatus)) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "当前票据识别状态不能确认");
+      if (item.type === "TRAVEL" && invoice.ocrWarning && /出租车|网约车|餐饮/.test(invoice.ocrWarning)) {
+        throw new ReimbursementError("REIMBURSEMENT_EXPENSE_INVALID", "出租车、网约车或餐饮票据不能计入出行报销费用");
       }
       const normalized = normalizeInvoiceNo(body.invoiceNo);
       if (normalized && await tx.reimbursementInvoice.count({ where: { reimbursementId: item.id, invoiceNoNormalized: normalized, id: { not: invoice.id } } })) {
@@ -229,6 +249,7 @@ export class ReimbursementService {
       if (!EDITABLE_STATUSES.includes(item.status as typeof EDITABLE_STATUSES[number])) throw new ReimbursementError("REIMBURSEMENT_STATE_CONFLICT", "当前状态不能识别票据");
       const invoice = await tx.reimbursementInvoice.findFirst({ where: { id: input.invoiceId, reimbursementId: item.id }, include: { attachment: true } });
       if (!invoice || invoice.attachment.scanStatus !== "PASSED" || !invoice.attachment.objectKey) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "票据必须先上传完成并通过安全扫描");
+      if (invoice.ocrStatus === "CONFIRMED") throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "已人工确认的票据不能重新发起 OCR");
       if (["QUEUED", "PROCESSING"].includes(invoice.ocrStatus)) return invoice;
       await tx.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: "QUEUED", ocrWarning: null } });
       await this.jobs.enqueue({ jobType: "REIMBURSEMENT_INVOICE_OCR", payload: { invoiceId: invoice.id },
@@ -267,6 +288,11 @@ export class ReimbursementService {
           description: e.description ?? undefined, expenseDate: e.expenseDate ?? undefined, amount: e.amount.toString(), invoiceId: e.invoiceId ?? undefined,
           source: e.source, referenceRate: e.referenceRate?.toString(), claimedDays: e.claimedDays?.toString(), calculationNote: e.calculationNote ?? undefined }));
         validateReimbursementExpenses(item.type, draftExpenses);
+        if (await tx.reimbursementInvoice.count({ where: { reimbursementId: item.id, attachment: { is: { OR: [
+          { uploadStatus: { not: "UPLOADED" } }, { scanStatus: { not: "PASSED" } }, { objectKey: null },
+        ] } } } })) {
+          throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "所有票据必须上传完成并通过安全扫描后才能提交");
+        }
         if (item.invoices.some((invoice) => ["QUEUED", "PROCESSING", "READY"].includes(invoice.ocrStatus))) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "请先确认或修正所有 OCR 识别结果");
         const numbers = item.invoices.flatMap((i) => i.invoiceNoNormalized ? [i.invoiceNoNormalized] : []).sort();
         if (new Set(numbers).size !== numbers.length) throw new ReimbursementError("REIMBURSEMENT_DUPLICATE_INVOICE", "当前报销单内发票号码重复");
@@ -287,6 +313,7 @@ export class ReimbursementService {
         await writeReimbursementTransition(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_SUBMITTED", fromState: item.status, toState: updated.status, metadata: { versionNo: version.versionNo, totalAmount: total.toString() } });
         await writeReimbursementAudit(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_SUBMITTED", before: stateSnapshot(item), after: stateSnapshot(updated) });
         const response = { id: item.id, businessNo: item.businessNo, status: updated.status, submissionVersionId: version.id, versionNo: version.versionNo, totalAmount: total.toString() };
+        await this.notify(tx, item, "REIMBURSEMENT_SUBMITTED", version.id, updated.status);
         await tx.reimbursementCommandIdempotency.create({ data: { reimbursementId: item.id, actorPersonId: input.actor.personId, idempotencyKeyHash: keyHash, payloadHash, responseJson: response } });
         return response;
       });
@@ -308,17 +335,18 @@ export class ReimbursementService {
     await authorizeActor({ actor, action, resource: { resourceType: "reimbursement", requiredScope: "REIMBURSEMENT_AUTHORIZED" } });
   }
 
-  private async transition(input: Input, id: string, from: ReimbursementStatus, to: ReimbursementStatus, actionCode: string, manager: boolean, reason?: string) {
+  private async transition(input: Input, id: string, from: ReimbursementStatus, to: ReimbursementStatus, actionCode: ReimbursementEventType, manager: boolean, reason?: string) {
     if (manager && !actorCanManageReimbursements(input.actor)) throw new ReimbursementError("REIMBURSEMENT_FORBIDDEN", "缺少报销管理权限");
     return this.repository.transaction(async (tx) => {
       const item = await this.locked(tx, id); if (!manager) this.ensureOwner(item, input.actor);
       if (item.status !== from) throw new ReimbursementError("REIMBURSEMENT_STATE_CONFLICT", `仅 ${from} 状态可执行此操作`);
       const now = new Date();
       const updated = await tx.reimbursement.update({ where: { id }, data: { status: to,
-        ...(to === "PAPER_RECEIVED" ? { paperReceivedAt: now, paperReceivedByPersonId: input.actor.personId } : {}),
-        ...(to === "FINANCE_SUBMITTED" ? { financeSubmittedAt: now, financeSubmittedByPersonId: input.actor.personId } : {}) } });
+        ...(to === "PAPER_RECEIVED" && item.paperReceivedAt === null ? { paperReceivedAt: now, paperReceivedByPersonId: input.actor.personId } : {}),
+        ...(to === "FINANCE_SUBMITTED" && item.financeSubmittedAt === null ? { financeSubmittedAt: now, financeSubmittedByPersonId: input.actor.personId } : {}) } });
       await writeReimbursementTransition(tx, { ...input, entityId: id, actionCode, fromState: from, toState: to, reason });
       await writeReimbursementAudit(tx, { ...input, entityId: id, actionCode, before: stateSnapshot(item), after: stateSnapshot(updated), reason });
+      await this.notify(tx, item, actionCode, randomUUID(), to);
       return this.repository.findById(tx, id);
     });
   }
@@ -331,6 +359,7 @@ export class ReimbursementService {
       const updated = await tx.reimbursement.update({ where: { id: item.id }, data: { status: "RETURNED" } });
       await writeReimbursementTransition(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_RETURNED", fromState: item.status, toState: "RETURNED", reason });
       await writeReimbursementAudit(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_RETURNED", before: stateSnapshot(item), after: stateSnapshot(updated), reason });
+      await this.notify(tx, item, "REIMBURSEMENT_RETURNED", randomUUID(), "RETURNED");
       return this.repository.findById(tx, item.id);
     });
   }
@@ -345,9 +374,15 @@ export class ReimbursementService {
     return this.repository.transaction(async (tx) => {
       const item = await this.locked(tx, input.reimbursementId);
       if (item.status !== body.fromState) throw new ReimbursementError("REIMBURSEMENT_STATE_CONFLICT", "报销单状态已变化");
-      const updated = await tx.reimbursement.update({ where: { id: item.id }, data: { status: body.toState } });
+      const now = new Date();
+      const updated = await tx.reimbursement.update({ where: { id: item.id }, data: {
+        status: body.toState,
+        ...(body.toState === "PAPER_RECEIVED" && item.paperReceivedAt === null ? { paperReceivedAt: now, paperReceivedByPersonId: input.actor.personId } : {}),
+        ...(body.toState === "FINANCE_SUBMITTED" && item.financeSubmittedAt === null ? { financeSubmittedAt: now, financeSubmittedByPersonId: input.actor.personId } : {}),
+      } });
       await writeReimbursementTransition(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_STATE_CORRECTED", fromState: body.fromState, toState: body.toState, reason: body.reason });
       await writeReimbursementAudit(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_STATE_CORRECTED", before: stateSnapshot(item), after: stateSnapshot(updated), reason: body.reason });
+      await this.notify(tx, item, "REIMBURSEMENT_STATE_CORRECTED", randomUUID(), body.toState);
       return this.repository.findById(tx, item.id);
     });
   }

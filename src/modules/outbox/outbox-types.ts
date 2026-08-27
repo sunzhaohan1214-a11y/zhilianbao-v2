@@ -30,6 +30,14 @@ export const OUTBOX_EVENT_TYPES = [
   "TRIP_RESULT_DUE_SCHEDULED",
   "TRIP_CANCELED",
   "TRIP_RESULT_SUBMITTED",
+  "REIMBURSEMENT_SUBMITTED",
+  "REIMBURSEMENT_RETURNED",
+  "REIMBURSEMENT_VERIFIED",
+  "REIMBURSEMENT_PAPER_RECEIVED",
+  "REIMBURSEMENT_PAPER_INCOMPLETE",
+  "REIMBURSEMENT_FINANCE_SUBMITTED",
+  "REIMBURSEMENT_WITHDRAWN",
+  "REIMBURSEMENT_STATE_CORRECTED",
 ] as const;
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];
 
@@ -60,6 +68,16 @@ function tripRecipientPayloadSchema() {
     tripId: z.uuid(),
     recipientIds: recipientIdsSchema,
     eventKey: z.string().min(1).max(120),
+  }).strict();
+}
+
+function reimbursementPayloadSchema() {
+  return z.object({
+    reimbursementId: z.uuid(),
+    applicantPersonId: z.uuid(),
+    managerRecipientIds: recipientIdsSchema,
+    eventKey: z.string().min(1).max(120),
+    toState: z.enum(["DRAFT", "PENDING_ONLINE_REVIEW", "RETURNED", "VERIFIED_PENDING_PAPER", "PAPER_RECEIVED", "FINANCE_SUBMITTED"]).optional(),
   }).strict();
 }
 
@@ -97,6 +115,14 @@ export const outboxPayloadSchemas = {
   }).strict(),
   TRIP_CANCELED: tripRecipientPayloadSchema(),
   TRIP_RESULT_SUBMITTED: tripRecipientPayloadSchema(),
+  REIMBURSEMENT_SUBMITTED: reimbursementPayloadSchema(),
+  REIMBURSEMENT_RETURNED: reimbursementPayloadSchema(),
+  REIMBURSEMENT_VERIFIED: reimbursementPayloadSchema(),
+  REIMBURSEMENT_PAPER_RECEIVED: reimbursementPayloadSchema(),
+  REIMBURSEMENT_PAPER_INCOMPLETE: reimbursementPayloadSchema(),
+  REIMBURSEMENT_FINANCE_SUBMITTED: reimbursementPayloadSchema(),
+  REIMBURSEMENT_WITHDRAWN: reimbursementPayloadSchema(),
+  REIMBURSEMENT_STATE_CORRECTED: reimbursementPayloadSchema(),
 } satisfies Record<OutboxEventType, z.ZodType>;
 
 export type OutboxPayloadByType = {
