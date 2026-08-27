@@ -106,6 +106,5 @@ CREATE TABLE `policy_replacement_relations` (
   CONSTRAINT `policy_replacement_relations_old_policy_id_fkey` FOREIGN KEY (`old_policy_id`) REFERENCES `policies` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `policy_replacement_relations_new_policy_id_fkey` FOREIGN KEY (`new_policy_id`) REFERENCES `policies` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `policy_replacement_relations_created_by_person_id_fkey` FOREIGN KEY (`created_by_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `policy_replacement_relations_ended_by_person_id_fkey` FOREIGN KEY (`ended_by_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `policy_replacement_relations_distinct_check` CHECK (`old_policy_id` <> `new_policy_id`)
+  CONSTRAINT `policy_replacement_relations_ended_by_person_id_fkey` FOREIGN KEY (`ended_by_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
