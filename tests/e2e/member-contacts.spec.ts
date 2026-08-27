@@ -13,6 +13,9 @@ test("internal member browses current/alumni, sees phone and separate minister l
   await expect(page.getByRole("heading", { name: "团员" })).toBeVisible();
   await expect(page.getByText("E2E normal", { exact: true })).toBeVisible();
   await expect(page.getByText("部长", { exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder("搜索姓名")).toBeVisible();
+  await page.goto(`/resources/members?kind=current&keyword=${encodeURIComponent(e2eUsers.normal.phone)}`); await expect(page.getByText("E2E normal", { exact: true })).toHaveCount(0);
+  await page.goto(`/resources/members?kind=current&keyword=${encodeURIComponent("E2E normal")}`); await expect(page.getByText("E2E normal", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "往届" }).click(); await expect(page.getByText("E2E admin", { exact: true })).toBeVisible();
   await page.goto(`/resources/members/${e2eUsers.normal.personId}`); await expect(page.getByText(e2eUsers.normal.phone)).toBeVisible();
   await page.goto(`/resources/contacts?organizationId=${enterpriseE2e.organizationId}`); await expect(page.getByText("E2E normal · 挂职专员", { exact: true })).toBeVisible(); await expect(page.getByText(e2eUsers.normal.phone)).toBeVisible(); await expect(page.getByText("E2E admin · 历史任职", { exact: true })).toHaveCount(0);
@@ -37,10 +40,25 @@ test("admin manages membership and Super replaces group leader without changing 
     const created = await fetch("/api/v2/admin/batches", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "E2E 延任批次", year: 2027, startDate: "2027-01-01", endDate: "2027-12-31" }) });
     const batchId = (await created.json()).data.id as string;
     const membership = await fetch(`/api/v2/admin/members/${personId}/memberships`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ batchId, startDate: "2027-01-01", endDate: "2027-12-31", status: "ACTIVE" }) });
-    return { create: created.status, membership: membership.status };
+    return { create: created.status, membership: membership.status, batchId };
   }, e2eUsers.normal.personId);
-  expect(managed).toEqual({ create: 201, membership: 201 });
+  expect(managed.create).toBe(201); expect(managed.membership).toBe(201);
+  await page.goto("/admin/batches");
+  await expect(page.getByRole("button", { name: /切换至/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "任命团长", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "撤销当前团长", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `关闭 E2E 延任批次`, exact: true })).toBeVisible();
+  const forbidden = await page.evaluate(async ({ batchId, personId }) => {
+    const activate = await fetch(`/api/v2/admin/batches/${batchId}/activate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "ACTIVATE", expectedCurrentBatchId: batchId }) });
+    const leader = await fetch(`/api/v2/admin/batches/${batchId}/group-leader`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "ASSIGN", personId, reason: "ADMIN 越权" }) });
+    return [activate.status, leader.status];
+  }, { batchId: enterpriseE2e.batchId, personId: e2eUsers.normal.personId });
+  expect(forbidden).toEqual([403, 403]);
   await page.context().clearCookies(); await login(page, e2eUsers.superAdmin);
+  await page.goto("/admin/batches");
+  await expect(page.getByRole("button", { name: `切换至 E2E 延任批次`, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "任命团长", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "撤销当前团长", exact: true })).toBeVisible();
   const assigned = await page.evaluate(async ({ batchId, personId }) => (await fetch(`/api/v2/admin/batches/${batchId}/group-leader`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "ASSIGN", personId, reason: "E2E Super 任命" }) })).status, { batchId: enterpriseE2e.batchId, personId: e2eUsers.normal.personId });
   expect(assigned).toBe(200); await page.goto("/resources/members");
   await expect(page.getByText("团长", { exact: true })).toBeVisible(); await expect(page.getByText("部长", { exact: true })).toBeVisible();

@@ -6,7 +6,9 @@ import { resolveCapabilities, type PermissionActor } from "@/modules/permissions
 
 const prisma = getPrismaClient();
 const personIds: string[] = []; const batchIds: string[] = []; const organizationIds: string[] = [];
+const unregisteredFoundationEvents = ["CURRENT_BATCH_CHANGED", "GROUP_LEADER_CHANGED", "BATCH_MEMBERSHIP_CHANGED", "MEMBER_CAPABILITY_UPDATED", "APPOINTMENT_CHANGED"];
 let actor: PermissionActor;
+let suiteStartedAt: Date;
 function phone() { return `136${Math.floor(10_000_000 + Math.random() * 89_999_999)}`; }
 async function person(name: string, withAccount = false) {
   const value = await prisma.person.create({ data: { name: `B-M2-001 ${name} ${randomUUID()}`, contactPhone: withAccount ? null : "0514-88888888" } }); personIds.push(value.id);
@@ -16,6 +18,7 @@ async function person(name: string, withAccount = false) {
 async function batch(name: string, current = false) { const value = await prisma.batch.create({ data: { name: `${name}-${randomUUID()}`, year: 2026, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: current ? "ACTIVE" : "PLANNED", isCurrent: current } }); batchIds.push(value.id); return value; }
 
 beforeAll(async () => {
+  suiteStartedAt = new Date();
   const superPerson = await person("super", true); const account = await prisma.account.findUniqueOrThrow({ where: { personId: superPerson.id } });
   await prisma.roleAssignment.create({ data: { personId: superPerson.id, roleCode: "SUPER_ADMIN", effectiveAt: new Date(Date.now() - 60_000), reason: "B-M2-001 tests" } });
   actor = { personId: superPerson.id, accountId: account.id, accountStatus: "NORMAL", permissionVersion: account.permissionVersion, effectiveRoles: ["SUPER_ADMIN"], capabilities: resolveCapabilities(["SUPER_ADMIN"], new Set()), specialPermissions: new Set(), selfPersonId: superPerson.id, townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true, hasGlobalOperational: true, hasSystem: true, currentBatchMember: false, configurationIssues: [] };
@@ -53,10 +56,22 @@ describe("B-M2-001 real MySQL invariants", () => {
 
   it("enforces unique and max-three memberships while extension reuses the same Person", async () => {
     const target = await person("extension"); const service = new BatchService(prisma); const batches = await Promise.all([batch("term1"), batch("term2"), batch("term3"), batch("term4")]);
-    for (const item of batches.slice(0, 3)) await service.addMembership({ actor, personId: target.id, membership: { batchId: item.id, startDate: new Date("2026-01-01"), status: "ACTIVE" } });
-    await expect(service.addMembership({ actor, personId: target.id, membership: { batchId: batches[0].id, startDate: new Date("2026-01-01"), status: "ACTIVE" } })).rejects.toMatchObject({ code: "MEMBERSHIP_LIMIT_EXCEEDED" });
+    await service.addMembership({ actor, personId: target.id, membership: { batchId: batches[0].id, startDate: new Date("2026-01-01"), status: "ACTIVE" } });
+    await expect(service.addMembership({ actor, personId: target.id, membership: { batchId: batches[0].id, startDate: new Date("2026-01-01"), status: "ACTIVE" } })).rejects.toMatchObject({ code: "MEMBERSHIP_DUPLICATE" });
+    for (const item of batches.slice(1, 3)) await service.addMembership({ actor, personId: target.id, membership: { batchId: item.id, startDate: new Date("2026-01-01"), status: "ACTIVE" } });
     await expect(service.addMembership({ actor, personId: target.id, membership: { batchId: batches[3].id, startDate: new Date("2026-01-01"), status: "ACTIVE" } })).rejects.toMatchObject({ code: "MEMBERSHIP_LIMIT_EXCEEDED" });
     expect(await prisma.person.count({ where: { id: target.id } })).toBe(1); expect(await prisma.batchMembership.count({ where: { personId: target.id } })).toBe(3);
+  });
+
+  it("validates partial membership dates against the stored counterpart", async () => {
+    const target = await person("partial-dates"); const targetBatch = await batch("partial-dates"); const service = new BatchService(prisma);
+    const created = await service.addMembership({ actor, personId: target.id, membership: { batchId: targetBatch.id, startDate: new Date("2026-06-01"), endDate: new Date("2026-06-30"), status: "ACTIVE" } });
+    await expect(service.updateMembership({ actor, membershipId: created.id, changes: { endDate: new Date("2026-05-01") } })).rejects.toMatchObject({ code: "MEMBERSHIP_DATE_INVALID", status: 422 });
+    await expect(service.updateMembership({ actor, membershipId: created.id, changes: { startDate: new Date("2026-07-01") } })).rejects.toMatchObject({ code: "MEMBERSHIP_DATE_INVALID", status: 422 });
+    const legal = await service.updateMembership({ actor, membershipId: created.id, changes: { endDate: new Date("2026-06-15") } });
+    expect(legal.endDate).toEqual(new Date("2026-06-15"));
+    const openEnded = await service.updateMembership({ actor, membershipId: created.id, changes: { endDate: null } });
+    expect(openEnded.endDate).toBeNull();
   });
 
   it("allows only a current member as leader and preserves revoke history with permission invalidation", async () => {
@@ -88,5 +103,16 @@ describe("B-M2-001 real MySQL invariants", () => {
     await prisma.roleAssignment.create({ data: { personId: visible.id, roleCode: "MEMBER_CURRENT", effectiveAt: new Date("2026-01-01"), grantedByPersonId: actor.personId, reason: "directory test" } });
     const result = await new MemberService(prisma).list({ actor, query: { kind: "current", page: 1, pageSize: 100 } });
     expect(result.items.filter(({ id }) => id === visible.id)).toHaveLength(1);
+    const phoneResult = await new MemberService(prisma).list({ actor, query: { kind: "current", keyword: "0514-88888888", page: 1, pageSize: 100 } });
+    expect(phoneResult.items.some(({ id }) => id === visible.id)).toBe(false);
+    const nameResult = await new MemberService(prisma).list({ actor, query: { kind: "current", keyword: visible.name, page: 1, pageSize: 100 } });
+    expect(nameResult.items.map(({ id }) => id)).toContain(visible.id);
+  });
+
+  it("does not enqueue unregistered member foundation events", async () => {
+    const organization = await prisma.organization.create({ data: { name: `outbox-${randomUUID()}`, type: "DEPARTMENT" } }); organizationIds.push(organization.id);
+    await new MemberService(prisma).updateCapabilityProfile({ actor, personId: actor.personId, profile: { professionalDirection: "复核", industryIds: [], preferredDemandTypes: [] } });
+    await new OrganizationService(prisma).createAppointment({ actor, appointment: { personId: actor.personId, organizationId: organization.id, positionTitle: "复核员", effectiveAt: new Date("2026-01-01"), isPrimary: false } });
+    expect(await prisma.outboxEvent.count({ where: { eventType: { in: unregisteredFoundationEvents }, occurredAt: { gte: suiteStartedAt } } })).toBe(0);
   });
 });

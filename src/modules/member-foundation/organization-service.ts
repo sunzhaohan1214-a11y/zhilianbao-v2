@@ -2,7 +2,7 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import { bumpPermissionVersions } from "@/modules/permissions/permission-invalidation";
 import type { PermissionActor } from "@/modules/permissions/types";
-import { enqueueFoundationEvent, writeFoundationAudit, type MutationContext } from "./audit";
+import { writeFoundationAudit, type MutationContext } from "./audit";
 import { FoundationError } from "./errors";
 import { appointmentCreateSchema, departmentAreaRelationSchema, endRecordSchema, organizationCreateSchema } from "./schemas";
 
@@ -83,7 +83,6 @@ export class OrganizationService {
       const appointment = await tx.appointment.create({ data: { ...value, expiredAt: value.expiredAt ?? null } });
       await bumpPermissionVersions([value.personId], tx);
       await writeFoundationAudit(tx, { ...input, actionCode: "APPOINTMENT_CREATED", entityType: "APPOINTMENT", entityId: appointment.id, after: { personId: value.personId, organizationId: value.organizationId, positionTitle: value.positionTitle } });
-      await enqueueFoundationEvent(tx, { eventType: "APPOINTMENT_CHANGED", aggregateType: "PERSON", aggregateId: value.personId, payload: { appointmentId: appointment.id } });
       return appointment;
     });
   }

@@ -19,7 +19,11 @@ export function classifyMember(input: {
     && isEffectiveWindow(membership.startDate, membership.endDate, input.now));
   if (currentMembership && activeRole("MEMBER_CURRENT")) return "current";
   const historicalMembership = input.memberships.some((membership) =>
-    membership.batchId !== input.currentBatchId || membership.status !== "ACTIVE" || membership.endDate !== null && membership.endDate <= input.now);
+    membership.startDate <= input.now && (
+      membership.batchId !== input.currentBatchId
+      || membership.status !== "ACTIVE"
+      || membership.endDate !== null && membership.endDate <= input.now
+    ));
   if ((input.hasAccount && activeRole("MEMBER_ALUMNI_PLATFORM")) || historicalMembership) return "alumni";
   return null;
 }

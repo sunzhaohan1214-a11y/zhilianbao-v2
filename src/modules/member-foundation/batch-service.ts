@@ -3,7 +3,7 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import { bumpPermissionVersions } from "@/modules/permissions/permission-invalidation";
 import type { PermissionActor } from "@/modules/permissions/types";
-import { enqueueFoundationEvent, writeFoundationAudit, writeFoundationTransition, type MutationContext } from "./audit";
+import { writeFoundationAudit, writeFoundationTransition, type MutationContext } from "./audit";
 import { FoundationError } from "./errors";
 import { batchActivationSchema, batchCloseSchema, batchCreateSchema, groupLeaderSchema, membershipSchema, membershipUpdateSchema } from "./schemas";
 
@@ -107,7 +107,6 @@ export class BatchService {
       if (currentCount !== 1 || activeCurrentCount !== 1) throw new FoundationError("BATCH_STATE_CONFLICT", "批次切换未能保持唯一有效当前批次");
       await writeFoundationTransition(tx, { ...input, entityType: "BATCH", entityId: target.id, fromState: target.status, toState: "ACTIVE_CURRENT", actionCode: "BATCH_ACTIVATED", metadata: { previousCurrentBatchId: currentId } });
       await writeFoundationAudit(tx, { ...input, actionCode: "BATCH_ACTIVATED", entityType: "BATCH", entityId: target.id, before: { currentBatchId: currentId }, after: { currentBatchId: target.id } });
-      await enqueueFoundationEvent(tx, { eventType: "CURRENT_BATCH_CHANGED", aggregateType: "BATCH", aggregateId: target.id, payload: { previousCurrentBatchId: currentId, currentBatchId: target.id } });
       return updated;
     });
   }
@@ -157,7 +156,6 @@ export class BatchService {
       await bumpPermissionVersions([...previousIds, ...(assignedPersonId ? [assignedPersonId] : [])], tx);
       await writeFoundationTransition(tx, { ...input, entityType: "GROUP_LEADER_ASSIGNMENT", entityId: batch.id, fromState: previousIds[0] ?? "NONE", toState: assignedPersonId ?? "NONE", actionCode: command.action === "ASSIGN" ? "GROUP_LEADER_ASSIGNED" : "GROUP_LEADER_REVOKED", reason: command.reason });
       await writeFoundationAudit(tx, { ...input, actionCode: command.action === "ASSIGN" ? "GROUP_LEADER_ASSIGNED" : "GROUP_LEADER_REVOKED", entityType: "BATCH", entityId: batch.id, reason: command.reason, before: { personIds: previousIds }, after: { personId: assignedPersonId } });
-      await enqueueFoundationEvent(tx, { eventType: "GROUP_LEADER_CHANGED", aggregateType: "BATCH", aggregateId: batch.id, payload: { personId: assignedPersonId } });
       return { batchId: batch.id, personId: assignedPersonId };
     });
   }
@@ -182,7 +180,6 @@ export class BatchService {
         } });
         await bumpPermissionVersions([input.personId], tx);
         await writeFoundationAudit(tx, { ...input, actionCode: "BATCH_MEMBERSHIP_CREATED", entityType: "BATCH_MEMBERSHIP", entityId: membership.id, after: { personId: input.personId, batchId: value.batchId, status: value.status } });
-        await enqueueFoundationEvent(tx, { eventType: "BATCH_MEMBERSHIP_CHANGED", aggregateType: "PERSON", aggregateId: input.personId, payload: { membershipId: membership.id } });
         return membership;
       });
     } catch (error) {
@@ -200,6 +197,11 @@ export class BatchService {
       if (!rows.length) throw new FoundationError("MEMBER_NOT_FOUND", "批次成员关系不存在");
       const existing = await tx.batchMembership.findUniqueOrThrow({ where: { id: input.membershipId }, include: { batch: true } });
       if (existing.batch.status === "CLOSED" && !input.actor.hasSystem) throw new FoundationError("BATCH_STATE_CONFLICT", "已关闭批次仅超级管理员可维护");
+      const candidateStartDate = changes.startDate ?? existing.startDate;
+      const candidateEndDate = changes.endDate === undefined ? existing.endDate : changes.endDate;
+      if (candidateEndDate !== null && candidateEndDate < candidateStartDate) {
+        throw new FoundationError("MEMBERSHIP_DATE_INVALID", "批次成员关系结束日期不能早于开始日期");
+      }
       await this.validateOrganizations(tx, changes.dispatchOrganizationId, changes.postOrganizationId);
       const updated = await tx.batchMembership.update({ where: { id: existing.id }, data: {
         ...changes,

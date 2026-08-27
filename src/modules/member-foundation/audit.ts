@@ -26,12 +26,3 @@ export async function writeFoundationTransition(tx: Prisma.TransactionClient, in
     reason: input.reason, metadataJson: input.metadata, requestId: input.context?.requestId?.slice(0, 100),
   } });
 }
-
-export async function enqueueFoundationEvent(tx: Prisma.TransactionClient, input: {
-  eventType: string; aggregateType: string; aggregateId: string; payload: Prisma.InputJsonObject;
-}) {
-  await tx.outboxEvent.create({ data: {
-    eventType: input.eventType, aggregateType: input.aggregateType, aggregateId: input.aggregateId,
-    payloadJson: input.payload,
-  } });
-}

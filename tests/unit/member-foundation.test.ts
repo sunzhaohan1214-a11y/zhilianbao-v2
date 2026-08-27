@@ -7,10 +7,15 @@ const effectiveRole = (roleCode: string) => ({ roleCode, effectiveAt: new Date("
 const membership = (batchId: string, status = "ACTIVE") => ({ batchId, status, startDate: new Date("2026-01-01"), endDate: null });
 
 describe("B-M2-001 member rules", () => {
-  it("classifies current first and supports accountless historical alumni without duplicates", () => {
+  it("classifies only already-started memberships and keeps current precedence", () => {
+    const future = { ...membership("future"), startDate: new Date("2027-01-01") };
+    const past = { ...membership("old", "COMPLETED"), endDate: new Date("2025-12-31") };
+    expect(classifyMember({ memberships: [future], roles: [], currentBatchId: "current", hasAccount: false, now })).toBeNull();
+    expect(classifyMember({ memberships: [past], roles: [], currentBatchId: "current", hasAccount: true, now })).toBe("alumni");
     expect(classifyMember({ memberships: [membership("current")], roles: [effectiveRole("MEMBER_CURRENT"), effectiveRole("MEMBER_ALUMNI_PLATFORM")], currentBatchId: "current", hasAccount: true, now })).toBe("current");
-    expect(classifyMember({ memberships: [{ ...membership("old", "COMPLETED"), endDate: new Date("2025-12-31") }], roles: [], currentBatchId: "current", hasAccount: false, now })).toBe("alumni");
-    expect(classifyMember({ memberships: [], roles: [effectiveRole("MEMBER_ALUMNI_PLATFORM")], currentBatchId: "current", hasAccount: false, now })).toBeNull();
+    expect(classifyMember({ memberships: [membership("current"), past], roles: [effectiveRole("MEMBER_CURRENT")], currentBatchId: "current", hasAccount: true, now })).toBe("current");
+    expect(classifyMember({ memberships: [], roles: [effectiveRole("MEMBER_ALUMNI_PLATFORM")], currentBatchId: "current", hasAccount: true, now })).toBe("alumni");
+    expect(classifyMember({ memberships: [past], roles: [], currentBatchId: "current", hasAccount: false, now })).toBe("alumni");
   });
 
   it("whitelists only capability fields and normalized relations", () => {

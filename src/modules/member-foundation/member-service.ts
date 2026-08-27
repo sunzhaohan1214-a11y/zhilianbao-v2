@@ -2,7 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
-import { enqueueFoundationEvent, writeFoundationAudit, type MutationContext } from "./audit";
+import { writeFoundationAudit, type MutationContext } from "./audit";
 import { FoundationError } from "./errors";
 import { classifyMember, roleLabel } from "./rules";
 import { capabilityProfileSchema } from "./schemas";
@@ -93,11 +93,7 @@ export class MemberService {
       this.prisma.person.findMany({
         where: {
           personStatus: "ACTIVE",
-          ...(input.query.keyword ? { OR: [
-            { name: { contains: input.query.keyword } },
-            { account: { phone: { contains: input.query.keyword } } },
-            { contactPhone: { contains: input.query.keyword } },
-          ] } : {}),
+          ...(input.query.keyword ? { name: { contains: input.query.keyword } } : {}),
           OR: [{ batchMemberships: { some: {} } }, { roleAssignments: { some: { roleCode: { in: ["MEMBER_CURRENT", "MEMBER_ALUMNI_PLATFORM"] } } } }],
         },
         include: memberInclude,
@@ -155,7 +151,6 @@ export class MemberService {
       if (demandTypes.length) await tx.memberPreferredDemandType.createMany({ data: demandTypes.map((demandType) => ({ personId: input.personId, demandType })) });
       const after = { ...profile, industryIds, preferredDemandTypes: demandTypes } satisfies Prisma.InputJsonObject;
       await writeFoundationAudit(tx, { ...input, actionCode: "MEMBER_CAPABILITY_UPDATED", entityType: "MEMBER_CAPABILITY_PROFILE", entityId: input.personId, before: before ? { id: before.id } : undefined, after });
-      await enqueueFoundationEvent(tx, { eventType: "MEMBER_CAPABILITY_UPDATED", aggregateType: "PERSON", aggregateId: input.personId, payload: { personId: input.personId } });
       return after;
     });
   }
