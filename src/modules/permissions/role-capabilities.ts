@@ -139,6 +139,7 @@ export const ADMIN_CAPABILITIES = [
   "enterprise.edit_formal",
   "enterprise.disable",
   "enterprise.merge",
+  "enterprise.contact.manage",
   "enterprise.map.manage",
   "member.manage",
   "member.batch.manage",

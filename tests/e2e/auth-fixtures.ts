@@ -9,6 +9,16 @@ export const e2eUsers = {
   minister: { personId: "10000000-0000-4000-8000-000000000005", accountId: "20000000-0000-4000-8000-000000000005", phone: "13800001005", password: "Minister-pass-123" },
   groupLeader: { personId: "10000000-0000-4000-8000-000000000006", accountId: "20000000-0000-4000-8000-000000000006", phone: "13800001006", password: "Leader-pass-123" },
   superAdmin: { personId: "10000000-0000-4000-8000-000000000007", accountId: "20000000-0000-4000-8000-000000000007", phone: "13800001007", password: "Super-pass-123" },
+  township: { personId: "10000000-0000-4000-8000-000000000008", accountId: "20000000-0000-4000-8000-000000000008", phone: "13800001008", password: "Township-pass-123" },
+} as const;
+
+export const enterpriseE2e = {
+  areaAId: "30000000-0000-4000-8000-000000000001",
+  areaBId: "30000000-0000-4000-8000-000000000002",
+  organizationId: "40000000-0000-4000-8000-000000000001",
+  batchId: "50000000-0000-4000-8000-000000000001",
+  enterpriseId: "60000000-0000-4000-8000-000000000001",
+  contactId: "70000000-0000-4000-8000-000000000001",
 } as const;
 
 export async function seedAuthFixtures() {
@@ -16,6 +26,14 @@ export async function seedAuthFixtures() {
   if (!/test/i.test(databaseUrl)) throw new Error("E2E auth fixtures require an explicitly named test database");
   const prisma = getPrismaClient();
   const users = Object.values(e2eUsers);
+  const enterpriseWhere = { createdByPersonId: { in: users.map(({ personId }) => personId) } };
+  await prisma.enterprise.updateMany({ where: enterpriseWhere, data: { status: "NORMAL", mergedIntoId: null, primaryContactId: null } });
+  await prisma.enterpriseChangeRequest.deleteMany({ where: { OR: [{ submitterPersonId: { in: users.map(({ personId }) => personId) } }, { reviewerPersonId: { in: users.map(({ personId }) => personId) } }] } });
+  await prisma.enterpriseVersion.deleteMany({ where: { enterprise: enterpriseWhere } });
+  await prisma.enterpriseTagRelation.deleteMany({ where: { enterprise: enterpriseWhere } });
+  await prisma.enterpriseContact.deleteMany({ where: { enterprise: enterpriseWhere } });
+  await prisma.enterprise.deleteMany({ where: enterpriseWhere });
+  await prisma.stateTransitionHistory.deleteMany({ where: { actorPersonId: { in: users.map(({ personId }) => personId) } } });
   await prisma.auditLog.deleteMany({ where: { actorAccountId: { in: users.map(({ accountId }) => accountId) } } });
   await prisma.session.deleteMany({ where: { accountId: { in: users.map(({ accountId }) => accountId) } } });
   await prisma.authRateLimitBucket.deleteMany();
@@ -59,6 +77,8 @@ export async function seedAuthFixtures() {
       { personId: e2eUsers.minister.personId, roleCode: "MINISTER" as const },
       { personId: e2eUsers.groupLeader.personId, roleCode: "GROUP_LEADER" as const },
       { personId: e2eUsers.superAdmin.personId, roleCode: "SUPER_ADMIN" as const },
+      { personId: e2eUsers.normal.personId, roleCode: "MEMBER_CURRENT" as const },
+      { personId: e2eUsers.township.personId, roleCode: "TOWNSHIP_STAFF" as const },
     ].map(({ personId, roleCode }) => ({
       personId,
       roleCode,
@@ -67,4 +87,27 @@ export async function seedAuthFixtures() {
       reason: "M0-004 unified permission E2E fixture",
     })),
   });
+
+  await prisma.batch.upsert({
+    where: { id: enterpriseE2e.batchId },
+    create: { id: enterpriseE2e.batchId, name: "E2E current batch", year: 2026, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: "ACTIVE", isCurrent: true },
+    update: { status: "ACTIVE", isCurrent: true },
+  });
+  await prisma.batchMembership.upsert({
+    where: { personId_batchId: { personId: e2eUsers.normal.personId, batchId: enterpriseE2e.batchId } },
+    create: { personId: e2eUsers.normal.personId, batchId: enterpriseE2e.batchId, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: "ACTIVE" },
+    update: { status: "ACTIVE", startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01") },
+  });
+  for (const [id, name] of [[enterpriseE2e.areaAId, "安宜镇"], [enterpriseE2e.areaBId, "射阳湖镇"]] as const) {
+    await prisma.administrativeArea.upsert({ where: { id }, create: { id, name, type: "TOWNSHIP" }, update: { name, status: "ACTIVE" } });
+  }
+  await prisma.organization.upsert({ where: { id: enterpriseE2e.organizationId }, create: { id: enterpriseE2e.organizationId, name: "E2E 安宜镇", type: "TOWNSHIP_ORG" }, update: { status: "ACTIVE" } });
+  const mapping = await prisma.organizationAreaMapping.findFirst({ where: { organizationId: enterpriseE2e.organizationId, areaId: enterpriseE2e.areaAId, expiredAt: null } });
+  if (!mapping) await prisma.organizationAreaMapping.create({ data: { organizationId: enterpriseE2e.organizationId, areaId: enterpriseE2e.areaAId, effectiveAt: new Date("2026-01-01") } });
+  const appointment = await prisma.appointment.findFirst({ where: { personId: e2eUsers.township.personId, organizationId: enterpriseE2e.organizationId, expiredAt: null } });
+  if (!appointment) await prisma.appointment.create({ data: { personId: e2eUsers.township.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "企业服务专员", effectiveAt: new Date("2026-01-01") } });
+  await prisma.enterprise.create({ data: { id: enterpriseE2e.enterpriseId, name: "宝应智造示范企业", responsibleAreaId: enterpriseE2e.areaAId, address: "宝应县安宜镇测试大道1号", creditCode: "91321023E2ETEST001", mainProducts: "智能装备、工业软件与技术服务", introduction: "用于 M1-001 关键链路验收。", createdByPersonId: e2eUsers.admin.personId } });
+  await prisma.enterpriseContact.create({ data: { id: enterpriseE2e.contactId, enterpriseId: enterpriseE2e.enterpriseId, name: "王经理", positionTitle: "企业联系人", phone: "13800003001", isPrimary: true, createdByPersonId: e2eUsers.admin.personId } });
+  await prisma.enterprise.update({ where: { id: enterpriseE2e.enterpriseId }, data: { primaryContactId: enterpriseE2e.contactId } });
+  await prisma.enterpriseVersion.create({ data: { enterpriseId: enterpriseE2e.enterpriseId, versionNo: 1, snapshotJson: { name: "宝应智造示范企业", currentVersion: 1 }, changeType: "CREATE", changedByPersonId: e2eUsers.admin.personId } });
 }

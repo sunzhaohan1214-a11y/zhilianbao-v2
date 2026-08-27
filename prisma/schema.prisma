@@ -102,27 +102,73 @@ enum AttachmentAccessAction {
   DOWNLOAD
 }
 
+enum EnterpriseStatus {
+  NORMAL
+  DISABLED
+  MERGED
+}
+
+enum EnterpriseGeocodeStatus {
+  UNRESOLVED
+  RESOLVED
+  MANUAL
+  FAILED
+}
+
+enum EnterpriseContactStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum EnterpriseChangeRequestType {
+  CREATE
+  CORRECTION
+}
+
+enum EnterpriseChangeRequestStatus {
+  PENDING_REVIEW
+  APPROVED
+  RETURNED
+  CLOSED
+}
+
+enum EnterpriseVersionChangeType {
+  CREATE
+  FORMAL_CORRECTION
+  CHANGE_REQUEST_APPROVED
+  DISABLE
+  RESTORE
+  MERGE
+  COORDINATE
+}
+
 model Person {
-  id                            String                   @id @default(uuid()) @db.Char(36)
-  name                          String                   @db.VarChar(80)
-  personStatus                  PersonStatus             @default(ACTIVE) @map("person_status")
-  createdAt                     DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                     DateTime                 @updatedAt @map("updated_at") @db.DateTime(3)
+  id                            String                    @id @default(uuid()) @db.Char(36)
+  name                          String                    @db.VarChar(80)
+  personStatus                  PersonStatus              @default(ACTIVE) @map("person_status")
+  createdAt                     DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
   account                       Account?
-  phoneChanges                  AccountPhoneHistory[]    @relation("PhoneChangeAccount")
+  phoneChanges                  AccountPhoneHistory[]     @relation("PhoneChangeAccount")
   appointments                  Appointment[]
-  roleAssignments               RoleAssignment[]         @relation("RoleAssignmentPerson")
-  grantedRoleAssignments        RoleAssignment[]         @relation("RoleAssignmentGrantor")
-  specialPermissionGrants       SpecialPermissionGrant[] @relation("PermissionGrantPerson")
-  grantedSpecialPermissions     SpecialPermissionGrant[] @relation("PermissionGrantGrantor")
+  roleAssignments               RoleAssignment[]          @relation("RoleAssignmentPerson")
+  grantedRoleAssignments        RoleAssignment[]          @relation("RoleAssignmentGrantor")
+  specialPermissionGrants       SpecialPermissionGrant[]  @relation("PermissionGrantPerson")
+  grantedSpecialPermissions     SpecialPermissionGrant[]  @relation("PermissionGrantGrantor")
   batchMemberships              BatchMembership[]
-  groupLeaderAssignments        GroupLeaderAssignment[]  @relation("GroupLeaderPerson")
-  grantedGroupLeaderAssignments GroupLeaderAssignment[]  @relation("GroupLeaderGrantor")
+  groupLeaderAssignments        GroupLeaderAssignment[]   @relation("GroupLeaderPerson")
+  grantedGroupLeaderAssignments GroupLeaderAssignment[]   @relation("GroupLeaderGrantor")
   auditLogs                     AuditLog[]
   stateTransitions              StateTransitionHistory[]
-  uploadedAttachments           Attachment[]             @relation("AttachmentUploader")
+  uploadedAttachments           Attachment[]              @relation("AttachmentUploader")
   createdAttachmentLinks        AttachmentLink[]          @relation("AttachmentLinkCreator")
   attachmentAccessLogs          AttachmentAccessLog[]     @relation("AttachmentAccessPerson")
+  createdEnterprises            Enterprise[]              @relation("EnterpriseCreator")
+  coordinatedEnterprises        Enterprise[]              @relation("EnterpriseCoordinateUpdater")
+  createdEnterpriseContacts     EnterpriseContact[]
+  submittedEnterpriseRequests   EnterpriseChangeRequest[] @relation("EnterpriseRequestSubmitter")
+  reviewedEnterpriseRequests    EnterpriseChangeRequest[] @relation("EnterpriseRequestReviewer")
+  enterpriseVersions            EnterpriseVersion[]
 
   @@index([personStatus])
   @@map("persons")
@@ -228,18 +274,20 @@ model Organization {
 }
 
 model AdministrativeArea {
-  id                   String                       @id @default(uuid()) @db.Char(36)
-  name                 String                       @db.VarChar(200)
-  type                 AdministrativeAreaType
-  parentId             String?                      @map("parent_id") @db.Char(36)
-  status               RecordStatus                 @default(ACTIVE)
-  sortOrder            Int                          @default(0) @map("sort_order")
-  createdAt            DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt            DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
-  parent               AdministrativeArea?          @relation("AdministrativeAreaHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
-  children             AdministrativeArea[]         @relation("AdministrativeAreaHierarchy")
-  organizationMappings OrganizationAreaMapping[]
-  departmentRelations  DepartmentTownshipRelation[]
+  id                         String                       @id @default(uuid()) @db.Char(36)
+  name                       String                       @db.VarChar(200)
+  type                       AdministrativeAreaType
+  parentId                   String?                      @map("parent_id") @db.Char(36)
+  status                     RecordStatus                 @default(ACTIVE)
+  sortOrder                  Int                          @default(0) @map("sort_order")
+  createdAt                  DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                  DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  parent                     AdministrativeArea?          @relation("AdministrativeAreaHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children                   AdministrativeArea[]         @relation("AdministrativeAreaHierarchy")
+  organizationMappings       OrganizationAreaMapping[]
+  departmentRelations        DepartmentTownshipRelation[]
+  enterprises                Enterprise[]
+  proposedEnterpriseRequests EnterpriseChangeRequest[]
 
   @@index([parentId])
   @@index([type, status, sortOrder])
@@ -557,4 +605,135 @@ model AttachmentAccessLog {
   @@index([personId, createdAt])
   @@index([requestId])
   @@map("attachment_access_logs")
+}
+
+model Enterprise {
+  id                     String                    @id @default(uuid()) @db.Char(36)
+  name                   String                    @db.VarChar(200)
+  responsibleAreaId      String                    @map("responsible_area_id") @db.Char(36)
+  address                String                    @db.VarChar(500)
+  creditCode             String?                   @unique @map("credit_code") @db.VarChar(32)
+  legalRepresentative    String?                   @map("legal_representative") @db.VarChar(80)
+  introduction           String?                   @db.Text
+  mainProducts           String                    @map("main_products") @db.Text
+  qualificationsHonors   String?                   @map("qualifications_honors") @db.Text
+  latitude               Decimal?                  @db.Decimal(10, 7)
+  longitude              Decimal?                  @db.Decimal(11, 7)
+  geocodeStatus          EnterpriseGeocodeStatus   @default(UNRESOLVED) @map("geocode_status")
+  geocodeProvider        String?                   @map("geocode_provider") @db.VarChar(64)
+  geocodedAt             DateTime?                 @map("geocoded_at") @db.DateTime(3)
+  coordinateUpdatedById  String?                   @map("coordinate_updated_by_id") @db.Char(36)
+  status                 EnterpriseStatus          @default(NORMAL)
+  mergedIntoId           String?                   @map("merged_into_id") @db.Char(36)
+  primaryContactId       String?                   @unique @map("primary_contact_id") @db.Char(36)
+  currentVersion         Int                       @default(1) @map("current_version") @db.UnsignedInt
+  createdByPersonId      String?                   @map("created_by_person_id") @db.Char(36)
+  createdAt              DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  responsibleArea        AdministrativeArea        @relation(fields: [responsibleAreaId], references: [id], onDelete: Restrict)
+  mergedInto             Enterprise?               @relation("EnterpriseMergeTarget", fields: [mergedIntoId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  mergedSources          Enterprise[]              @relation("EnterpriseMergeTarget")
+  primaryContact         EnterpriseContact?        @relation("EnterprisePrimaryContact", fields: [primaryContactId], references: [id], onDelete: Restrict)
+  contacts               EnterpriseContact[]       @relation("EnterpriseContacts")
+  versions               EnterpriseVersion[]
+  tagRelations           EnterpriseTagRelation[]
+  targetChangeRequests   EnterpriseChangeRequest[] @relation("EnterpriseRequestTarget")
+  approvedChangeRequests EnterpriseChangeRequest[] @relation("EnterpriseRequestApproved")
+  createdByPerson        Person?                   @relation("EnterpriseCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  coordinateUpdatedBy    Person?                   @relation("EnterpriseCoordinateUpdater", fields: [coordinateUpdatedById], references: [id], onDelete: Restrict)
+
+  @@index([status, responsibleAreaId])
+  @@index([name])
+  @@index([mergedIntoId])
+  @@map("enterprises")
+}
+
+model EnterpriseTag {
+  id             String                  @id @default(uuid()) @db.Char(36)
+  name           String                  @db.VarChar(100)
+  normalizedName String                  @unique @map("normalized_name") @db.VarChar(100)
+  status         RecordStatus            @default(ACTIVE)
+  createdAt      DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  relations      EnterpriseTagRelation[]
+
+  @@index([status, name])
+  @@map("enterprise_tags")
+}
+
+model EnterpriseTagRelation {
+  enterpriseId String        @map("enterprise_id") @db.Char(36)
+  tagId        String        @map("tag_id") @db.Char(36)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  enterprise   Enterprise    @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  tag          EnterpriseTag @relation(fields: [tagId], references: [id], onDelete: Restrict)
+
+  @@id([enterpriseId, tagId])
+  @@index([tagId, enterpriseId])
+  @@map("enterprise_tag_relations")
+}
+
+model EnterpriseContact {
+  id                String                  @id @default(uuid()) @db.Char(36)
+  enterpriseId      String                  @map("enterprise_id") @db.Char(36)
+  name              String                  @db.VarChar(80)
+  positionTitle     String?                 @map("position_title") @db.VarChar(100)
+  phone             String                  @db.VarChar(30)
+  isPrimary         Boolean                 @default(false) @map("is_primary")
+  status            EnterpriseContactStatus @default(ACTIVE)
+  createdByPersonId String                  @map("created_by_person_id") @db.Char(36)
+  inactiveReason    String?                 @map("inactive_reason") @db.VarChar(500)
+  createdAt         DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
+  enterprise        Enterprise              @relation("EnterpriseContacts", fields: [enterpriseId], references: [id], onDelete: Restrict)
+  primaryFor        Enterprise?             @relation("EnterprisePrimaryContact")
+  createdByPerson   Person                  @relation(fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([enterpriseId, status])
+  @@index([phone])
+  @@map("enterprise_contacts")
+}
+
+model EnterpriseChangeRequest {
+  id                    String                        @id @default(uuid()) @db.Char(36)
+  requestType           EnterpriseChangeRequestType   @map("request_type")
+  proposedAreaId        String?                       @map("proposed_area_id") @db.Char(36)
+  targetEnterpriseId    String?                       @map("target_enterprise_id") @db.Char(36)
+  payloadSnapshot       Json                          @map("payload_snapshot")
+  baseEnterpriseVersion Int?                          @map("base_enterprise_version") @db.UnsignedInt
+  submitterPersonId     String                        @map("submitter_person_id") @db.Char(36)
+  status                EnterpriseChangeRequestStatus @default(PENDING_REVIEW)
+  reviewerPersonId      String?                       @map("reviewer_person_id") @db.Char(36)
+  reviewReason          String?                       @map("review_reason") @db.VarChar(500)
+  approvedEnterpriseId  String?                       @map("approved_enterprise_id") @db.Char(36)
+  submittedAt           DateTime                      @default(now()) @map("submitted_at") @db.DateTime(3)
+  reviewedAt            DateTime?                     @map("reviewed_at") @db.DateTime(3)
+  createdAt             DateTime                      @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime                      @updatedAt @map("updated_at") @db.DateTime(3)
+  proposedArea          AdministrativeArea?           @relation(fields: [proposedAreaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  targetEnterprise      Enterprise?                   @relation("EnterpriseRequestTarget", fields: [targetEnterpriseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedEnterprise    Enterprise?                   @relation("EnterpriseRequestApproved", fields: [approvedEnterpriseId], references: [id], onDelete: Restrict)
+  submitterPerson       Person                        @relation("EnterpriseRequestSubmitter", fields: [submitterPersonId], references: [id], onDelete: Restrict)
+  reviewerPerson        Person?                       @relation("EnterpriseRequestReviewer", fields: [reviewerPersonId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([submitterPersonId, status])
+  @@index([targetEnterpriseId])
+  @@map("enterprise_change_requests")
+}
+
+model EnterpriseVersion {
+  id                String                      @id @default(uuid()) @db.Char(36)
+  enterpriseId      String                      @map("enterprise_id") @db.Char(36)
+  versionNo         Int                         @map("version_no") @db.UnsignedInt
+  snapshotJson      Json                        @map("snapshot_json")
+  changeType        EnterpriseVersionChangeType @map("change_type")
+  reason            String?                     @db.VarChar(500)
+  changedByPersonId String                      @map("changed_by_person_id") @db.Char(36)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  enterprise        Enterprise                  @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  changedByPerson   Person                      @relation(fields: [changedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([enterpriseId, versionNo])
+  @@index([changedByPersonId, createdAt])
+  @@map("enterprise_versions")
 }
