@@ -19,12 +19,13 @@ describe("C-M3-003 announcement and notification foundation", () => {
     })).toThrow();
   });
 
-  it("declares strict schemas for every emitted event and keeps future contracts out of runtime", () => {
+  it("declares strict schemas for every emitted event, including the Trip model now on main", () => {
     expect(OUTBOX_EVENT_TYPES).toEqual(expect.arrayContaining([
       "ANNOUNCEMENT_PUBLISHED", "ANNOUNCEMENT_UPDATED", "ANNOUNCEMENT_AUDIENCE_ADDED",
       "ANNOUNCEMENT_AUDIENCE_REMOVED", "ANNOUNCEMENT_WITHDRAWN", "HELP_REASSIGNED",
+      "TRIP_PARTICIPANT_ADDED", "TRIP_UPDATED", "TRIP_RESULT_DUE_SCHEDULED",
+      "TRIP_CANCELED", "TRIP_RESULT_SUBMITTED",
     ]));
-    expect(OUTBOX_EVENT_TYPES).not.toContain("TRIP_PARTICIPANT_ADDED");
     expect(outboxPayloadSchemas.ANNOUNCEMENT_PUBLISHED.safeParse({
       announcementId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       versionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -32,6 +33,11 @@ describe("C-M3-003 announcement and notification foundation", () => {
       needConfirm: true,
       eventKey: "v1",
     }).data?.recipientIds).toEqual(["cccccccc-cccc-4ccc-8ccc-cccccccccccc"]);
+    expect(outboxPayloadSchemas.TRIP_RESULT_DUE_SCHEDULED.safeParse({
+      tripId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      dueAt: "2026-08-30T15:59:59.999Z",
+      eventKey: "2026-08-30T15:59:59.999Z",
+    }).success).toBe(true);
   });
 
   it("keeps announcement, self-message and self-todo capabilities on all internal actors", () => {

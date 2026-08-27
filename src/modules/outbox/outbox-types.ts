@@ -18,6 +18,11 @@ export const OUTBOX_EVENT_TYPES = [
   "HELP_REOPENED",
   "HELP_REASSIGNED",
   "HELP_WITHDRAWN",
+  "TRIP_PARTICIPANT_ADDED",
+  "TRIP_UPDATED",
+  "TRIP_RESULT_DUE_SCHEDULED",
+  "TRIP_CANCELED",
+  "TRIP_RESULT_SUBMITTED",
 ] as const;
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];
 
@@ -43,6 +48,14 @@ function businessPayloadSchema() {
   }).strict();
 }
 
+function tripRecipientPayloadSchema() {
+  return z.object({
+    tripId: z.uuid(),
+    recipientIds: recipientIdsSchema,
+    eventKey: z.string().min(1).max(120),
+  }).strict();
+}
+
 export const outboxPayloadSchemas = {
   TEST_ENTITY_CHANGED: z.object({ entityId: z.uuid() }).strict(),
   ATTACHMENT_UPLOADED: z.object({ attachmentId: z.uuid() }).strict(),
@@ -61,6 +74,15 @@ export const outboxPayloadSchemas = {
   HELP_REOPENED: businessPayloadSchema(),
   HELP_REASSIGNED: businessPayloadSchema(),
   HELP_WITHDRAWN: businessPayloadSchema(),
+  TRIP_PARTICIPANT_ADDED: tripRecipientPayloadSchema(),
+  TRIP_UPDATED: tripRecipientPayloadSchema(),
+  TRIP_RESULT_DUE_SCHEDULED: z.object({
+    tripId: z.uuid(),
+    dueAt: z.iso.datetime(),
+    eventKey: z.string().min(1).max(120),
+  }).strict(),
+  TRIP_CANCELED: tripRecipientPayloadSchema(),
+  TRIP_RESULT_SUBMITTED: tripRecipientPayloadSchema(),
 } satisfies Record<OutboxEventType, z.ZodType>;
 
 export type OutboxPayloadByType = {

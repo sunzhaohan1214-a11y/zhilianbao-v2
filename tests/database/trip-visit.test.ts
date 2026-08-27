@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RoleCode } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
+import { TripResultDueJobHandler } from "@/modules/jobs/handlers/trip-result-due-handler";
+import { JobRepository } from "@/modules/jobs/job-repository";
+import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
+import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 import { TripService } from "@/modules/trip";
 
@@ -89,6 +93,10 @@ afterAll(async () => {
   const tripIds = trips.map(({ id }) => id);
   const visitIds = trips.flatMap(({ visits }) => visits.map(({ id }) => id));
   const leadIds = (await prisma.demandLead.findMany({ where: { OR: [{ tripId: { in: tripIds } }, { visitId: { in: visitIds } }] }, select: { id: true } })).map(({ id }) => id);
+  await prisma.message.deleteMany({ where: { aggregateType: "TRIP", aggregateId: { in: tripIds } } });
+  await prisma.todo.deleteMany({ where: { aggregateType: "TRIP", aggregateId: { in: tripIds } } });
+  await prisma.jobTask.deleteMany({ where: { idempotencyKey: { startsWith: "trip-result-due:" } } });
+  await prisma.outboxEvent.deleteMany({ where: { aggregateType: "TRIP", aggregateId: { in: tripIds } } });
   await prisma.attachmentLink.deleteMany({ where: { OR: [{ entityType: "TRIP", entityId: { in: tripIds } }, { entityType: "ENTERPRISE_VISIT", entityId: { in: visitIds } }, { entityType: "DEMAND_LEAD", entityId: { in: leadIds } }] } });
   await prisma.visitDemandLeadIdempotency.deleteMany({ where: { OR: [{ actorPersonId: { in: personIds } }, { visitId: { in: visitIds } }] } });
   await prisma.demandLeadSupplement.deleteMany({ where: { demandLeadId: { in: leadIds } } });
@@ -114,6 +122,48 @@ afterAll(async () => {
 });
 
 describe("B-M2-004 real MySQL Trip and Visit invariants", () => {
+  it("uses Message for added participants and creates Trip Todo only after the result due time", async () => {
+    const trip = await service.create({ actor: admin, body: tripBody(30) });
+    const registry = new OutboxHandlerRegistry();
+    const jobs = new JobRepository(prisma);
+    registry.register("TRIP_PARTICIPANT_ADDED", new TripParticipantAddedHandler());
+    registry.register("TRIP_UPDATED", new TripLifecycleHandler("TRIP_UPDATED"));
+    registry.register("TRIP_RESULT_DUE_SCHEDULED", new TripResultDueScheduledHandler(jobs));
+    registry.register("TRIP_CANCELED", new TripLifecycleHandler("TRIP_CANCELED"));
+    registry.register("TRIP_RESULT_SUBMITTED", new TripLifecycleHandler("TRIP_RESULT_SUBMITTED"));
+    const dispatchPending = async () => {
+      const events = await prisma.outboxEvent.findMany({
+        where: { aggregateType: "TRIP", aggregateId: trip.id, publishedAt: null },
+        orderBy: { occurredAt: "asc" },
+      });
+      for (const event of events) {
+        await prisma.$transaction((tx) => registry.dispatch(event, tx));
+        await prisma.outboxEvent.update({ where: { id: event.id }, data: { publishedAt: new Date() } });
+      }
+    };
+
+    await dispatchPending();
+    expect(await prisma.message.count({ where: { personId: member.personId, aggregateId: trip.id, messageType: "TRIP_PARTICIPANT_ADDED" } })).toBe(1);
+    expect(await prisma.todo.count({ where: { aggregateId: trip.id } })).toBe(0);
+
+    await service.update({ actor: admin, tripId: trip.id, body: { title: "B-M2-004 通知更新" } });
+    await dispatchPending();
+    expect(await prisma.message.count({ where: { personId: member.personId, aggregateId: trip.id, messageType: "TRIP_UPDATED" } })).toBe(1);
+
+    const dueJob = await prisma.jobTask.findFirstOrThrow({ where: { idempotencyKey: { startsWith: `trip-result-due:${trip.id}:` } } });
+    const dueAt = new Date((dueJob.payloadJson as { dueAt: string }).dueAt);
+    await new TripResultDueJobHandler(prisma, () => new Date(dueAt.getTime() + 1)).handle(dueJob.payloadJson as {
+      tripId: string; dueAt: string; eventKey: string;
+    });
+    expect(await prisma.todo.count({ where: { aggregateId: trip.id, todoType: "TRIP_RESULT", status: "OPEN" } })).toBe(2);
+    expect(await prisma.message.count({ where: { aggregateId: trip.id, messageType: "TRIP_RESULT_DUE" } })).toBe(2);
+
+    await service.cancel({ actor: admin, tripId: trip.id, body: { reason: "数据库通知测试取消" }, now: new Date(dueAt.getTime() + 2) });
+    await dispatchPending();
+    expect(await prisma.todo.count({ where: { aggregateId: trip.id, todoType: "TRIP_RESULT", status: "STALE" } })).toBe(2);
+    expect(await prisma.message.count({ where: { aggregateId: trip.id, messageType: "TRIP_CANCELED" } })).toBe(2);
+  });
+
   it("rejects adding an active person without an Account under the Trip lock", async () => {
     const trip = await service.create({ actor: admin, body: tripBody(27) });
     await expect(service.addParticipant({ actor: admin, tripId: trip.id, body: { personId: noAccountPersonId } }))
