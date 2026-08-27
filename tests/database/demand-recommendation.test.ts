@@ -125,6 +125,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.jobTask.deleteMany({ where: { jobType: "DEMAND_RECOMMENDATION_RUN" } });
   await prisma.batch.updateMany({ where: { id: batchId }, data: { isCurrent: false } });
   if (previousCurrentBatchIds.length) await prisma.batch.updateMany({ where: { id: { in: previousCurrentBatchIds } }, data: { isCurrent: true } });
   await prisma.$disconnect();
