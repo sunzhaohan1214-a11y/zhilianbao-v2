@@ -11,6 +11,7 @@ export const e2eUsers = {
   superAdmin: { personId: "10000000-0000-4000-8000-000000000007", accountId: "20000000-0000-4000-8000-000000000007", phone: "13800001007", password: "Super-pass-123" },
   township: { personId: "10000000-0000-4000-8000-000000000008", accountId: "20000000-0000-4000-8000-000000000008", phone: "13800001008", password: "Township-pass-123" },
   alumni: { personId: "10000000-0000-4000-8000-000000000009", accountId: "20000000-0000-4000-8000-000000000009", phone: "13800001009", password: "Alumni-pass-123" },
+  disabled: { personId: "10000000-0000-4000-8000-000000000010", accountId: "20000000-0000-4000-8000-000000000010", phone: "13800001010", password: "Disabled-pass-123" },
 } as const;
 
 export const enterpriseE2e = {
@@ -37,6 +38,7 @@ export const talentE2e = {
   talentId: "91000000-0000-4000-8000-000000000001",
   versionId: "91000000-0000-4000-8000-000000000002",
   contactHistoryId: "91000000-0000-4000-8000-000000000003",
+  resumeAttachmentId: "91000000-0000-4000-8000-000000000004",
 } as const;
 
 export async function seedAuthFixtures() {
@@ -94,6 +96,8 @@ export async function seedAuthFixtures() {
   await prisma.talentContactPersonHistory.deleteMany({ where: { talentId: { in: talentIds } } });
   await prisma.talentVersion.deleteMany({ where: { id: { in: talentVersionIds } } });
   await prisma.talentChangeRequest.deleteMany({ where: { id: { in: talentRequestIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: talentE2e.resumeAttachmentId } });
+  await prisma.attachment.deleteMany({ where: { id: talentE2e.resumeAttachmentId } });
   await prisma.talent.updateMany({ where: { id: { in: talentIds } }, data: { status: "DISABLED", mergedIntoId: null } });
   await prisma.talent.deleteMany({ where: { id: { in: talentIds } } });
   await prisma.presenceReport.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
@@ -123,6 +127,7 @@ export async function seedAuthFixtures() {
     });
     const isUnactivated = name === "unactivated";
     const isForced = name === "forced";
+    const isDisabled = name === "disabled";
     const password = isUnactivated || isForced ? initialPasswordFromPhone(fixture.phone) : fixture.password;
     await prisma.account.upsert({
       where: { id: fixture.accountId },
@@ -131,7 +136,7 @@ export async function seedAuthFixtures() {
         personId: fixture.personId,
         phone: fixture.phone,
         passwordHash: await hashPassword(password),
-        status: isUnactivated ? "UNACTIVATED" : "NORMAL",
+        status: isUnactivated ? "UNACTIVATED" : isDisabled ? "DISABLED" : "NORMAL",
         forcePasswordChange: isForced,
         firstPasswordChangedAt: isUnactivated ? null : new Date(),
         confidentialityConfirmedAt: isUnactivated ? null : new Date(),
@@ -139,7 +144,7 @@ export async function seedAuthFixtures() {
       update: {
         phone: fixture.phone,
         passwordHash: await hashPassword(password),
-        status: isUnactivated ? "UNACTIVATED" : "NORMAL",
+        status: isUnactivated ? "UNACTIVATED" : isDisabled ? "DISABLED" : "NORMAL",
         forcePasswordChange: isForced,
         firstPasswordChangedAt: isUnactivated ? null : new Date(),
         confidentialityConfirmedAt: isUnactivated ? null : new Date(),

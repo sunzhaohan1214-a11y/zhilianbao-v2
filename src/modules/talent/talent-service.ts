@@ -12,6 +12,8 @@ import {
 } from "./audit";
 import {
   FakeTalentExtractionAdapter,
+  parseTalentExtractionOutput,
+  TalentAIOutputUnsafeError,
   type TalentExtractionAdapter,
   UnavailableTalentExtractionAdapter,
 } from "./extraction";
@@ -76,7 +78,12 @@ export class TalentService {
         account: { select: { id: true, status: true, phone: true } },
       },
     });
-    if (!person || person.personStatus !== "ACTIVE" || !person.account)
+    if (
+      !person ||
+      person.personStatus !== "ACTIVE" ||
+      !person.account ||
+      person.account.status === "DISABLED"
+    )
       throw new TalentError(
         "TALENT_PERSON_INVALID",
         "推荐人、联系人或经办人必须是存在账号的在册内部人员",
@@ -498,16 +505,14 @@ export class TalentService {
       const request = await this.repository.findRequest(tx, input.requestId);
       if (!request)
         throw new TalentError("TALENT_REQUEST_NOT_FOUND", "人才申请不存在");
-      const canReview = request.submitterPersonId !== input.actor.personId;
-      if (canReview)
-        await authorizeActor({
-          actor: input.actor,
-          action: "talent.review",
-          resource: {
-            resourceType: "talent_change_request",
-            requiredScope: "GLOBAL_OPERATIONAL",
-          },
-        });
+      const canReview =
+        input.actor.capabilities.has("talent.review") &&
+        input.actor.hasGlobalOperational;
+      if (!canReview) {
+        await authorizeActor({ actor: input.actor, action: "talent.submit" });
+        if (request.submitterPersonId !== input.actor.personId)
+          throw new TalentError("TALENT_FORBIDDEN", "只能查看本人提交的人才申请");
+      }
       let duplicateCandidates: Awaited<ReturnType<TalentRepository["duplicateCandidates"]>> = [];
       if (canReview && request.requestType === "CREATE") {
         const payload = createTalentChangeRequestSchema.options[0].shape.payload.parse(request.payloadSnapshot);
@@ -520,6 +525,7 @@ export class TalentService {
   async resubmitChangeRequest(
     input: ServiceInput & { requestId: string; body: unknown },
   ) {
+    await authorizeActor({ actor: input.actor, action: "talent.submit" });
     const body = resubmitTalentChangeRequestSchema.parse(input.body);
     return this.repository.transaction(async (tx) => {
       await this.repository.lockRequest(tx, input.requestId).catch(() => {
@@ -530,6 +536,11 @@ export class TalentService {
       });
       if (!request)
         throw new TalentError("TALENT_REQUEST_NOT_FOUND", "人才申请不存在");
+      if (request.requestType === "CORRECTION")
+        await authorizeActor({
+          actor: input.actor,
+          action: "talent.correct_request",
+        });
       if (
         request.status !== "RETURNED" ||
         request.submitterPersonId !== input.actor.personId
@@ -1356,14 +1367,31 @@ export class TalentService {
   async extractAI(
     input: ServiceInput & { requestId: string; attachmentId: string },
   ) {
+    await authorizeActor({ actor: input.actor, action: "talent.submit" });
     const pending = await this.repository.transaction(async (tx) => {
+      await this.repository.lockRequest(tx, input.requestId).catch(() => {
+        throw new TalentError("TALENT_REQUEST_NOT_FOUND", "人才申请不存在");
+      });
       const request = await tx.talentChangeRequest.findUnique({
         where: { id: input.requestId },
       });
       if (!request)
         throw new TalentError("TALENT_REQUEST_NOT_FOUND", "人才申请不存在");
+      if (request.requestType === "CORRECTION")
+        await authorizeActor({
+          actor: input.actor,
+          action: "talent.correct_request",
+        });
       if (request.submitterPersonId !== input.actor.personId)
         throw new TalentError("TALENT_FORBIDDEN", "仅申请提交人可发起简历提取");
+      if (
+        request.status !== "PENDING_REVIEW" &&
+        request.status !== "RETURNED"
+      )
+        throw new TalentError(
+          "TALENT_REQUEST_STATE_CONFLICT",
+          "当前申请状态不允许发起简历提取",
+        );
       const link = await tx.attachmentLink.findFirst({
         where: {
           attachmentId: input.attachmentId,
@@ -1381,7 +1409,7 @@ export class TalentService {
           "TALENT_ATTACHMENT_INVALID",
           "证据附件必须属于当前申请且已通过安全扫描",
         );
-      return tx.talentAIExtraction.create({
+      const extraction = await tx.talentAIExtraction.create({
         data: {
           requestId: request.id,
           attachmentId: input.attachmentId,
@@ -1391,47 +1419,56 @@ export class TalentService {
           requestedByPersonId: input.actor.personId,
         },
       });
+      await writeTalentAudit(tx, {
+        ...input,
+        actionCode: "TALENT_AI_EXTRACTION_REQUESTED",
+        entityType: "TALENT_AI_EXTRACTION",
+        entityId: extraction.id,
+        after: {
+          requestId: request.id,
+          attachmentId: input.attachmentId,
+          provider: this.extraction.provider,
+          model: this.extraction.model,
+          promptVersion: this.extraction.promptVersion,
+        },
+      });
+      return extraction;
     });
     try {
-      const result = await this.extraction.extract({
+      const raw = await this.extraction.extract({
         attachmentId: input.attachmentId,
       });
-      const candidate = {
-        ...(result.candidate.workEducationExperience
-          ? {
-              workEducationExperience: result.candidate.workEducationExperience,
-            }
-          : {}),
-        ...(result.candidate.representativeAchievements
-          ? {
-              representativeAchievements:
-                result.candidate.representativeAchievements,
-            }
-          : {}),
-        ...(result.candidate.structured
-          ? { structured: result.candidate.structured }
-          : {}),
-      };
+      const result = parseTalentExtractionOutput(raw, input.attachmentId);
       return this.repository.transaction((tx) =>
         tx.talentAIExtraction.update({
           where: { id: pending.id },
           data: {
             status: "COMPLETED",
-            candidateJson: candidate as Prisma.InputJsonObject,
+            candidateJson: result.candidate as Prisma.InputJsonObject,
             evidenceJson: result.evidence as Prisma.InputJsonObject,
           },
         }),
       );
-    } catch {
-      return this.repository.transaction((tx) =>
+    } catch (error) {
+      const unsafe = error instanceof TalentAIOutputUnsafeError;
+      const failed = await this.repository.transaction((tx) =>
         tx.talentAIExtraction.update({
           where: { id: pending.id },
           data: {
             status: "FAILED",
-            failureCode: "TALENT_AI_EXTRACTION_UNAVAILABLE",
+            failureCode: unsafe
+              ? "TALENT_AI_OUTPUT_UNSAFE"
+              : "TALENT_AI_EXTRACTION_UNAVAILABLE",
           },
         }),
       );
+      if (unsafe)
+        throw new TalentError(
+          "TALENT_AI_OUTPUT_UNSAFE",
+          "AI 提取结果包含不允许保存的字段或证据",
+          { extractionId: failed.id },
+        );
+      return failed;
     }
   }
   async confirmAI(
@@ -1442,19 +1479,40 @@ export class TalentService {
       representativeAchievements?: string;
     },
   ) {
+    await authorizeActor({ actor: input.actor, action: "talent.submit" });
     return this.repository.transaction(async (tx) => {
-      await this.repository.lockRequest(tx, input.requestId);
+      await this.repository.lockRequest(tx, input.requestId).catch(() => {
+        throw new TalentError("TALENT_REQUEST_NOT_FOUND", "人才申请不存在");
+      });
       const request = await tx.talentChangeRequest.findUnique({
         where: { id: input.requestId },
       });
+      if (!request)
+        throw new TalentError("TALENT_REQUEST_NOT_FOUND", "人才申请不存在");
+      if (request.requestType === "CORRECTION")
+        await authorizeActor({
+          actor: input.actor,
+          action: "talent.correct_request",
+        });
+      if (request.submitterPersonId !== input.actor.personId)
+        throw new TalentError(
+          "TALENT_FORBIDDEN",
+          "仅申请提交人可确认当前申请的提取结果",
+        );
+      if (
+        request.status !== "PENDING_REVIEW" &&
+        request.status !== "RETURNED"
+      )
+        throw new TalentError(
+          "TALENT_REQUEST_STATE_CONFLICT",
+          "当前申请状态不允许确认简历提取结果",
+        );
       const extraction = await tx.talentAIExtraction.findUnique({
         where: { id: input.extractionId },
       });
       if (
-        !request ||
         !extraction ||
-        extraction.requestId !== request.id ||
-        request.submitterPersonId !== input.actor.personId
+        extraction.requestId !== request.id
       )
         throw new TalentError(
           "TALENT_FORBIDDEN",
@@ -1465,44 +1523,37 @@ export class TalentService {
           "TALENT_STATE_CONFLICT",
           "只有提取成功的候选内容可以确认",
         );
+      const accepted = {
+        ...(input.workEducationExperience !== undefined
+          ? { workEducationExperience: input.workEducationExperience }
+          : {}),
+        ...(input.representativeAchievements !== undefined
+          ? { representativeAchievements: input.representativeAchievements }
+          : {}),
+      };
       const payload = request.payloadSnapshot as Record<string, unknown>;
+      let updatedPayload: Prisma.InputJsonObject;
       if (request.requestType === "CREATE") {
         const parsed =
           createTalentChangeRequestSchema.options[0].shape.payload.parse(
             payload,
           );
-        await tx.talentChangeRequest.update({
-          where: { id: request.id },
-          data: {
-            payloadSnapshot: {
-              talent: {
-                ...parsed.talent,
-                workEducationExperience: input.workEducationExperience,
-                representativeAchievements: input.representativeAchievements,
-              },
-            },
-          },
-        });
+        updatedPayload = { talent: { ...parsed.talent, ...accepted } };
       } else {
         const parsed =
           createTalentChangeRequestSchema.options[1].shape.payload.parse(
             payload,
           );
-        await tx.talentChangeRequest.update({
-          where: { id: request.id },
-          data: {
-            payloadSnapshot: {
-              ...parsed,
-              changes: {
-                ...parsed.changes,
-                workEducationExperience: input.workEducationExperience,
-                representativeAchievements: input.representativeAchievements,
-              },
-            },
-          },
-        });
+        updatedPayload = {
+          ...parsed,
+          changes: { ...parsed.changes, ...accepted },
+        };
       }
-      return tx.talentAIExtraction.update({
+      await tx.talentChangeRequest.update({
+        where: { id: request.id },
+        data: { payloadSnapshot: updatedPayload },
+      });
+      const confirmed = await tx.talentAIExtraction.update({
         where: { id: extraction.id },
         data: {
           status: "CONFIRMED",
@@ -1510,6 +1561,18 @@ export class TalentService {
           confirmedByPersonId: input.actor.personId,
         },
       });
+      await writeTalentAudit(tx, {
+        ...input,
+        actionCode: "TALENT_AI_EXTRACTION_CONFIRMED",
+        entityType: "TALENT_AI_EXTRACTION",
+        entityId: extraction.id,
+        after: {
+          requestId: request.id,
+          extractionId: extraction.id,
+          acceptedFields: Object.keys(accepted),
+        },
+      });
+      return confirmed;
     });
   }
 }

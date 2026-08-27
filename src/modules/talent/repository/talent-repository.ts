@@ -207,7 +207,10 @@ export class TalentRepository {
   }
   listInternalPeople() {
     return this.prisma.person.findMany({
-      where: { personStatus: "ACTIVE", account: { isNot: null } },
+      where: {
+        personStatus: "ACTIVE",
+        account: { is: { status: { not: "DISABLED" } } },
+      },
       orderBy: { name: "asc" },
       select: { id: true, name: true, account: { select: { status: true } } },
     });

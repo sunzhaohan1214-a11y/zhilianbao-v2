@@ -10,7 +10,8 @@ export type TalentErrorCode =
   | "TALENT_ROUND_CONFLICT"
   | "TALENT_AREA_INVALID"
   | "TALENT_ATTACHMENT_INVALID"
-  | "TALENT_AI_UNAVAILABLE";
+  | "TALENT_AI_UNAVAILABLE"
+  | "TALENT_AI_OUTPUT_UNSAFE";
 
 const STATUS: Record<TalentErrorCode, number> = {
   TALENT_NOT_FOUND: 404,
@@ -25,6 +26,7 @@ const STATUS: Record<TalentErrorCode, number> = {
   TALENT_AREA_INVALID: 422,
   TALENT_ATTACHMENT_INVALID: 422,
   TALENT_AI_UNAVAILABLE: 503,
+  TALENT_AI_OUTPUT_UNSAFE: 422,
 };
 export class TalentError extends Error {
   readonly status: number;
