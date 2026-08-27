@@ -222,6 +222,7 @@ model Person {
   createdDemandLeads            DemandLead[]              @relation("DemandLeadCreator")
   demandLeadSupplements         DemandLeadSupplement[]
   createdDemands                Demand[]                  @relation("DemandCreator")
+  presenceReports              PresenceReport[]
 
   @@index([personStatus])
   @@map("persons")
@@ -551,6 +552,26 @@ model StateTransitionHistory {
   @@index([actorPersonId, createdAt])
   @@index([requestId])
   @@map("state_transition_history")
+}
+
+model PresenceReport {
+  id                  String   @id @default(uuid()) @db.Char(36)
+  personId            String   @map("person_id") @db.Char(36)
+  arrivalAt           DateTime @map("arrival_at") @db.DateTime(3)
+  expectedDepartureAt DateTime @map("expected_departure_at") @db.DateTime(3)
+  origin              String?  @db.VarChar(200)
+  transportMode       String?  @map("transport_mode") @db.VarChar(100)
+  trainFlightNo       String?  @map("train_flight_no") @db.VarChar(100)
+  note                String?  @db.VarChar(1000)
+  canceledAt          DateTime? @map("canceled_at") @db.DateTime(3)
+  cancelReason        String?  @map("cancel_reason") @db.VarChar(500)
+  createdAt           DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+  person              Person   @relation(fields: [personId], references: [id], onDelete: Restrict)
+
+  @@index([personId, canceledAt, arrivalAt, expectedDepartureAt], map: "presence_person_active_interval_idx")
+  @@index([arrivalAt, expectedDepartureAt], map: "presence_current_interval_idx")
+  @@map("presence_reports")
 }
 
 model OutboxEvent {
