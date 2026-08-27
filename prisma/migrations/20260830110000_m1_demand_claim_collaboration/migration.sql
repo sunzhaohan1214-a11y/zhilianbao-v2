@@ -16,7 +16,7 @@ CREATE TABLE `demand_owner_histories` (
   `reason` VARCHAR(500) NULL,
   `change_type` ENUM('CLAIM', 'TRANSFER', 'OWNER_EXIT_APPROVED', 'CROSS_BATCH_TRANSFER') NOT NULL,
   `created_by_person_id` CHAR(36) NOT NULL,
-  `active_key` TINYINT UNSIGNED NULL,
+  `active_key` TINYINT UNSIGNED NULL DEFAULT 1,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
   CONSTRAINT `demand_owner_histories_active_key_check` CHECK (
@@ -39,7 +39,7 @@ CREATE TABLE `demand_collaboration_requests` (
   `decided_by_person_id` CHAR(36) NULL,
   `requested_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `decided_at` DATETIME(3) NULL,
-  `pending_key` TINYINT UNSIGNED NULL,
+  `pending_key` TINYINT UNSIGNED NULL DEFAULT 1,
 
   CONSTRAINT `demand_collaboration_requests_pending_key_check` CHECK (
     (`status` = 'PENDING' AND `pending_key` = 1 AND `decided_at` IS NULL)
@@ -62,7 +62,7 @@ CREATE TABLE `demand_collaborators` (
   `expired_at` DATETIME(3) NULL,
   `ended_reason` VARCHAR(500) NULL,
   `ended_by_person_id` CHAR(36) NULL,
-  `active_key` TINYINT UNSIGNED NULL,
+  `active_key` TINYINT UNSIGNED NULL DEFAULT 1,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
   CONSTRAINT `demand_collaborators_active_key_check` CHECK (

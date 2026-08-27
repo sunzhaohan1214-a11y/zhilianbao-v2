@@ -1301,7 +1301,7 @@ model DemandOwnerHistory {
   reason            String?               @db.VarChar(500)
   changeType        DemandOwnerChangeType @map("change_type")
   createdByPersonId String                @map("created_by_person_id") @db.Char(36)
-  activeKey         Int?                  @map("active_key") @db.UnsignedTinyInt
+  activeKey         Int?                  @default(1) @map("active_key") @db.UnsignedTinyInt
   createdAt         DateTime              @default(now()) @map("created_at") @db.DateTime(3)
   demand            Demand                @relation(fields: [demandId], references: [id], onDelete: Restrict)
   person            Person                @relation("DemandOwnerPerson", fields: [personId], references: [id], onDelete: Restrict)
@@ -1324,7 +1324,7 @@ model DemandCollaborationRequest {
   decidedByPersonId     String?                          @map("decided_by_person_id") @db.Char(36)
   requestedAt           DateTime                         @default(now()) @map("requested_at") @db.DateTime(3)
   decidedAt             DateTime?                        @map("decided_at") @db.DateTime(3)
-  pendingKey            Int?                             @map("pending_key") @db.UnsignedTinyInt
+  pendingKey            Int?                             @default(1) @map("pending_key") @db.UnsignedTinyInt
   demand                Demand                           @relation(fields: [demandId], references: [id], onDelete: Restrict)
   person                Person                           @relation("DemandCollaborationTarget", fields: [personId], references: [id], onDelete: Restrict)
   requestedByPerson     Person                           @relation("DemandCollaborationRequester", fields: [requestedByPersonId], references: [id], onDelete: Restrict)
@@ -1348,7 +1348,7 @@ model DemandCollaborator {
   expiredAt       DateTime?                      @map("expired_at") @db.DateTime(3)
   endedReason     String?                        @map("ended_reason") @db.VarChar(500)
   endedByPersonId String?                        @map("ended_by_person_id") @db.Char(36)
-  activeKey       Int?                           @map("active_key") @db.UnsignedTinyInt
+  activeKey       Int?                           @default(1) @map("active_key") @db.UnsignedTinyInt
   createdAt       DateTime                       @default(now()) @map("created_at") @db.DateTime(3)
   demand          Demand                         @relation(fields: [demandId], references: [id], onDelete: Restrict)
   person          Person                         @relation("DemandCollaboratorPerson", fields: [personId], references: [id], onDelete: Restrict)

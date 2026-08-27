@@ -183,22 +183,28 @@ describe("M1-004 real MySQL demand claim and collaboration", () => {
       status: "ACTIVE",
       isCurrent: true,
     } });
-    await expect(service.claim({ actor: eligible, demandId: (await publishedDemand()).id, body: {}, idempotencyKey: `multi-${randomUUID()}` }))
-      .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE", details: { reason: "CURRENT_BATCH_INVALID" } });
-    await prisma.batch.update({ where: { id: duplicateCurrent.id }, data: { isCurrent: false } });
+    try {
+      await expect(service.claim({ actor: eligible, demandId: (await publishedDemand()).id, body: {}, idempotencyKey: `multi-${randomUUID()}` }))
+        .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE", details: { reason: "CURRENT_BATCH_INVALID" } });
+    } finally {
+      await prisma.batch.update({ where: { id: duplicateCurrent.id }, data: { isCurrent: false } });
+    }
 
     const noBatchActor = await actorFixture(["MEMBER_CURRENT"]);
     await prisma.batch.update({ where: { id: batchId }, data: { isCurrent: false } });
-    await expect(service.claim({ actor: noBatchActor, demandId: (await publishedDemand()).id, body: {}, idempotencyKey: `none-${randomUUID()}` }))
-      .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE", details: { reason: "CURRENT_BATCH_INVALID" } });
-    await prisma.batch.update({ where: { id: batchId }, data: { isCurrent: true } });
+    try {
+      await expect(service.claim({ actor: noBatchActor, demandId: (await publishedDemand()).id, body: {}, idempotencyKey: `none-${randomUUID()}` }))
+        .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE", details: { reason: "CURRENT_BATCH_INVALID" } });
+    } finally {
+      await prisma.batch.update({ where: { id: batchId }, data: { isCurrent: true } });
+    }
 
     const future = await actorFixture(["MEMBER_CURRENT"]);
     await prisma.batchMembership.update({ where: { personId_batchId: { personId: future.personId, batchId } }, data: { startDate: new Date("2027-01-01") } });
     await expect(service.claim({ actor: future, demandId: (await publishedDemand()).id, body: {}, idempotencyKey: `future-${randomUUID()}` }))
       .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE" });
     const ended = await actorFixture(["MEMBER_CURRENT"]);
-    await prisma.batchMembership.update({ where: { personId_batchId: { personId: ended.personId, batchId } }, data: { endDate: new Date("2025-12-31") } });
+    await prisma.batchMembership.update({ where: { personId_batchId: { personId: ended.personId, batchId } }, data: { startDate: new Date("2025-01-01"), endDate: new Date("2025-12-31") } });
     await expect(service.claim({ actor: ended, demandId: (await publishedDemand()).id, body: {}, idempotencyKey: `ended-${randomUUID()}` }))
       .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE" });
   });
