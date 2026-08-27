@@ -120,7 +120,7 @@ CREATE TABLE `enterprise_versions` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ALTER TABLE `enterprises` ADD CONSTRAINT `enterprises_responsible_area_id_fkey` FOREIGN KEY (`responsible_area_id`) REFERENCES `administrative_areas`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE `enterprises` ADD CONSTRAINT `enterprises_merged_into_id_fkey` FOREIGN KEY (`merged_into_id`) REFERENCES `enterprises`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `enterprises` ADD CONSTRAINT `enterprises_merged_into_id_fkey` FOREIGN KEY (`merged_into_id`) REFERENCES `enterprises`(`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `enterprises` ADD CONSTRAINT `enterprises_created_by_person_id_fkey` FOREIGN KEY (`created_by_person_id`) REFERENCES `persons`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `enterprises` ADD CONSTRAINT `enterprises_coordinate_updated_by_id_fkey` FOREIGN KEY (`coordinate_updated_by_id`) REFERENCES `persons`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -131,8 +131,8 @@ ALTER TABLE `enterprises` ADD CONSTRAINT `enterprises_primary_contact_id_fkey` F
 ALTER TABLE `enterprise_tag_relations` ADD CONSTRAINT `enterprise_tag_relations_enterprise_id_fkey` FOREIGN KEY (`enterprise_id`) REFERENCES `enterprises`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `enterprise_tag_relations` ADD CONSTRAINT `enterprise_tag_relations_tag_id_fkey` FOREIGN KEY (`tag_id`) REFERENCES `enterprise_tags`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
-ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_proposed_area_id_fkey` FOREIGN KEY (`proposed_area_id`) REFERENCES `administrative_areas`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_target_enterprise_id_fkey` FOREIGN KEY (`target_enterprise_id`) REFERENCES `enterprises`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_proposed_area_id_fkey` FOREIGN KEY (`proposed_area_id`) REFERENCES `administrative_areas`(`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_target_enterprise_id_fkey` FOREIGN KEY (`target_enterprise_id`) REFERENCES `enterprises`(`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_approved_enterprise_id_fkey` FOREIGN KEY (`approved_enterprise_id`) REFERENCES `enterprises`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_submitter_person_id_fkey` FOREIGN KEY (`submitter_person_id`) REFERENCES `persons`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `enterprise_change_requests` ADD CONSTRAINT `enterprise_change_requests_reviewer_person_id_fkey` FOREIGN KEY (`reviewer_person_id`) REFERENCES `persons`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
