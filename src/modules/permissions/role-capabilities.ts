@@ -77,6 +77,8 @@ const MEMBER_ALUMNI_CAPABILITIES = [
 ] as const satisfies readonly Capability[];
 
 const TOWNSHIP_CAPABILITIES = [
+  "demand.lead.view",
+  "demand.lead.create",
   "demand.lead.verify",
   "demand.formal.create",
   "demand.submit_review",
@@ -125,7 +127,10 @@ const DEPARTMENT_CAPABILITIES = [
 
 export const ADMIN_CAPABILITIES = [
   "admin.shell.access",
+  "demand.lead.view",
+  "demand.lead.create",
   "demand.lead.verify",
+  "demand.lead.restore",
   "demand.formal.create",
   "demand.submit_review",
   "demand.review",

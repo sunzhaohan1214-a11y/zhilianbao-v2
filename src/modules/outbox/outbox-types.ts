@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-export const OUTBOX_EVENT_TYPES = ["TEST_ENTITY_CHANGED", "ATTACHMENT_UPLOADED"] as const;
+export const OUTBOX_EVENT_TYPES = [
+  "TEST_ENTITY_CHANGED",
+  "ATTACHMENT_UPLOADED",
+] as const;
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];
 
 export const outboxPayloadSchemas = {
