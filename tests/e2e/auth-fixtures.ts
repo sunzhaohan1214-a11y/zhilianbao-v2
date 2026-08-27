@@ -25,11 +25,30 @@ export const enterpriseE2e = {
   presenceId: "80000000-0000-4000-8000-000000000001",
 } as const;
 
+export const policyE2e = {
+  oldPolicyId: "90000000-0000-4000-8000-000000000001",
+  oldVersionId: "90000000-0000-4000-8000-000000000002",
+  oldAttachmentId: "90000000-0000-4000-8000-000000000003",
+  tagId: "90000000-0000-4000-8000-000000000004",
+} as const;
+
 export async function seedAuthFixtures() {
   const databaseUrl = process.env.DATABASE_URL ?? "";
   if (!/test/i.test(databaseUrl)) throw new Error("E2E auth fixtures require an explicitly named test database");
   const prisma = getPrismaClient();
   const users = Object.values(e2eUsers);
+  const policyRecords = await prisma.policy.findMany({ where: { createdByPersonId: { in: users.map(({ personId }) => personId) } }, select: { id: true, versions: { select: { id: true } } } });
+  const policyIds = policyRecords.map(({ id }) => id); const policyVersionIds = policyRecords.flatMap(({ versions }) => versions.map(({ id }) => id));
+  const policyAttachmentIds = (await prisma.attachmentLink.findMany({ where: { entityType: "POLICY_CONTENT_VERSION", entityId: { in: policyVersionIds } }, select: { attachmentId: true } })).map(({ attachmentId }) => attachmentId);
+  await prisma.policy.updateMany({ where: { id: { in: policyIds } }, data: { currentVersionId: null } });
+  await prisma.attachmentLink.deleteMany({ where: { entityType: "POLICY_CONTENT_VERSION", entityId: { in: policyVersionIds } } });
+  await prisma.policyAIInterpretation.deleteMany({ where: { versionId: { in: policyVersionIds } } });
+  await prisma.policyReplacementRelation.deleteMany({ where: { OR: [{ oldPolicyId: { in: policyIds } }, { newPolicyId: { in: policyIds } }] } });
+  await prisma.policyTagRelation.deleteMany({ where: { policyId: { in: policyIds } } });
+  await prisma.policyContentVersion.deleteMany({ where: { id: { in: policyVersionIds } } });
+  await prisma.policy.deleteMany({ where: { id: { in: policyIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: policyAttachmentIds } } });
+  await prisma.attachment.deleteMany({ where: { id: { in: policyAttachmentIds } } });
   const e2eLeadIds = (await prisma.demandLead.findMany({
     where: {
       OR: [
@@ -162,4 +181,11 @@ export async function seedAuthFixtures() {
   await prisma.enterpriseContact.create({ data: { id: enterpriseE2e.contactId, enterpriseId: enterpriseE2e.enterpriseId, name: "王经理", positionTitle: "企业联系人", phone: "13800003001", isPrimary: true, createdByPersonId: e2eUsers.admin.personId } });
   await prisma.enterprise.update({ where: { id: enterpriseE2e.enterpriseId }, data: { primaryContactId: enterpriseE2e.contactId } });
   await prisma.enterpriseVersion.create({ data: { enterpriseId: enterpriseE2e.enterpriseId, versionNo: 1, snapshotJson: { name: "宝应智造示范企业", currentVersion: 1 }, changeType: "CREATE", changedByPersonId: e2eUsers.admin.personId } });
+  await prisma.policyTag.upsert({ where: { id: policyE2e.tagId }, create: { id: policyE2e.tagId, name: "科技创新", normalizedName: "科技创新" }, update: { name: "科技创新", status: "ACTIVE" } });
+  await prisma.attachment.create({ data: { id: policyE2e.oldAttachmentId, originalFilename: "E2E旧政策.pdf", extension: "pdf", declaredMimeType: "application/pdf", detectedMimeType: "application/pdf", detectedFileType: "pdf", expectedSizeBytes: 10, actualSizeBytes: 10, sha256: "b".repeat(64), bucket: "test", region: "test", objectKey: "policy/e2e-old.pdf", uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, uploadedByPersonId: e2eUsers.admin.personId } });
+  await prisma.policy.create({ data: { id: policyE2e.oldPolicyId, title: "E2E 旧政策", issuingDepartment: "宝应县测试部门", publicationDate: new Date("2025-01-01"), level: "县级", publicationStatus: "PUBLISHED", effectStatus: "CURRENT", createdByPersonId: e2eUsers.admin.personId, publishedAt: new Date("2025-01-02") } });
+  await prisma.policyContentVersion.create({ data: { id: policyE2e.oldVersionId, policyId: policyE2e.oldPolicyId, versionNo: 1, snapshotJson: { title: "E2E 旧政策", interpretation: { targetAudience: "企业", supportContent: "旧支持", applicationConditions: "旧条件", keyClauses: ["旧条款"], evidence: [{ field: "支持内容", value: "旧支持", page: 1 }] } }, changedByPersonId: e2eUsers.admin.personId, coreFieldsConfirmedAt: new Date(), coreFieldsConfirmedById: e2eUsers.admin.personId } });
+  await prisma.policy.update({ where: { id: policyE2e.oldPolicyId }, data: { currentVersionId: policyE2e.oldVersionId } });
+  await prisma.policyTagRelation.create({ data: { policyId: policyE2e.oldPolicyId, tagId: policyE2e.tagId } });
+  await prisma.attachmentLink.create({ data: { attachmentId: policyE2e.oldAttachmentId, entityType: "POLICY_CONTENT_VERSION", entityId: policyE2e.oldVersionId, relationType: "PRIMARY", createdByPersonId: e2eUsers.admin.personId } });
 }
