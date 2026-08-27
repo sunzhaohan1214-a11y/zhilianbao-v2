@@ -91,11 +91,11 @@ CREATE TABLE `help_command_idempotencies` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 ALTER TABLE `help_requests` ADD CONSTRAINT `help_requests_submitter_person_id_fkey` FOREIGN KEY (`submitter_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE `help_requests` ADD CONSTRAINT `help_requests_current_owner_person_id_fkey` FOREIGN KEY (`current_owner_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `help_requests` ADD CONSTRAINT `help_requests_current_owner_person_id_fkey` FOREIGN KEY (`current_owner_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `help_requests` ADD CONSTRAINT `help_requests_transferred_organization_id_fkey` FOREIGN KEY (`transferred_organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `help_assignment_history` ADD CONSTRAINT `help_assignment_history_help_request_id_fkey` FOREIGN KEY (`help_request_id`) REFERENCES `help_requests` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE `help_assignment_history` ADD CONSTRAINT `help_assignment_history_person_id_fkey` FOREIGN KEY (`person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE `help_assignment_history` ADD CONSTRAINT `help_assignment_history_organization_id_fkey` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE `help_assignment_history` ADD CONSTRAINT `help_assignment_history_person_id_fkey` FOREIGN KEY (`person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE `help_assignment_history` ADD CONSTRAINT `help_assignment_history_organization_id_fkey` FOREIGN KEY (`organization_id`) REFERENCES `organizations` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT;
 ALTER TABLE `help_assignment_history` ADD CONSTRAINT `help_assignment_history_changed_by_person_id_fkey` FOREIGN KEY (`changed_by_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `help_progresses` ADD CONSTRAINT `help_progresses_help_request_id_fkey` FOREIGN KEY (`help_request_id`) REFERENCES `help_requests` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 ALTER TABLE `help_progresses` ADD CONSTRAINT `help_progresses_created_by_person_id_fkey` FOREIGN KEY (`created_by_person_id`) REFERENCES `persons` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE;

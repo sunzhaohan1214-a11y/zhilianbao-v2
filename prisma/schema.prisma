@@ -1553,7 +1553,7 @@ model HelpRequest {
   createdAt                 DateTime                @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt                 DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
   submitter                 Person                  @relation("HelpSubmitter", fields: [submitterPersonId], references: [id], onDelete: Restrict)
-  currentOwner              Person?                 @relation("HelpCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict)
+  currentOwner              Person?                 @relation("HelpCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   transferredOrganization   Organization?           @relation("HelpTransferredOrganization", fields: [transferredOrganizationId], references: [id], onDelete: Restrict)
   assignments               HelpAssignmentHistory[]
   progresses                HelpProgress[]
@@ -1580,8 +1580,8 @@ model HelpAssignmentHistory {
   changedByPersonId String             @map("changed_by_person_id") @db.Char(36)
   createdAt         DateTime           @default(now()) @map("created_at") @db.DateTime(3)
   helpRequest       HelpRequest        @relation(fields: [helpRequestId], references: [id], onDelete: Restrict)
-  person            Person?            @relation("HelpAssignmentPerson", fields: [personId], references: [id], onDelete: Restrict)
-  organization      Organization?      @relation("HelpAssignmentOrganization", fields: [organizationId], references: [id], onDelete: Restrict)
+  person            Person?            @relation("HelpAssignmentPerson", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  organization      Organization?      @relation("HelpAssignmentOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   changedByPerson   Person             @relation("HelpAssignmentChanger", fields: [changedByPersonId], references: [id], onDelete: Restrict)
 
   @@unique([helpRequestId, activeKey])
