@@ -111,7 +111,8 @@ describe("B-M2-001 real MySQL invariants", () => {
 
   it("does not enqueue unregistered member foundation events", async () => {
     const organization = await prisma.organization.create({ data: { name: `outbox-${randomUUID()}`, type: "DEPARTMENT" } }); organizationIds.push(organization.id);
-    await new MemberService(prisma).updateCapabilityProfile({ actor, personId: actor.personId, profile: { professionalDirection: "复核", industryIds: [], preferredDemandTypes: [] } });
+    const selfEditActor: PermissionActor = { ...actor, effectiveRoles: ["SUPER_ADMIN", "MEMBER_CURRENT"], capabilities: resolveCapabilities(["SUPER_ADMIN", "MEMBER_CURRENT"], new Set()) };
+    await new MemberService(prisma).updateCapabilityProfile({ actor: selfEditActor, personId: actor.personId, profile: { professionalDirection: "复核", industryIds: [], preferredDemandTypes: [] } });
     await new OrganizationService(prisma).createAppointment({ actor, appointment: { personId: actor.personId, organizationId: organization.id, positionTitle: "复核员", effectiveAt: new Date("2026-01-01"), isPrimary: false } });
     expect(await prisma.outboxEvent.count({ where: { eventType: { in: unregisteredFoundationEvents }, occurredAt: { gte: suiteStartedAt } } })).toBe(0);
   });

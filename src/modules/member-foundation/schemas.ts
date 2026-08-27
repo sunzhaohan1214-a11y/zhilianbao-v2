@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const text = (maximum: number, minimum = 1) => z.string().trim().min(minimum).max(maximum);
 const optionalText = (maximum: number) => z.union([text(maximum), z.literal("")]).optional();
-const optionalDate = z.union([z.coerce.date(), z.null()]).optional();
+const optionalDate = z.union([z.null(), z.coerce.date()]).optional();
 const optionalQuery = z.preprocess((value) => value === null || value === "" ? undefined : value, z.string().optional());
 const pageNumber = (fallback: number, maximum: number) => z.preprocess(
   (value) => value === null || value === "" || value === undefined ? fallback : Number(value),

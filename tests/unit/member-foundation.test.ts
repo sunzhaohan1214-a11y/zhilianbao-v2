@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capabilityProfileSchema } from "@/modules/member-foundation/schemas";
+import { capabilityProfileSchema, membershipUpdateSchema } from "@/modules/member-foundation/schemas";
 import { assertMembershipLimit, classifyMember, isCurrentAppointment, planBatchTransition, roleLabel } from "@/modules/member-foundation/rules";
 
 const now = new Date("2026-08-27T00:00:00.000Z");
@@ -29,6 +29,10 @@ describe("B-M2-001 member rules", () => {
   it("caps a person at three batch memberships", () => {
     expect(() => assertMembershipLimit(2)).not.toThrow();
     expect(() => assertMembershipLimit(3)).toThrow("MEMBERSHIP_LIMIT_EXCEEDED");
+  });
+
+  it("preserves an explicit null end date in a partial membership update", () => {
+    expect(membershipUpdateSchema.parse({ endDate: null }).endDate).toBeNull();
   });
 
   it("plans an explicit batch transition and rejects closed target", () => {
