@@ -57,6 +57,7 @@ S4 不进入普通业务导出。
 |---|---|---:|---|
 | `id` | UUID | 是 | 永久不变 |
 | `name` | VARCHAR(80) | 是 | 不作为主键 |
+| `contact_phone` | VARCHAR(30) | 否 | 无 Account 的历史往届联系方式；存在 Account 时以 `Account.phone` 为当前电话真源 |
 | `gender` | ENUM/nullable | 否 | 如业务确需 |
 | `avatar_attachment_id` | UUID | 否 | 团员照片 |
 | `person_status` | ENUM | 是 | `ACTIVE/ARCHIVED`，不等于账号状态 |
@@ -275,6 +276,14 @@ LEADER_STAGE2
 | `updated_at` |  |
 
 这些字段可参与需求推荐。
+
+结构化多选正式落表：
+
+- `MemberIndustry(id, name, status)`：行业字典，`name` 唯一；
+- `MemberCapabilityIndustry(person_id, industry_id)`：联合主键；
+- `MemberPreferredDemandType(person_id, demand_type)`：联合主键，类型为 `TECHNICAL/TALENT/PROJECT/OTHER`。
+
+不得以逗号拼接字符串作为行业或意向需求类型真源。
 
 ---
 

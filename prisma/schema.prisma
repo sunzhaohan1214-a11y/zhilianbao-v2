@@ -59,6 +59,13 @@ enum BatchStatus {
   CLOSED
 }
 
+enum MemberDemandType {
+  TECHNICAL
+  TALENT
+  PROJECT
+  OTHER
+}
+
 enum JobStatus {
   WAITING
   RUNNING
@@ -194,6 +201,7 @@ enum DemandProvenanceSourceType {
 model Person {
   id                            String                    @id @default(uuid()) @db.Char(36)
   name                          String                    @db.VarChar(80)
+  contactPhone                  String?                   @map("contact_phone") @db.VarChar(30)
   personStatus                  PersonStatus              @default(ACTIVE) @map("person_status")
   createdAt                     DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
@@ -207,6 +215,8 @@ model Person {
   batchMemberships              BatchMembership[]
   groupLeaderAssignments        GroupLeaderAssignment[]   @relation("GroupLeaderPerson")
   grantedGroupLeaderAssignments GroupLeaderAssignment[]   @relation("GroupLeaderGrantor")
+  memberCapabilityProfile       MemberCapabilityProfile?  @relation("MemberCapabilityPerson")
+  updatedMemberCapabilities     MemberCapabilityProfile[] @relation("MemberCapabilityUpdater")
   auditLogs                     AuditLog[]
   stateTransitions              StateTransitionHistory[]
   uploadedAttachments           Attachment[]              @relation("AttachmentUploader")
@@ -496,6 +506,58 @@ model GroupLeaderAssignment {
   @@index([batchId, effectiveAt, expiredAt])
   @@index([grantedByPersonId])
   @@map("group_leader_assignments")
+}
+
+model MemberCapabilityProfile {
+  id                       String                      @id @default(uuid()) @db.Char(36)
+  personId                 String                      @unique @map("person_id") @db.Char(36)
+  professionalDirection    String?                     @map("professional_direction") @db.VarChar(500)
+  coordinatableResources   String?                     @map("coordinatable_resources") @db.Text
+  personalIntroduction     String?                     @map("personal_introduction") @db.Text
+  updatedByPersonId        String                      @map("updated_by_person_id") @db.Char(36)
+  createdAt                DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
+  person                   Person                      @relation("MemberCapabilityPerson", fields: [personId], references: [id], onDelete: Restrict)
+  updatedByPerson          Person                      @relation("MemberCapabilityUpdater", fields: [updatedByPersonId], references: [id], onDelete: Restrict)
+  industries               MemberCapabilityIndustry[]
+  preferredDemandTypes     MemberPreferredDemandType[]
+
+  @@index([updatedByPersonId, updatedAt])
+  @@map("member_capability_profiles")
+}
+
+model MemberIndustry {
+  id             String                      @id @default(uuid()) @db.Char(36)
+  name           String                      @unique @db.VarChar(100)
+  status         RecordStatus                @default(ACTIVE)
+  createdAt      DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  capabilityUses MemberCapabilityIndustry[]
+
+  @@index([status, name])
+  @@map("member_industries")
+}
+
+model MemberCapabilityIndustry {
+  personId  String                  @map("person_id") @db.Char(36)
+  industryId String                 @map("industry_id") @db.Char(36)
+  createdAt DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  profile   MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
+  industry  MemberIndustry          @relation(fields: [industryId], references: [id], onDelete: Restrict)
+
+  @@id([personId, industryId])
+  @@index([industryId, personId])
+  @@map("member_capability_industries")
+}
+
+model MemberPreferredDemandType {
+  personId  String                  @map("person_id") @db.Char(36)
+  demandType MemberDemandType       @map("demand_type")
+  createdAt DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  profile   MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
+
+  @@id([personId, demandType])
+  @@index([demandType, personId])
+  @@map("member_preferred_demand_types")
 }
 
 model BusinessSequence {
