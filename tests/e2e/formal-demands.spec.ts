@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { getPrismaClient } from "@/lib/db/prisma";
+import { SESSION_COOKIE } from "@/lib/auth/cookies";
+import { formalDemandPageAccess } from "@/lib/demand/formal-page-access";
+import { getCurrentSessionByToken } from "@/modules/identity/session-service";
+import { resolvePermissionActor } from "@/modules/permissions/actor-resolver";
+import { FormalDemandService } from "@/modules/demand";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 test.describe.configure({ mode: "serial" });
@@ -97,8 +102,30 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.township);
   page = authenticated.page;
+  const sessionToken = (await authenticated.context.cookies()).find(({ name }) => name === SESSION_COOKIE)?.value;
+  const session = await getCurrentSessionByToken(sessionToken);
+  expect(session).not.toBeNull();
+  const actor = await resolvePermissionActor(session!);
+  const returnedDemand = await new FormalDemandService().detail({ actor, demandId });
+  const returnedAccess = formalDemandPageAccess(actor, returnedDemand);
+  expect({
+    personId: actor.personId,
+    roles: actor.effectiveRoles,
+    townshipAreaIds: actor.townshipAreaIds,
+    status: returnedDemand.status,
+    responsibleAreaId: returnedDemand.responsibleAreaId,
+    canEdit: returnedAccess.canEdit,
+  }).toMatchObject({
+    personId: e2eUsers.township.personId,
+    roles: expect.arrayContaining(["TOWNSHIP_STAFF"]),
+    townshipAreaIds: expect.arrayContaining([enterpriseE2e.areaAId]),
+    status: "RETURNED",
+    responsibleAreaId: enterpriseE2e.areaAId,
+    canEdit: true,
+  });
   await page.goto(`/demands/${demandId}`);
   await expect(page.getByText("请补充量化目标和实施边界").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "编辑草稿" })).toBeVisible();
   await page.getByLabel("企业原始需求描述", { exact: true }).fill("E2E 退回后补充量化目标，但仍由原录入方修改核心字段。");
   await page.getByRole("button", { name: "保存草稿修改" }).click();
   await expect(page.getByRole("status")).toHaveText("操作已完成。");
