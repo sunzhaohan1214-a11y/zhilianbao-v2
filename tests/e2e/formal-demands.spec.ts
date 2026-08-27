@@ -211,6 +211,7 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   await page.getByLabel("按姓名搜索协同人").fill("E2E minister");
   await expect(page.getByText("E2E minister", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "发出邀请" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
 
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.minister);
