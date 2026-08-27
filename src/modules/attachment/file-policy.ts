@@ -16,6 +16,7 @@ const DECLARED_MIME_BY_EXTENSION: Readonly<Record<string, readonly string[]>> = 
   png: ["image/png"],
   heic: ["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "application/octet-stream"],
   heif: ["image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "application/octet-stream"],
+  ofd: ["application/ofd", "application/zip", "application/octet-stream"],
 };
 
 const BLOCKED_EXTENSIONS = new Set([
@@ -30,7 +31,7 @@ export type NormalizedFileInput = {
 };
 
 export type DetectedAttachmentType = {
-  extension: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "jpg" | "png" | "heic" | "heif";
+  extension: "pdf" | "doc" | "docx" | "xls" | "xlsx" | "jpg" | "png" | "heic" | "heif" | "ofd";
   mimeType: string;
 };
 
@@ -110,6 +111,10 @@ export async function detectAttachmentType(buffer: Uint8Array): Promise<Detected
   if (hasExecutableSignature(buffer)) return null;
   const legacy = detectLegacyOffice(buffer);
   if (legacy) return legacy;
+  const raw = Buffer.from(buffer);
+  if (raw.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) && raw.includes(Buffer.from("OFD.xml"))) {
+    return { extension: "ofd", mimeType: "application/ofd" };
+  }
   const detected = await fileTypeFromBuffer(buffer);
   if (!detected) return null;
   if (detected.ext === "jpeg" || detected.ext === "jpg") return { extension: "jpg", mimeType: "image/jpeg" };

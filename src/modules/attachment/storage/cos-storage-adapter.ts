@@ -134,6 +134,14 @@ export class CosStorageAdapter implements StorageAdapter {
     }
   }
 
+  async writeObject(objectKey: string, body: Buffer, contentType: string): Promise<void> {
+    try {
+      await this.cos.putObject({ Bucket: this.bucket, Region: this.region, Key: objectKey, Body: body, ContentType: contentType, ACL: "private" });
+    } catch {
+      throw new AttachmentError("ATTACHMENT_STORAGE_UNAVAILABLE", "暂时无法写入导出文件");
+    }
+  }
+
   async createSignedGetUrl(objectKey: string, expiresInSeconds: number): Promise<string> {
     try {
       return this.cos.getObjectUrl({

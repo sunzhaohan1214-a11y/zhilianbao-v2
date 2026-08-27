@@ -426,9 +426,13 @@ COS_REGION
 COS_BUCKET
 COS_SECRET_ID
 COS_SECRET_KEY
+INVOICE_OCR_ENDPOINT
+INVOICE_OCR_API_KEY
 ATTACHMENT_SIGNED_URL_TTL_SECONDS
 ATTACHMENT_UPLOAD_TTL_SECONDS
 ```
+
+`INVOICE_OCR_ENDPOINT` 必须指向专业票据 OCR/电子票据解析服务，`INVOICE_OCR_API_KEY` 只通过服务端 Secret 注入。任一项未配置时，报销票据识别任务进入可解释的人工录入降级状态；不得改用通用大模型猜测金额、票号或费用分类。
 
 V2 TEST 首次连接真实 COS 前必须检查：bucket 访问控制为 private；地域、bucket 名与 CORS 来源正确；服务账号仅有 staging 上传、服务端 HEAD/COPY/GET/DELETE 和签名所需的最小权限；浏览器分片上传及断点续传可用；staging 到 immutable final 的复制、源对象清理和短时访问 URL 均已验证。
 

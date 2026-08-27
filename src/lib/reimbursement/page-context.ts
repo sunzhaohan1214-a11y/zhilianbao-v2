@@ -1,0 +1,2 @@
+import { requireBusinessPageSession } from "@/lib/auth/guards"; import { resolvePermissionActor } from "@/modules/permissions/actor-resolver"; import { ReimbursementService } from "@/modules/reimbursement/reimbursement-service";
+export async function reimbursementPageContext() { const session = await requireBusinessPageSession(); return { actor: await resolvePermissionActor(session), service: new ReimbursementService() }; }

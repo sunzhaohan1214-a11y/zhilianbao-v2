@@ -53,14 +53,15 @@ async function requireEligibleTarget(
   now: Date,
 ): Promise<void> {
   if (permissionCode !== "reimbursement.apply") return;
-  const [alumniRole, membershipCount] = await Promise.all([
+  const [eligiblePerson, alumniRole, membershipCount] = await Promise.all([
+    tx.person.findFirst({ where: { id: personId, personStatus: "ACTIVE", account: { is: { status: "NORMAL" } } }, select: { id: true } }),
     tx.roleAssignment.findFirst({
       where: { personId, roleCode: "MEMBER_ALUMNI_PLATFORM", ...effectiveAt(now) },
       select: { id: true },
     }),
     tx.batchMembership.count({ where: { personId } }),
   ]);
-  if (!alumniRole || membershipCount === 0) {
+  if (!eligiblePerson || !alumniRole || membershipCount === 0) {
     throw new PermissionError(
       "PERMISSION_RULE_VIOLATION",
       "reimbursement.apply 仅可按人授予有效平台往届团员",
