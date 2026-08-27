@@ -33,15 +33,15 @@ CREATE TABLE `reimbursements` (
   CONSTRAINT `reimbursements_amount_check` CHECK (`total_amount` >= 0),
   CONSTRAINT `reimbursements_submission_shape_check` CHECK (
     (`status` = 'DRAFT') OR
-    (`current_submission_version_id` IS NOT NULL AND `first_submitted_at` IS NOT NULL AND `last_submitted_at` IS NOT NULL)
+    (`first_submitted_at` IS NOT NULL AND `last_submitted_at` IS NOT NULL)
   ),
   CONSTRAINT `reimbursements_paper_shape_check` CHECK (
     (`status` NOT IN ('PAPER_RECEIVED', 'FINANCE_SUBMITTED')) OR
-    (`paper_received_at` IS NOT NULL AND `paper_received_by_person_id` IS NOT NULL)
+    (`paper_received_at` IS NOT NULL)
   ),
   CONSTRAINT `reimbursements_finance_shape_check` CHECK (
     (`status` <> 'FINANCE_SUBMITTED') OR
-    (`finance_submitted_at` IS NOT NULL AND `finance_submitted_by_person_id` IS NOT NULL)
+    (`finance_submitted_at` IS NOT NULL)
   )
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -88,7 +88,7 @@ CREATE TABLE `reimbursement_invoices` (
   CONSTRAINT `reimbursement_invoice_amount_check` CHECK (`confirmed_amount` IS NULL OR `confirmed_amount` >= 0),
   CONSTRAINT `reimbursement_invoice_confirmed_shape_check` CHECK (
     (`ocr_status` <> 'CONFIRMED') OR
-    (`confirmed_at` IS NOT NULL AND `confirmed_by_person_id` IS NOT NULL AND `confirmed_expense_type` IS NOT NULL)
+    (`confirmed_at` IS NOT NULL AND `confirmed_expense_type` IS NOT NULL)
   )
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
