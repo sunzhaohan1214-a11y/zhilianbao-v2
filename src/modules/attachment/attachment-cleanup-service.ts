@@ -8,11 +8,7 @@ export class AttachmentCleanupService {
     const candidates = await this.repository.findExpiredTemporary(now, Math.min(Math.max(limit, 1), 500));
     let cleaned = 0;
     for (const attachment of candidates) {
-      const aborted = await this.repository.abortTemporary({
-        id: attachment.id,
-        actorPersonId: attachment.uploadedByPersonId,
-        requestId: "attachment-cleanup",
-      });
+      const aborted = await this.repository.abortExpiredTemporary(attachment.id);
       if (aborted?.uploadStatus !== "ABORTED") continue;
       if (aborted.stagingObjectKey) await this.storage.deleteObject(aborted.stagingObjectKey);
       if (aborted.objectKey) await this.storage.deleteObject(aborted.objectKey);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentCleanupService } from "@/modules/attachment/attachment-cleanup-service";
+import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { AttachmentLinkService } from "@/modules/attachment/attachment-link-service";
 import { AttachmentScanService } from "@/modules/attachment/attachment-scan-service";
 import { AttachmentService } from "@/modules/attachment/attachment-service";
@@ -21,6 +22,7 @@ import type { PermissionActor } from "@/modules/permissions/types";
 const prisma = getPrismaClient();
 const personIds: string[] = [];
 const attachmentIds: string[] = [];
+const areaIds: string[] = [];
 const PDF = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n");
 const config = {
   bucket: "test-private-bucket-1250000000",
@@ -104,10 +106,86 @@ afterAll(async () => {
     await prisma.attachment.deleteMany({ where: { id: { in: attachmentIds } } });
   }
   await prisma.person.deleteMany({ where: { id: { in: personIds } } });
+  await prisma.administrativeArea.deleteMany({ where: { id: { in: areaIds } } });
   await prisma.$disconnect();
 });
 
 describe("M0-005 attachment lifecycle on real MySQL", () => {
+  it("keeps internal scans safe while cleaning only abandoned public uploads", async () => {
+    const actor = await createActor("cleanup-boundaries");
+    const runtime = services();
+    const recovery = new AttachmentRecoveryService();
+    const expiredAt = new Date(Date.now() - 60_000);
+    const area = await prisma.administrativeArea.create({ data: { name: `附件公开区域-${randomUUID()}`, type: "TOWNSHIP" } });
+    areaIds.push(area.id);
+
+    async function createExpired(input: { public: boolean; scanStatus: "PASSED" | "SCANNING" | "REJECTED" | "FAILED" }) {
+      const attachment = await prisma.attachment.create({ data: {
+        originalFilename: `cleanup-${randomUUID()}.pdf`,
+        extension: "pdf",
+        declaredMimeType: "application/pdf",
+        expectedSizeBytes: BigInt(PDF.byteLength),
+        actualSizeBytes: BigInt(PDF.byteLength),
+        bucket: config.bucket,
+        region: config.region,
+        objectKey: `cleanup/${randomUUID()}.pdf`,
+        uploadStatus: "UPLOADED",
+        scanStatus: input.scanStatus,
+        isTemporary: true,
+        uploadExpiresAt: expiredAt,
+        uploadedByPersonId: input.public ? null : actor.personId,
+        publicUploadTokenHash: input.public ? randomUUID().replaceAll("-", "").repeat(2) : null,
+        publicAreaId: input.public ? area.id : null,
+      } });
+      attachmentIds.push(attachment.id);
+      return attachment;
+    }
+
+    const internalPassed = await createExpired({ public: false, scanStatus: "PASSED" });
+    const internalScanning = await createExpired({ public: false, scanStatus: "SCANNING" });
+    const publicPassed = await createExpired({ public: true, scanStatus: "PASSED" });
+    const publicRejected = await createExpired({ public: true, scanStatus: "REJECTED" });
+    const publicScanning = await createExpired({ public: true, scanStatus: "SCANNING" });
+    const linkedPublic = await createExpired({ public: true, scanStatus: "PASSED" });
+    await prisma.attachmentLink.create({ data: {
+      attachmentId: linkedPublic.id,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+    } });
+    await prisma.attachment.update({ where: { id: linkedPublic.id }, data: { isTemporary: false } });
+
+    await expect(runtime.cleanupService.cleanupExpiredTemporaryAttachments()).resolves.toBeGreaterThanOrEqual(2);
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: internalPassed.id } })).uploadStatus).toBe("UPLOADED");
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: internalScanning.id } })).scanStatus).toBe("SCANNING");
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: publicPassed.id } })).uploadStatus).toBe("ABORTED");
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: publicRejected.id } })).uploadStatus).toBe("ABORTED");
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: publicScanning.id } })).scanStatus).toBe("SCANNING");
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: linkedPublic.id } })).uploadStatus).toBe("UPLOADED");
+
+    await prisma.$transaction((tx) => recovery.recoverStaleScan(tx, publicScanning.id));
+    await expect(runtime.cleanupService.cleanupExpiredTemporaryAttachments()).resolves.toBeGreaterThanOrEqual(1);
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: publicScanning.id } })).uploadStatus).toBe("ABORTED");
+  });
+
+  it("rejects an expired 256-bit public upload token before complete", async () => {
+    const runtime = services();
+    const area = await prisma.administrativeArea.create({ data: { name: `附件凭证区域-${randomUUID()}`, type: "TOWNSHIP" } });
+    areaIds.push(area.id);
+    const intent = await runtime.service.createPublicUploadIntent({
+      filename: "public.pdf",
+      declaredMimeType: "application/pdf",
+      expectedSizeBytes: PDF.byteLength,
+      responsibleAreaId: area.id,
+    });
+    attachmentIds.push(intent.attachmentId);
+    runtime.storage.putObjectForTest(intent.stagingObjectKey, PDF);
+    await prisma.attachment.update({ where: { id: intent.attachmentId }, data: { uploadExpiresAt: new Date(Date.now() - 1) } });
+    await expect(runtime.service.completePublic({ attachmentId: intent.attachmentId, uploadToken: intent.uploadToken }))
+      .rejects.toMatchObject({ code: "ATTACHMENT_FORBIDDEN", status: 403 });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: intent.attachmentId } })).uploadStatus).toBe("PENDING_UPLOAD");
+  });
+
   it("runs intent -> complete -> pending gate -> clean scan -> access with SHA and AccessLog", async () => {
     const actor = await createActor("lifecycle");
     const runtime = services();
@@ -338,7 +416,7 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
       where: { id: cleanupCandidate.attachmentId },
       data: { uploadExpiresAt: new Date(Date.now() - 60_000) },
     });
-    await expect(runtime.cleanupService.cleanupExpiredTemporaryAttachments()).resolves.toBe(1);
+    await expect(runtime.cleanupService.cleanupExpiredTemporaryAttachments()).resolves.toBeGreaterThanOrEqual(1);
     expect((await prisma.attachment.findUniqueOrThrow({ where: { id: cleanupCandidate.attachmentId } })).uploadStatus).toBe("ABORTED");
     await expect(runtime.storage.headObject(cleanupCandidate.stagingObjectKey)).resolves.toEqual({ exists: false, sizeBytes: 0 });
 

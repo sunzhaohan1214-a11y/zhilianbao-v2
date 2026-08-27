@@ -327,6 +327,18 @@ export class EnterpriseService {
       if (source.status === "MERGED" || target.status !== "NORMAL") {
         throw new EnterpriseError("ENTERPRISE_STATE_CONFLICT", "目标企业必须正常且源企业不能已合并");
       }
+      // Lock dependency rows/ranges with current reads. Plain counts are
+      // consistent reads under MySQL REPEATABLE READ and can miss a lead that
+      // committed while this transaction was waiting for the Enterprise lock.
+      const leadDependencies = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM demand_leads WHERE enterprise_id = ${source.id} FOR UPDATE
+      `;
+      const demandDependencies = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM demands WHERE enterprise_id = ${source.id} FOR UPDATE
+      `;
+      if (leadDependencies.length > 0 || demandDependencies.length > 0) {
+        throw new EnterpriseError("ENTERPRISE_STATE_CONFLICT", "源企业存在需求线索或需求依赖，请先处理关联后再合并");
+      }
       const before = snapshotEnterprise(source, source.tagRelations.map(({ tagId }) => tagId));
       const updated = await tx.enterprise.update({ where: { id: source.id }, data: {
         status: "MERGED", mergedIntoId: target.id, currentVersion: { increment: 1 },
