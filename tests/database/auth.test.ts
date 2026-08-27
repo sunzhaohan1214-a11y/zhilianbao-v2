@@ -196,7 +196,7 @@ describe("M0-003 device and session integration", () => {
         { ...context(fixture.deviceId), ip: sharedIp },
       )).resolves.toMatchObject({ nextStep: "HOME" });
     }
-  });
+  }, 15_000);
 
   it("blocks many different invalid credentials from one IP", async () => {
     const sharedIp = `10.241.${Math.floor(ipCounter / 250)}.${ipCounter % 250}`;

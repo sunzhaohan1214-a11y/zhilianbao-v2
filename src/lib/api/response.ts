@@ -5,6 +5,7 @@ import { isAuthError } from "@/modules/identity/errors";
 import { isPermissionError } from "@/modules/permissions/permission-errors";
 import { isAttachmentError } from "@/modules/attachment/attachment-errors";
 import { isEnterpriseError } from "@/modules/enterprise/errors";
+import { isFoundationError } from "@/modules/member-foundation/errors";
 import { isPresenceError } from "@/modules/presence/errors";
 import { isPolicyError } from "@/modules/policy/errors";
 
@@ -14,9 +15,13 @@ export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status 
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
   if (isPolicyError(error)) {
-    return NextResponse.json({ ok: false, error: { code: error.code, message: error.message, details: {} }, requestId }, { status: error.status });
+    return NextResponse.json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details ?? {} },
+      requestId,
+    }, { status: error.status });
   }
-  if (isPresenceError(error)) {
+  if (isFoundationError(error) || isPresenceError(error)) {
     return NextResponse.json({
       ok: false,
       error: { code: error.code, message: error.message, details: error.details ?? {} },

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { e2eUsers } from "./auth-fixtures";
+import { e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 declare global {
   interface Window { __presenceGpsCalls: number }
@@ -19,6 +19,8 @@ async function apiPost(page: Page, path: string, body: unknown) {
     return { status: response.status, payload: await response.json() };
   }, { path, body });
 }
+
+test.beforeEach(async () => { await seedAuthFixtures(); });
 
 test("MEMBER_CURRENT reports Presence, sees current list, and never requests GPS", async ({ page }) => {
   await page.addInitScript(() => {
