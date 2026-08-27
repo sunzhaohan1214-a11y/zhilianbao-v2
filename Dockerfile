@@ -12,6 +12,9 @@ COPY . .
 COPY --from=deps /app/src/generated/prisma ./src/generated/prisma
 RUN npm run build
 
+FROM deps AS prod-deps
+RUN npm prune --omit=dev
+
 FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
@@ -23,6 +26,9 @@ RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/public ./public
+COPY --from=prod-deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/worker-dist ./worker-dist
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 

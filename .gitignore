@@ -5,6 +5,7 @@
 # Next.js
 /.next
 /out
+/worker-dist
 
 # tests
 /playwright-report

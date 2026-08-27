@@ -456,10 +456,13 @@ model OutboxEvent {
   dedupeKey     String?   @unique @map("dedupe_key") @db.VarChar(191)
   occurredAt    DateTime  @default(now()) @map("occurred_at") @db.DateTime(3)
   publishedAt   DateTime? @map("published_at") @db.DateTime(3)
+  nextAttemptAt DateTime? @map("next_attempt_at") @db.DateTime(3)
+  failedAt      DateTime? @map("failed_at") @db.DateTime(3)
   attempts      Int       @default(0) @db.UnsignedInt
   lastError     String?   @map("last_error") @db.Text
 
   @@index([publishedAt, occurredAt])
+  @@index([publishedAt, failedAt, nextAttemptAt, occurredAt], map: "outbox_consume_retry_idx")
   @@index([aggregateType, aggregateId, occurredAt])
   @@map("outbox_events")
 }

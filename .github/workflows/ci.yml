@@ -90,9 +90,15 @@ jobs:
       - name: Verify repeated migrate deploy is idempotent
         run: npm run db:migrate:deploy
       - run: npm run test:database
+      - name: Worker run-once smoke
+        env:
+          APP_ENV: test
+          WORKER_RUN_ONCE: "true"
+        run: npm run build:worker && npm run start:worker
 
   docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --tag zhilianbao-v2:m0-005 .
+      - run: docker build --tag zhilianbao-v2:m0-006 .
+      - run: docker run --rm zhilianbao-v2:m0-006 node worker-dist/main.js --help

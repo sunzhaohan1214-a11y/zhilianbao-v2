@@ -1,5 +1,5 @@
 import COS from "cos-nodejs-sdk-v5";
-import { getCredential, getPolicy, type PolicyDescription } from "qcloud-cos-sts";
+import sts, { type PolicyDescription } from "qcloud-cos-sts";
 import { AttachmentError } from "../attachment-errors";
 import type { StorageAdapter, StoredObjectHead, UploadAuthorization } from "./storage-adapter";
 
@@ -13,6 +13,8 @@ export const COS_UPLOAD_ACTIONS = [
   "name/cos:ListParts",
   "name/cos:AbortMultipartUpload",
 ] as const;
+
+const { getCredential, getPolicy } = sts;
 
 export function buildCosUploadPolicy(input: {
   bucket: string;

@@ -2,6 +2,7 @@ export * from "./attachment-cleanup-service";
 export * from "./attachment-config";
 export * from "./attachment-errors";
 export * from "./attachment-link-service";
+export * from "./attachment-recovery-service";
 export * from "./attachment-scan-service";
 export * from "./attachment-service";
 export * from "./file-policy";
