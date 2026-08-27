@@ -17,6 +17,10 @@ export function setAuthCookies(response: NextResponse, rawSessionToken: string, 
     path: "/",
     maxAge: THIRTY_DAYS_SECONDS,
   });
+  setDeviceCookie(response, deviceId);
+}
+
+export function setDeviceCookie(response: NextResponse, deviceId: string): void {
   response.cookies.set(DEVICE_COOKIE, deviceId, {
     httpOnly: true,
     secure: secureCookie(),

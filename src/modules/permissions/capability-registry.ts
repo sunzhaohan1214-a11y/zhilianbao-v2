@@ -11,8 +11,10 @@ export const ACTION_REGISTRY = {
   "admin.shell.access": { defaultScope: "GLOBAL_OPERATIONAL" },
 
   "demand.view": { defaultScope: "GLOBAL_PUBLISHED" },
+  "demand.lead.view": {},
   "demand.lead.create": {},
   "demand.lead.verify": { defaultScope: "TOWNSHIP" },
+  "demand.lead.restore": { defaultScope: "GLOBAL_OPERATIONAL" },
   "demand.formal.create": { defaultScope: "TOWNSHIP" },
   "demand.submit_review": { defaultScope: "TOWNSHIP" },
   "demand.review": { defaultScope: "GLOBAL_OPERATIONAL" },

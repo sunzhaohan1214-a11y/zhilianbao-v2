@@ -17,6 +17,7 @@ export async function POST(request: NextRequest, route: { params: Promise<{ id: 
     const { id } = await route.params;
     const attachment = await getAttachmentRuntime().repository.findById(id);
     if (!attachment) throw new AttachmentError("ATTACHMENT_NOT_FOUND", "附件不存在");
+    if (!attachment.uploadedByPersonId) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "无权操作此附件");
     await authorizeActor({
       actor,
       action: "attachment.temporary_self_access",

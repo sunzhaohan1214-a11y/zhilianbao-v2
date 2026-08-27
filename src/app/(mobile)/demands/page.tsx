@@ -1,5 +1,11 @@
-import { MobilePlaceholder } from "@/components/mobile/mobile-placeholder";
+import Link from "next/link";
+import { demandLeadPageContext } from "@/lib/demand/page-context";
 
-export default function DemandsPage() {
-  return <MobilePlaceholder title="需求" description="需求相关页面将在后续里程碑按规格实现。" />;
+export default async function DemandsPage() {
+  const { actor, service } = await demandLeadPageContext();
+  if (!actor.capabilities.has("demand.lead.view")) {
+    return <section><p className="text-sm font-medium text-blue-600">需求中心</p><h2 className="mt-1 text-2xl font-semibold">正式需求</h2><div className="mt-6 rounded-3xl border border-dashed border-black/10 bg-white p-8 text-center"><p className="font-medium">暂无已发布需求</p><p className="mt-2 text-sm text-neutral-500">未获线索权限的账号不会看到发布前线索。</p></div></section>;
+  }
+  const result = await service.list({ actor, query: { page: 1, pageSize: 20, actionableOnly: false } });
+  return <section><p className="text-sm font-medium text-blue-600">需求 · 线索工作池</p><h2 className="mt-1 text-2xl font-semibold">待核验线索</h2><p className="mt-2 text-sm text-neutral-500">仅展示当前账号有权处理的负责区域。</p><div className="mt-5 space-y-3">{result.items.map((lead) => <Link key={lead.id} href={`/demand-leads/${lead.id}`} className="block rounded-2xl border border-black/5 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-medium text-blue-600">{lead.businessNo}</p><h3 className="mt-1 font-semibold">{lead.rawTitle}</h3><p className="mt-1 text-sm text-neutral-500">{lead.rawEnterpriseName ?? lead.enterprise?.name ?? "待关联企业"}</p></div><span className="rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700">{lead.status}</span></div></Link>)}{result.items.length === 0 && <div className="rounded-2xl border border-dashed bg-white p-8 text-center text-sm text-neutral-500">当前工作池暂无线索。</div>}</div></section>;
 }

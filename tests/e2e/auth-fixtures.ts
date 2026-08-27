@@ -49,6 +49,32 @@ export async function seedAuthFixtures() {
   await prisma.policy.deleteMany({ where: { id: { in: policyIds } } });
   await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: policyAttachmentIds } } });
   await prisma.attachment.deleteMany({ where: { id: { in: policyAttachmentIds } } });
+  const e2eLeadIds = (await prisma.demandLead.findMany({
+    where: {
+      OR: [
+        { responsibleAreaId: { in: [enterpriseE2e.areaAId, enterpriseE2e.areaBId] } },
+        { createdByPersonId: { in: users.map(({ personId }) => personId) } },
+      ],
+    },
+    select: { id: true },
+  })).map(({ id }) => id);
+  const e2eDemandIds = (await prisma.demand.findMany({
+    where: {
+      OR: [
+        { createdByPersonId: { in: users.map(({ personId }) => personId) } },
+        { provenances: { some: { demandLeadId: { in: e2eLeadIds } } } },
+      ],
+    },
+    select: { id: true },
+  })).map(({ id }) => id);
+  await prisma.attachmentLink.deleteMany({ where: { entityType: "DEMAND", entityId: { in: e2eDemandIds } } });
+  await prisma.demandContactSnapshot.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandProvenance.deleteMany({ where: { OR: [{ demandId: { in: e2eDemandIds } }, { demandLeadId: { in: e2eLeadIds } }] } });
+  await prisma.demandLead.updateMany({ where: { id: { in: e2eLeadIds } }, data: { mergedIntoLeadId: null, convertedDemandId: null } });
+  await prisma.demand.deleteMany({ where: { id: { in: e2eDemandIds } } });
+  await prisma.demandLeadPublicIdempotency.deleteMany({ where: { demandLeadId: { in: e2eLeadIds } } });
+  await prisma.demandLeadSupplement.deleteMany({ where: { demandLeadId: { in: e2eLeadIds } } });
+  await prisma.demandLead.deleteMany({ where: { id: { in: e2eLeadIds } } });
   const enterpriseWhere = { createdByPersonId: { in: users.map(({ personId }) => personId) } };
   await prisma.presenceReport.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.enterprise.updateMany({ where: enterpriseWhere, data: { status: "NORMAL", mergedIntoId: null, primaryContactId: null } });

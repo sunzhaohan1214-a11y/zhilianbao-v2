@@ -9,6 +9,7 @@ export function AdminShell({ children }: Readonly<{ children: ReactNode }>) {
         <p className="mt-2 text-xl font-semibold">PC 管理后台</p>
         <nav className="mt-8 space-y-1 text-sm">
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin">工作台</Link>
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/demand-leads">需求线索</Link>
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/enterprises">企业管理</Link>
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/enterprise-change-requests">企业申请审核</Link>
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/members">人员与团员</Link>
