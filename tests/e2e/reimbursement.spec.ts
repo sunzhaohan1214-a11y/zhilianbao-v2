@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
-test.describe.configure({ mode: "serial" }); test.setTimeout(120_000);
+test.setTimeout(120_000);
 async function login(page: Page, user: { phone: string; password: string }) { await page.goto("/login"); await page.getByLabel("手机号").fill(user.phone); await page.getByLabel("密码", { exact: true }).fill(user.password); await Promise.all([page.waitForResponse((r) => r.url().endsWith("/api/v2/auth/login")), page.getByRole("button", { name: "登录" }).click()]); }
 async function api(page: Page, url: string, body?: unknown, headers?: Record<string, string>, method?: string) { return page.evaluate(async ({ url, body, headers, method }) => { const response = await fetch(url, { method: method ?? (body === undefined ? "GET" : "POST"), headers: body === undefined ? headers : { "content-type": "application/json", ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: response.status, json: await response.json() }; }, { url, body, headers, method }); }
 const body = (reason = "E2E 出行报销") => ({ type: "TRAVEL", reason, linkedTripId: null, expenses: [{ expenseType: "TRAVEL_TRANSPORT_ACTUAL", amount: "188.50", source: "MANUAL" }, { expenseType: "TRAVEL_MEAL_SUBSIDY", amount: "200", source: "MANUAL", referenceRate: "100", claimedDays: "2" }] });

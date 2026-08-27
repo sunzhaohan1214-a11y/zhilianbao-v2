@@ -133,8 +133,11 @@ export class ReimbursementService {
   }
 
   async list(input: Input & { query: { mode: "mine" | "manage"; status?: ReimbursementStatus; type?: "TRAVEL" | "ACTIVITY"; page: number; pageSize: number } }) {
-    await authorizeActor({ actor: input.actor, action: "reimbursement.view.self" });
-    if (input.query.mode === "manage" && !actorCanManageReimbursements(input.actor)) throw new ReimbursementError("REIMBURSEMENT_FORBIDDEN", "缺少报销管理权限");
+    if (input.query.mode === "manage") {
+      if (!actorCanManageReimbursements(input.actor)) throw new ReimbursementError("REIMBURSEMENT_FORBIDDEN", "缺少报销管理权限");
+    } else {
+      await authorizeActor({ actor: input.actor, action: "reimbursement.view.self" });
+    }
     return this.repository.list({ actor: input.actor, ...input.query });
   }
 
