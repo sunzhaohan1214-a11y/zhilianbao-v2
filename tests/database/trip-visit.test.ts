@@ -15,10 +15,12 @@ let admin: PermissionActor;
 let member: PermissionActor;
 let secondMember: PermissionActor;
 let minister: PermissionActor;
+let ministerMember: PermissionActor;
 let alumni: PermissionActor;
 let noAccountPersonId: string;
 
-async function fixture(name: string, role: RoleCode): Promise<PermissionActor> {
+async function fixture(name: string, roleInput: RoleCode | readonly RoleCode[]): Promise<PermissionActor> {
+  const roles: RoleCode[] = typeof roleInput === "string" ? [roleInput] : [...roleInput];
   const person = await prisma.person.create({ data: { name: `B-M2-004 ${name} ${randomUUID()}` } });
   const account = await prisma.account.create({ data: {
     personId: person.id,
@@ -26,19 +28,18 @@ async function fixture(name: string, role: RoleCode): Promise<PermissionActor> {
     passwordHash: "database-test-only",
     status: "NORMAL",
   } });
-  await prisma.roleAssignment.create({ data: {
-    personId: person.id,
-    roleCode: role,
+  await prisma.roleAssignment.createMany({ data: roles.map((roleCode) => ({
+    personId: person.id, roleCode,
     effectiveAt: new Date("2025-01-01T00:00:00Z"),
     reason: "B-M2-004 Trip database fixture",
-  } });
+  })) });
   personIds.push(person.id); accountIds.push(account.id);
   return {
     personId: person.id, accountId: account.id, accountStatus: "NORMAL", permissionVersion: BigInt(1),
-    effectiveRoles: [role], capabilities: resolveCapabilities([role], new Set()), specialPermissions: new Set(),
+    effectiveRoles: roles, capabilities: resolveCapabilities(roles, new Set()), specialPermissions: new Set(),
     selfPersonId: person.id, townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true,
-    hasGlobalOperational: role === "ADMIN" || role === "SUPER_ADMIN", hasSystem: role === "SUPER_ADMIN",
-    currentBatchMember: role === "MEMBER_CURRENT", configurationIssues: [],
+    hasGlobalOperational: roles.includes("ADMIN") || roles.includes("SUPER_ADMIN"), hasSystem: roles.includes("SUPER_ADMIN"),
+    currentBatchMember: roles.includes("MEMBER_CURRENT"), configurationIssues: [],
   };
 }
 
@@ -60,11 +61,12 @@ function tripBody(day: number, participantIds: string[] = [member.personId]) {
 }
 
 beforeAll(async () => {
-  [admin, member, secondMember, minister, alumni] = await Promise.all([
+  [admin, member, secondMember, minister, ministerMember, alumni] = await Promise.all([
     fixture("admin", "ADMIN"),
     fixture("member", "MEMBER_CURRENT"),
     fixture("second member", "MEMBER_CURRENT"),
     fixture("minister", "MINISTER"),
+    fixture("minister member", ["MINISTER", "MEMBER_CURRENT"]),
     fixture("alumni", "MEMBER_ALUMNI_PLATFORM"),
   ]);
   const noAccountPerson = await prisma.person.create({ data: { name: `B-M2-004 no account ${randomUUID()}` } });
@@ -119,23 +121,30 @@ describe("B-M2-004 real MySQL Trip and Visit invariants", () => {
     expect(await prisma.tripParticipant.count({ where: { tripId: trip.id, personId: noAccountPersonId } })).toBe(0);
   });
 
-  it("lets a MINISTER-only actor create, update, and cancel their own team trip with truthful audit identity", async () => {
+  it("lets a MINISTER-only actor create a team trip but rejects update and cancel at Permission", async () => {
     expect(minister.effectiveRoles).toEqual(["MINISTER"]);
     expect(minister.currentBatchMember).toBe(false);
     const trip = await service.create({ actor: minister, body: tripBody(25, []) });
-    const updated = await service.update({ actor: minister, tripId: trip.id, body: { title: "B-M2-004 MINISTER 更新" } });
-    expect(updated.title).toBe("B-M2-004 MINISTER 更新");
-    const canceled = await service.cancel({ actor: minister, tripId: trip.id, body: { reason: "B-M2-004 MINISTER 取消验证" } });
-    expect(canceled.status).toBe("CANCELED");
+    await expect(service.update({ actor: minister, tripId: trip.id, body: { title: "B-M2-004 MINISTER 越权更新" } }))
+      .rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+    await expect(service.cancel({ actor: minister, tripId: trip.id, body: { reason: "B-M2-004 MINISTER 越权取消" } }))
+      .rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     expect(await prisma.auditLog.findMany({
       where: { actorPersonId: minister.personId, entityId: trip.id },
       orderBy: { actionCode: "asc" },
       select: { actionCode: true, actorPersonId: true },
     })).toEqual([
-      { actionCode: "TRIP_CANCELED", actorPersonId: minister.personId },
       { actionCode: "TRIP_CREATED", actorPersonId: minister.personId },
-      { actionCode: "TRIP_UPDATED", actorPersonId: minister.personId },
     ]);
+  });
+
+  it("lets MINISTER plus MEMBER_CURRENT update and cancel through composed roles", async () => {
+    expect(ministerMember.effectiveRoles).toEqual(["MINISTER", "MEMBER_CURRENT"]);
+    const trip = await service.create({ actor: ministerMember, body: tripBody(28, []) });
+    const updated = await service.update({ actor: ministerMember, tripId: trip.id, body: { title: "B-M2-004 组合角色更新" } });
+    expect(updated.title).toBe("B-M2-004 组合角色更新");
+    const canceled = await service.cancel({ actor: ministerMember, tripId: trip.id, body: { reason: "B-M2-004 组合角色取消" } });
+    expect(canceled.status).toBe("CANCELED");
   });
 
   it("validates alumni overall-only updates against Presence while holding the Trip lock", async () => {

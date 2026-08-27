@@ -122,13 +122,20 @@ describe("B-M2-004 permission matrix", () => {
     await expect(authorizeActor({ actor: actor(["ADMIN"]), action: "visit.correct.admin", resource: { resourceType: "enterprise_visit", requiredScope: "GLOBAL_OPERATIONAL" } })).resolves.toMatchObject({ allowed: true });
   });
 
-  it("lets a MINISTER-only creator maintain their own trip without inheriting member or admin powers", async () => {
+  it("lets MINISTER-only create a team trip without member maintenance or admin powers", async () => {
     const minister = actor(["MINISTER"]);
     await expect(authorizeActor({ actor: minister, action: "trip.create.team" })).resolves.toMatchObject({ allowed: true });
-    await expect(authorizeActor({ actor: minister, action: "trip.update" })).resolves.toMatchObject({ allowed: true });
-    await expect(authorizeActor({ actor: minister, action: "trip.cancel" })).resolves.toMatchObject({ allowed: true });
+    await expect(authorizeActor({ actor: minister, action: "trip.update" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+    await expect(authorizeActor({ actor: minister, action: "trip.cancel" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     await expect(authorizeActor({ actor: minister, action: "demand.claim" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     await expect(authorizeActor({ actor: minister, action: "visit.correct.admin" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+  });
+
+  it("grants update and cancel through natural MINISTER plus MEMBER_CURRENT role composition", async () => {
+    const ministerMember = actor(["MINISTER", "MEMBER_CURRENT"]);
+    await expect(authorizeActor({ actor: ministerMember, action: "trip.create.team" })).resolves.toMatchObject({ allowed: true });
+    await expect(authorizeActor({ actor: ministerMember, action: "trip.update" })).resolves.toMatchObject({ allowed: true });
+    await expect(authorizeActor({ actor: ministerMember, action: "trip.cancel" })).resolves.toMatchObject({ allowed: true });
   });
 });
 

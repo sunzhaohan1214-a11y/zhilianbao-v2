@@ -63,6 +63,8 @@ export const ACTION_REGISTRY = {
   "talent.contact.withdraw": { defaultScope: "TOWNSHIP" },
   "talent.contact_person.change": { defaultScope: "GLOBAL_OPERATIONAL" },
   "talent.merge": { defaultScope: "GLOBAL_OPERATIONAL" },
+  "talent.disable": { defaultScope: "GLOBAL_OPERATIONAL" },
+  "talent.round.void": { defaultScope: "GLOBAL_OPERATIONAL" },
 
   "policy.view": { defaultScope: "GLOBAL_PUBLISHED" },
   "policy.create": { defaultScope: "GLOBAL_OPERATIONAL" },

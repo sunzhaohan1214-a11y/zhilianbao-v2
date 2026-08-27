@@ -60,7 +60,7 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
   const adminSession = await authenticatedPage(browser, e2eUsers.admin);
   const normal = normalSession.page;
   const prisma = getPrismaClient();
-  const noAccountPersonId = "10000000-0000-4000-8000-000000000012";
+  const noAccountPersonId = "10000000-0000-4000-8000-000000000013";
 
   try {
     await prisma.person.upsert({
@@ -144,14 +144,16 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
     expect(ministerTrip.status).toBe(201);
     const ministerTripId = ministerTrip.payload.data.id as string;
     const ministerUpdate = await apiPost(ministerOnlySession.page, `/api/v2/trips/${ministerTripId}/update`, { title: "E2E 纯 MINISTER 已更新" });
-    expect(ministerUpdate.status).toBe(200);
+    expect(ministerUpdate.status).toBe(403);
+    expect(ministerUpdate.payload).toMatchObject({ error: { code: "FORBIDDEN_CAPABILITY" } });
     const ministerCancel = await apiPost(ministerOnlySession.page, `/api/v2/trips/${ministerTripId}/cancel`, { reason: "E2E 纯 MINISTER 取消" });
-    expect(ministerCancel.status).toBe(200);
+    expect(ministerCancel.status).toBe(403);
+    expect(ministerCancel.payload).toMatchObject({ error: { code: "FORBIDDEN_CAPABILITY" } });
     expect(await prisma.auditLog.findMany({
       where: { actorPersonId: e2eUsers.ministerOnly.personId, entityId: ministerTripId },
       orderBy: { actionCode: "asc" },
       select: { actionCode: true },
-    })).toEqual([{ actionCode: "TRIP_CANCELED" }, { actionCode: "TRIP_CREATED" }, { actionCode: "TRIP_UPDATED" }]);
+    })).toEqual([{ actionCode: "TRIP_CREATED" }]);
 
     const departmentTrip = await apiPost(departmentSession.page, "/api/v2/trips", {
       title: "E2E 部门县外行程",

@@ -1,0 +1,2 @@
+import Link from "next/link"; import { AdminTalentCreateForm } from "@/components/talent/admin-talent-actions"; import { talentPageContext } from "@/lib/talent/page-context";
+export default async function NewTalentPage(){const{actor,service}=await talentPageContext();const options=await service.governanceOptions({actor});return <section><Link href="/admin/talents" className="text-sm text-blue-600">‹ 返回人才管理</Link><h1 className="my-5 text-3xl font-semibold">人才正式建档</h1><AdminTalentCreateForm people={options.people.map(x=>({id:x.id,name:x.name}))}/></section>}
