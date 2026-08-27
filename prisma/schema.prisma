@@ -250,6 +250,51 @@ enum DemandCollaboratorStatus {
   REMOVED
 }
 
+enum DemandRecommendationStage {
+  CURRENT
+  ALUMNI
+}
+
+enum DemandRecommendationRunStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FALLBACK_SUCCEEDED
+  FAILED
+}
+
+enum DemandRecommendationTriggerType {
+  AUTO
+  ADMIN
+}
+
+enum DemandRecommendationCandidateKind {
+  CURRENT
+  ALUMNI_PLATFORM
+  ALUMNI_HISTORICAL
+}
+
+enum DemandRecommendationSource {
+  AI
+  RULE_FALLBACK
+  MANUAL
+}
+
+enum DemandRecommendationResponseStatus {
+  WILLING
+  DECLINE
+}
+
+enum DemandAlumniHelperKind {
+  PLATFORM
+  HISTORICAL
+}
+
+enum DemandAlumniHelperStatus {
+  ACTIVE
+  ENDED
+}
+
 enum TalentScopeType {
   DOMESTIC
   OVERSEAS
@@ -405,6 +450,13 @@ model Person {
   decidedDemandCollaborations    DemandCollaborationRequest[] @relation("DemandCollaborationDecider")
   demandCollaborations           DemandCollaborator[]         @relation("DemandCollaboratorPerson")
   endedDemandCollaborations      DemandCollaborator[]         @relation("DemandCollaboratorEnder")
+  createdRecommendationRuns      DemandRecommendationRun[]    @relation("RecommendationRunCreator")
+  recommendationItems            DemandRecommendationItem[]   @relation("RecommendationCandidate")
+  recommendationResponses        DemandRecommendationItem[]   @relation("RecommendationResponder")
+  alumniHelpAssignments          DemandAlumniHelper[]          @relation("DemandAlumniHelperPerson")
+  createdAlumniHelpAssignments   DemandAlumniHelper[]          @relation("DemandAlumniHelperCreator")
+  townshipHandlerAssignments     DemandTownshipHandler[]       @relation("DemandTownshipHandlerPerson")
+  assignedTownshipHandlers       DemandTownshipHandler[]       @relation("DemandTownshipHandlerAssigner")
 
   @@index([personStatus])
   @@map("persons")
@@ -504,6 +556,7 @@ model Organization {
   postBatchMemberships     BatchMembership[]            @relation("PostOrganization")
   transferredHelpRequests  HelpRequest[]                 @relation("HelpTransferredOrganization")
   helpAssignments          HelpAssignmentHistory[]       @relation("HelpAssignmentOrganization")
+  demandTownshipHandlers   DemandTownshipHandler[]
 
   @@index([parentId])
   @@index([type, status])
@@ -1490,6 +1543,9 @@ model Demand {
   ownerHistories        DemandOwnerHistory[]
   collaborationRequests DemandCollaborationRequest[]
   collaborators         DemandCollaborator[]
+  recommendationRuns    DemandRecommendationRun[]
+  alumniHelpers         DemandAlumniHelper[]
+  townshipHandlers      DemandTownshipHandler[]
 
   @@index([responsibleAreaId, status, createdAt])
   @@index([enterpriseId, status])
@@ -1570,6 +1626,109 @@ model DemandCollaborator {
   @@index([demandId, status, effectiveAt])
   @@index([personId, status, effectiveAt])
   @@map("demand_collaborators")
+}
+
+model DemandRecommendationRun {
+  id                String                          @id @default(uuid()) @db.Char(36)
+  demandId          String                          @map("demand_id") @db.Char(36)
+  stage             DemandRecommendationStage
+  status            DemandRecommendationRunStatus  @default(PENDING)
+  triggerType       DemandRecommendationTriggerType @map("trigger_type")
+  rulesVersion      String                          @map("rules_version") @db.VarChar(100)
+  promptVersion     String?                         @map("prompt_version") @db.VarChar(100)
+  provider          String?                         @db.VarChar(100)
+  model             String?                         @db.VarChar(100)
+  candidateCount    Int                             @default(0) @map("candidate_count") @db.UnsignedInt
+  currentKey        Int?                            @map("current_key") @db.UnsignedTinyInt
+  startedAt         DateTime?                       @map("started_at") @db.DateTime(3)
+  finishedAt        DateTime?                       @map("finished_at") @db.DateTime(3)
+  durationMs        Int?                            @map("duration_ms") @db.UnsignedInt
+  errorCategory     String?                         @map("error_category") @db.VarChar(100)
+  createdByPersonId String?                         @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime                        @default(now()) @map("created_at") @db.DateTime(3)
+  demand            Demand                          @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  createdByPerson   Person?                         @relation("RecommendationRunCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  items             DemandRecommendationItem[]
+
+  @@unique([demandId, stage, currentKey])
+  @@index([demandId, stage, createdAt])
+  @@index([status, createdAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("demand_recommendation_runs")
+}
+
+model DemandRecommendationItem {
+  id                   String                                      @id @default(uuid()) @db.Char(36)
+  runId                String                                      @map("run_id") @db.Char(36)
+  personId             String                                      @map("person_id") @db.Char(36)
+  candidateKind        DemandRecommendationCandidateKind           @map("candidate_kind")
+  rank                 Int                                         @db.UnsignedTinyInt
+  source               DemandRecommendationSource
+  reason               String                                      @db.VarChar(500)
+  evidenceSnapshotJson Json                                        @map("evidence_snapshot_json")
+  responseStatus       DemandRecommendationResponseStatus?         @map("response_status")
+  respondedAt          DateTime?                                   @map("responded_at") @db.DateTime(3)
+  respondedByPersonId  String?                                     @map("responded_by_person_id") @db.Char(36)
+  responseNote         String?                                     @map("response_note") @db.VarChar(500)
+  createdAt            DateTime                                    @default(now()) @map("created_at") @db.DateTime(3)
+  run                  DemandRecommendationRun                     @relation(fields: [runId], references: [id], onDelete: Restrict)
+  person               Person                                      @relation("RecommendationCandidate", fields: [personId], references: [id], onDelete: Restrict)
+  respondedByPerson    Person?                                     @relation("RecommendationResponder", fields: [respondedByPersonId], references: [id], onDelete: Restrict)
+  alumniHelper         DemandAlumniHelper?
+
+  @@unique([runId, rank])
+  @@unique([runId, personId])
+  @@index([personId, responseStatus, createdAt])
+  @@index([respondedByPersonId, respondedAt])
+  @@map("demand_recommendation_items")
+}
+
+model DemandAlumniHelper {
+  id                         String                    @id @default(uuid()) @db.Char(36)
+  demandId                   String                    @map("demand_id") @db.Char(36)
+  personId                   String                    @map("person_id") @db.Char(36)
+  helperKind                 DemandAlumniHelperKind    @map("helper_kind")
+  sourceRecommendationItemId String?                   @unique @map("source_recommendation_item_id") @db.Char(36)
+  effectiveAt                DateTime                  @default(now()) @map("effective_at") @db.DateTime(3)
+  expiredAt                  DateTime?                 @map("expired_at") @db.DateTime(3)
+  status                     DemandAlumniHelperStatus  @default(ACTIVE)
+  activeKey                  Int?                      @default(1) @map("active_key") @db.UnsignedTinyInt
+  createdByPersonId          String                    @map("created_by_person_id") @db.Char(36)
+  reason                     String?                   @db.VarChar(500)
+  createdAt                  DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  demand                     Demand                    @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  person                     Person                    @relation("DemandAlumniHelperPerson", fields: [personId], references: [id], onDelete: Restrict)
+  sourceRecommendationItem   DemandRecommendationItem? @relation(fields: [sourceRecommendationItemId], references: [id], onDelete: Restrict)
+  createdByPerson            Person                    @relation("DemandAlumniHelperCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, personId, activeKey])
+  @@index([demandId, status, effectiveAt])
+  @@index([personId, status, effectiveAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("demand_alumni_helpers")
+}
+
+model DemandTownshipHandler {
+  id                 String       @id @default(uuid()) @db.Char(36)
+  demandId           String       @map("demand_id") @db.Char(36)
+  personId           String       @map("person_id") @db.Char(36)
+  organizationId     String       @map("organization_id") @db.Char(36)
+  effectiveAt        DateTime     @default(now()) @map("effective_at") @db.DateTime(3)
+  expiredAt          DateTime?    @map("expired_at") @db.DateTime(3)
+  activeKey          Int?         @default(1) @map("active_key") @db.UnsignedTinyInt
+  assignedByPersonId String       @map("assigned_by_person_id") @db.Char(36)
+  reason             String       @db.VarChar(500)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.DateTime(3)
+  demand             Demand       @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  person             Person       @relation("DemandTownshipHandlerPerson", fields: [personId], references: [id], onDelete: Restrict)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignedByPerson   Person       @relation("DemandTownshipHandlerAssigner", fields: [assignedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, activeKey])
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([organizationId, effectiveAt, expiredAt])
+  @@index([assignedByPersonId, createdAt])
+  @@map("demand_township_handlers")
 }
 
 model DemandProvenance {

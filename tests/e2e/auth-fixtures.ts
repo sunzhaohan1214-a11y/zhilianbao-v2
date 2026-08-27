@@ -94,6 +94,11 @@ export async function seedAuthFixtures() {
     select: { id: true },
   })).map(({ id }) => id);
   await prisma.demand.updateMany({ where: { id: { in: e2eDemandIds } }, data: { status: "RETURNED", currentOwnerPersonId: null } });
+  await prisma.demandAlumniHelper.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandTownshipHandler.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandRecommendationItem.deleteMany({ where: { run: { demandId: { in: e2eDemandIds } } } });
+  await prisma.demandRecommendationRun.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.jobTask.deleteMany({ where: { jobType: "DEMAND_RECOMMENDATION_RUN" } });
   await prisma.attachmentLink.deleteMany({ where: { entityType: "DEMAND", entityId: { in: e2eDemandIds } } });
   await prisma.demandCommandIdempotency.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandCollaborator.deleteMany({ where: { demandId: { in: e2eDemandIds } } });

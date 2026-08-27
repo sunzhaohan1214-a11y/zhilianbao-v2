@@ -497,10 +497,19 @@ Run：
 
 ```text
 demand_id
-candidate_stage: CURRENT/ALUMNI
+stage: CURRENT/ALUMNI
+status: PENDING/RUNNING/SUCCEEDED/FALLBACK_SUCCEEDED/FAILED
+trigger_type: AUTO/ADMIN
 rules_version
 prompt_version
-model_metadata
+provider
+model
+candidate_count
+current_key
+started_at
+finished_at
+duration_ms
+error_category
 created_at
 ```
 
@@ -511,11 +520,18 @@ person_id
 rank
 reason
 evidence_snapshot
-user_response
+candidate_kind: CURRENT/ALUMNI_PLATFORM/ALUMNI_HISTORICAL
+source: AI/RULE_FALLBACK/MANUAL
+response_status: WILLING/DECLINE
 responded_at
+responded_by_person_id
+response_note
 ```
 
 最多3名当前阶段候选。
+
+`DemandAlumniHelper` 保存往届人员、`PLATFORM | HISTORICAL` 类型、来源推荐项、有效期与状态。
+`DemandTownshipHandler` 保存当前镇区经办人、当时组织、有效期、指派人和原因。
 
 ---
 

@@ -8,6 +8,7 @@ import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
 import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
+import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation-handler";
 import { JobHandlerRegistry } from "./handler-registry";
 import { JobRepository } from "./job-repository";
 import { JobRunner, type WorkerLogger } from "./job-runner";
@@ -57,6 +58,7 @@ export class WorkerRuntime {
     const jobHandlers = new JobHandlerRegistry();
     jobHandlers.register("ATTACHMENT_SCAN", new AttachmentScanJobHandler(attachment.scanService));
     jobHandlers.register("ATTACHMENT_TEMP_CLEANUP", new AttachmentCleanupJobHandler(attachment.cleanupService));
+    jobHandlers.register("DEMAND_RECOMMENDATION_RUN", new DemandRecommendationJobHandler());
     this.runner = dependencies?.runner ?? new JobRunner(this.jobs, jobHandlers, config.heartbeatMs, logger);
 
     const outboxHandlers = new OutboxHandlerRegistry();
