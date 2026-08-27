@@ -14,6 +14,9 @@ let enterpriseId: string;
 let admin: PermissionActor;
 let member: PermissionActor;
 let secondMember: PermissionActor;
+let minister: PermissionActor;
+let alumni: PermissionActor;
+let noAccountPersonId: string;
 
 async function fixture(name: string, role: RoleCode): Promise<PermissionActor> {
   const person = await prisma.person.create({ data: { name: `B-M2-004 ${name} ${randomUUID()}` } });
@@ -57,11 +60,16 @@ function tripBody(day: number, participantIds: string[] = [member.personId]) {
 }
 
 beforeAll(async () => {
-  [admin, member, secondMember] = await Promise.all([
+  [admin, member, secondMember, minister, alumni] = await Promise.all([
     fixture("admin", "ADMIN"),
     fixture("member", "MEMBER_CURRENT"),
     fixture("second member", "MEMBER_CURRENT"),
+    fixture("minister", "MINISTER"),
+    fixture("alumni", "MEMBER_ALUMNI_PLATFORM"),
   ]);
+  const noAccountPerson = await prisma.person.create({ data: { name: `B-M2-004 no account ${randomUUID()}` } });
+  noAccountPersonId = noAccountPerson.id;
+  personIds.push(noAccountPerson.id);
   const area = await prisma.administrativeArea.create({ data: { name: `B-M2-004 TEST ${randomUUID()}`, type: "TOWNSHIP" } });
   areaId = area.id;
   const enterprise = await prisma.enterprise.create({ data: {
@@ -94,6 +102,7 @@ afterAll(async () => {
   await prisma.trip.deleteMany({ where: { id: { in: tripIds } } });
   await prisma.stateTransitionHistory.deleteMany({ where: { actorPersonId: { in: personIds } } });
   await prisma.auditLog.deleteMany({ where: { actorAccountId: { in: accountIds } } });
+  await prisma.presenceReport.deleteMany({ where: { personId: { in: personIds } } });
   await prisma.enterprise.deleteMany({ where: { id: enterpriseId } });
   await prisma.administrativeArea.deleteMany({ where: { id: areaId } });
   await prisma.roleAssignment.deleteMany({ where: { personId: { in: personIds } } });
@@ -103,6 +112,52 @@ afterAll(async () => {
 });
 
 describe("B-M2-004 real MySQL Trip and Visit invariants", () => {
+  it("rejects adding an active person without an Account under the Trip lock", async () => {
+    const trip = await service.create({ actor: admin, body: tripBody(27) });
+    await expect(service.addParticipant({ actor: admin, tripId: trip.id, body: { personId: noAccountPersonId } }))
+      .rejects.toMatchObject({ code: "TRIP_PARTICIPANT_INVALID" });
+    expect(await prisma.tripParticipant.count({ where: { tripId: trip.id, personId: noAccountPersonId } })).toBe(0);
+  });
+
+  it("lets a MINISTER-only actor create, update, and cancel their own team trip with truthful audit identity", async () => {
+    expect(minister.effectiveRoles).toEqual(["MINISTER"]);
+    expect(minister.currentBatchMember).toBe(false);
+    const trip = await service.create({ actor: minister, body: tripBody(25, []) });
+    const updated = await service.update({ actor: minister, tripId: trip.id, body: { title: "B-M2-004 MINISTER 更新" } });
+    expect(updated.title).toBe("B-M2-004 MINISTER 更新");
+    const canceled = await service.cancel({ actor: minister, tripId: trip.id, body: { reason: "B-M2-004 MINISTER 取消验证" } });
+    expect(canceled.status).toBe("CANCELED");
+    expect(await prisma.auditLog.findMany({
+      where: { actorPersonId: minister.personId, entityId: trip.id },
+      orderBy: { actionCode: "asc" },
+      select: { actionCode: true, actorPersonId: true },
+    })).toEqual([
+      { actionCode: "TRIP_CANCELED", actorPersonId: minister.personId },
+      { actionCode: "TRIP_CREATED", actorPersonId: minister.personId },
+      { actionCode: "TRIP_UPDATED", actorPersonId: minister.personId },
+    ]);
+  });
+
+  it("validates alumni overall-only updates against Presence while holding the Trip lock", async () => {
+    await prisma.presenceReport.create({ data: {
+      personId: alumni.personId,
+      arrivalAt: new Date("2026-08-26T00:00:00Z"),
+      expectedDepartureAt: new Date("2026-08-26T04:00:00Z"),
+      note: "B-M2-004 alumni update boundary",
+    } });
+    const trip = await service.create({ actor: alumni, body: tripBody(26, []) });
+    const covered = await service.update({
+      actor: alumni, tripId: trip.id, body: { overallEndAt: "2026-08-26T11:30:00+08:00" },
+    });
+    expect(covered.overallEndAt).toEqual(new Date("2026-08-26T03:30:00Z"));
+    expect(covered.nodes.map(({ id }) => id)).toEqual(trip.nodes.map(({ id }) => id));
+    await expect(service.update({
+      actor: alumni, tripId: trip.id, body: { overallEndAt: "2026-08-26T18:00:00+08:00" },
+    })).rejects.toMatchObject({ code: "TRIP_ALUMNI_PRESENCE_REQUIRED" });
+    expect((await prisma.trip.findUniqueOrThrow({ where: { id: trip.id } })).overallEndAt)
+      .toEqual(new Date("2026-08-26T03:30:00Z"));
+  });
+
   it("creates one shared result and exactly one Visit per enterprise under concurrent submissions", async () => {
     const trip = await service.create({ actor: admin, body: tripBody(20) });
     const resultBody = { resultSummary: "完成走访并形成共识", nodeResults: [{ tripNodeId: trip.nodes[0].id, resultSummary: "企业提出融资需求" }] };

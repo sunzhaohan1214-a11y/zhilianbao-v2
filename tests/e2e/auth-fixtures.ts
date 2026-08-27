@@ -12,6 +12,7 @@ export const e2eUsers = {
   township: { personId: "10000000-0000-4000-8000-000000000008", accountId: "20000000-0000-4000-8000-000000000008", phone: "13800001008", password: "Township-pass-123" },
   alumni: { personId: "10000000-0000-4000-8000-000000000009", accountId: "20000000-0000-4000-8000-000000000009", phone: "13800001009", password: "Alumni-pass-123" },
   department: { personId: "10000000-0000-4000-8000-000000000010", accountId: "20000000-0000-4000-8000-000000000010", phone: "13800001010", password: "Department-pass-123" },
+  ministerOnly: { personId: "10000000-0000-4000-8000-000000000011", accountId: "20000000-0000-4000-8000-000000000011", phone: "13800001011", password: "Minister-only-pass-123" },
 } as const;
 
 export const enterpriseE2e = {
@@ -164,6 +165,7 @@ export async function seedAuthFixtures() {
       { personId: e2eUsers.township.personId, roleCode: "TOWNSHIP_STAFF" as const },
       { personId: e2eUsers.alumni.personId, roleCode: "MEMBER_ALUMNI_PLATFORM" as const },
       { personId: e2eUsers.department.personId, roleCode: "DEPARTMENT_STAFF" as const },
+      { personId: e2eUsers.ministerOnly.personId, roleCode: "MINISTER" as const },
     ].map(({ personId, roleCode }) => ({
       personId,
       roleCode,

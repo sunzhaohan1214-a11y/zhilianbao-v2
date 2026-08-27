@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RoleCode } from "@/generated/prisma/client";
 import { authorizeActor, resolveCapabilities, type PermissionActor } from "@/modules/permissions";
+import type { TripRepository } from "@/modules/trip/repository/trip-repository";
 import {
   deriveTripStatus,
   effectiveTripEnd,
@@ -11,6 +12,7 @@ import {
   tripCreateSchema,
   tripResultSchema,
   tripTimeRange,
+  TripService,
   validateTripNodes,
   visitDemandLeadSchema,
 } from "@/modules/trip";
@@ -45,12 +47,14 @@ describe("B-M2-004 Trip derived status and node rules", () => {
     expect(effectiveTripEnd({ canceledAt: null, result: null, nodes, overallEndAt: null }).toISOString()).toBe("2026-09-12T15:59:59.999Z");
   });
 
-  it("accepts ordered same-day nodes and rejects duplicate enterprises or cross-day nodes", () => {
+  it("accepts ordered same-day nodes and rejects duplicate enterprises or any cross-day endpoint", () => {
     const first = { plannedStartAt: new Date("2026-09-12T01:00:00Z"), plannedEndAt: new Date("2026-09-12T02:00:00Z"), enterpriseId, locationName: "甲企业", content: "走访" };
     const second = { plannedStartAt: new Date("2026-09-12T03:00:00Z"), enterpriseId: secondEnterpriseId, locationName: "乙企业", content: "座谈" };
     expect(validateTripNodes([first, second])).toHaveLength(2);
     expect(() => validateTripNodes([first, { ...second, enterpriseId }])).toThrow(expect.objectContaining({ code: "TRIP_DUPLICATE_ENTERPRISE" }));
     expect(() => validateTripNodes([first, { ...second, plannedStartAt: new Date("2026-09-13T03:00:00Z") }])).toThrow(expect.objectContaining({ code: "TRIP_NODE_INVALID" }));
+    expect(() => validateTripNodes([{ ...first, plannedEndAt: new Date("2026-09-12T16:00:00Z") }])).toThrow(expect.objectContaining({ code: "TRIP_NODE_INVALID" }));
+    expect(() => validateTripNodes([first], new Date("2026-09-12T16:00:00Z"))).toThrow(expect.objectContaining({ code: "TRIP_NODE_INVALID" }));
     expect(() => validateTripNodes([first], new Date("2026-09-12T01:30:00Z"))).toThrow(expect.objectContaining({ code: "TRIP_NODE_INVALID" }));
   });
 
@@ -60,10 +64,17 @@ describe("B-M2-004 Trip derived status and node rules", () => {
       { plannedStartAt: new Date("2026-09-12T01:00:00Z"), plannedEndAt: new Date("2026-09-12T02:00:00Z") },
     ], new Date("2026-09-12T05:00:00Z"));
     expect(range).toEqual({ start: new Date("2026-09-12T01:00:00Z"), end: new Date("2026-09-12T05:00:00Z") });
+    expect(tripTimeRange([
+      { plannedStartAt: new Date("2026-09-12T01:00:00Z"), plannedEndAt: new Date("2026-09-12T02:00:00Z") },
+      { plannedStartAt: new Date("2026-09-12T03:00:00Z") },
+    ])).toEqual({ start: new Date("2026-09-12T01:00:00Z"), end: new Date("2026-09-12T03:00:00Z") });
   });
 
-  it("allows active people without accounts, rejects disabled accounts, and protects the last active participant", () => {
-    expect(isEligibleTripParticipant({ personStatus: "ACTIVE", account: null })).toBe(true);
+  it("requires an enabled account for new participants and protects the last active participant", () => {
+    expect(isEligibleTripParticipant({ personStatus: "ACTIVE", account: null })).toBe(false);
+    expect(isEligibleTripParticipant({ personStatus: "ACTIVE" })).toBe(false);
+    expect(isEligibleTripParticipant({ personStatus: "ACTIVE", account: { status: "UNACTIVATED" } })).toBe(true);
+    expect(isEligibleTripParticipant({ personStatus: "ACTIVE", account: { status: "PENDING_ENABLE" } })).toBe(true);
     expect(isEligibleTripParticipant({ personStatus: "ACTIVE", account: { status: "NORMAL" } })).toBe(true);
     expect(isEligibleTripParticipant({ personStatus: "ACTIVE", account: { status: "DISABLED" } })).toBe(false);
     expect(isEligibleTripParticipant({ personStatus: "INACTIVE", account: null })).toBe(false);
@@ -109,5 +120,56 @@ describe("B-M2-004 permission matrix", () => {
     await expect(authorizeActor({ actor: actor(["MEMBER_CURRENT"]), action: "trip.create.team" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     await expect(authorizeActor({ actor: actor(["MEMBER_CURRENT"]), action: "visit.correct.admin" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     await expect(authorizeActor({ actor: actor(["ADMIN"]), action: "visit.correct.admin", resource: { resourceType: "enterprise_visit", requiredScope: "GLOBAL_OPERATIONAL" } })).resolves.toMatchObject({ allowed: true });
+  });
+
+  it("lets a MINISTER-only creator maintain their own trip without inheriting member or admin powers", async () => {
+    const minister = actor(["MINISTER"]);
+    await expect(authorizeActor({ actor: minister, action: "trip.create.team" })).resolves.toMatchObject({ allowed: true });
+    await expect(authorizeActor({ actor: minister, action: "trip.update" })).resolves.toMatchObject({ allowed: true });
+    await expect(authorizeActor({ actor: minister, action: "trip.cancel" })).resolves.toMatchObject({ allowed: true });
+    await expect(authorizeActor({ actor: minister, action: "demand.claim" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+    await expect(authorizeActor({ actor: minister, action: "visit.correct.admin" })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+  });
+});
+
+describe("B-M2-004 final update candidate validation", () => {
+  const existingTrip = {
+    id: "trip",
+    createdByPersonId: "person",
+    canceledAt: null,
+    result: null,
+    overallEndAt: null,
+    nodes: [{
+      plannedStartAt: new Date("2026-09-12T01:00:00Z"),
+      plannedEndAt: new Date("2026-09-12T03:00:00Z"),
+      enterpriseId: null,
+      locationName: "测试地点",
+      address: null,
+      content: "测试行程",
+    }],
+  };
+
+  function serviceFor(presenceFound: boolean) {
+    const tx = {
+      presenceReport: { findFirst: async () => presenceFound ? { id: "presence" } : null },
+    };
+    const repository = {
+      transaction: async (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+      lockTrip: async () => undefined,
+      findTrip: async () => existingTrip,
+    } as unknown as TripRepository;
+    return new TripService(repository, {} as never);
+  }
+
+  it("rejects an overall-only update earlier than the existing latest node", async () => {
+    await expect(serviceFor(true).update({
+      actor: actor(["MEMBER_CURRENT"]), tripId: "trip", body: { overallEndAt: "2026-09-12T10:00:00+08:00" },
+    })).rejects.toMatchObject({ code: "TRIP_NODE_INVALID" });
+  });
+
+  it("checks an alumni overall-only update against Presence using the final schedule", async () => {
+    await expect(serviceFor(false).update({
+      actor: actor(["MEMBER_ALUMNI_PLATFORM"]), tripId: "trip", body: { overallEndAt: "2026-09-12T12:00:00+08:00" },
+    })).rejects.toMatchObject({ code: "TRIP_ALUMNI_PRESENCE_REQUIRED" });
   });
 });

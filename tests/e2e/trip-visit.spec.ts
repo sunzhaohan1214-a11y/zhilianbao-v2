@@ -53,18 +53,31 @@ test.beforeEach(async () => { await seedAuthFixtures(); });
 test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async ({ browser }) => {
   const normalSession = await authenticatedPage(browser, e2eUsers.normal, true);
   const ministerSession = await authenticatedPage(browser, e2eUsers.minister);
+  const ministerOnlySession = await authenticatedPage(browser, e2eUsers.ministerOnly);
   const leaderSession = await authenticatedPage(browser, e2eUsers.groupLeader);
   const alumniSession = await authenticatedPage(browser, e2eUsers.alumni);
   const departmentSession = await authenticatedPage(browser, e2eUsers.department);
   const adminSession = await authenticatedPage(browser, e2eUsers.admin);
   const normal = normalSession.page;
+  const prisma = getPrismaClient();
+  const noAccountPersonId = "10000000-0000-4000-8000-000000000012";
 
   try {
-    const prisma = getPrismaClient();
+    await prisma.person.upsert({
+      where: { id: noAccountPersonId },
+      create: { id: noAccountPersonId, name: "E2E 无账号参与人" },
+      update: { name: "E2E 无账号参与人", personStatus: "ACTIVE" },
+    });
     await prisma.enterprise.createMany({ data: [
       { id: enterpriseE2e.enterprise2Id, name: "E2E 荷乡科技企业", responsibleAreaId: enterpriseE2e.areaAId, address: "宝应县安宜镇测试大道2号", mainProducts: "新能源装备", createdByPersonId: e2eUsers.admin.personId },
       { id: enterpriseE2e.enterprise3Id, name: "E2E 湖畔制造企业", responsibleAreaId: enterpriseE2e.areaBId, address: "宝应县射阳湖镇测试大道3号", mainProducts: "精密制造", createdByPersonId: e2eUsers.admin.personId },
     ] });
+    await normal.goto("/trips/new");
+    const participantSelect = normal.getByLabel("共享参与人（可多选）");
+    await expect(participantSelect).toBeVisible();
+    await expect(participantSelect.locator(`option[value="${e2eUsers.minister.personId}"]`)).toHaveCount(1);
+    await expect(participantSelect.locator(`option[value="${noAccountPersonId}"]`)).toHaveCount(0);
+
     const created = await apiPost(normal, "/api/v2/trips", {
       title: "E2E 三企业共享行程",
       purpose: "逐项验证工作行程与企业走访",
@@ -79,6 +92,10 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
     const tripId = created.payload.data.id as string;
     const tripNodeIds = (created.payload.data.nodes as Array<{ id: string }>).map(({ id }) => id);
 
+    const rejectedNoAccount = await apiPost(normal, `/api/v2/trips/${tripId}/participants`, { personId: noAccountPersonId });
+    expect(rejectedNoAccount.status).toBe(422);
+    expect(rejectedNoAccount.payload).toMatchObject({ error: { code: "TRIP_PARTICIPANT_INVALID" } });
+
     const added = await apiPost(normal, `/api/v2/trips/${tripId}/participants`, { personId: e2eUsers.groupLeader.personId });
     expect(added.status).toBe(200);
     const left = await apiPost(leaderSession.page, `/api/v2/trips/${tripId}/participants/leave`, {});
@@ -90,6 +107,11 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
       nodes: [{ plannedStartAt: "2026-08-18T09:00:00+08:00", locationName: "E2E 自由地点", content: "TEST ONLY" }],
     });
     expect(personal.status).toBe(201);
+    const tooEarlyOverall = await apiPost(normal, `/api/v2/trips/${personal.payload.data.id}/update`, {
+      overallEndAt: "2026-08-18T08:00:00+08:00",
+    });
+    expect(tooEarlyOverall.status).toBe(422);
+    expect(tooEarlyOverall.payload).toMatchObject({ error: { code: "TRIP_NODE_INVALID" } });
     const lastLeave = await apiPost(normal, `/api/v2/trips/${personal.payload.data.id}/participants/leave`, {});
     expect(lastLeave.status).toBe(409);
     expect(lastLeave.payload).toMatchObject({ error: { code: "TRIP_LAST_PARTICIPANT_CANNOT_LEAVE" } });
@@ -108,6 +130,28 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
     });
     expect(coveredPresence.status).toBe(201);
     expect(coveredPresence.payload.data.participants).toHaveLength(1);
+    const outsidePresence = await apiPost(alumniSession.page, `/api/v2/trips/${coveredPresence.payload.data.id}/update`, {
+      overallEndAt: "2026-09-12T19:00:00+08:00",
+    });
+    expect(outsidePresence.status).toBe(422);
+    expect(outsidePresence.payload).toMatchObject({ error: { code: "TRIP_ALUMNI_PRESENCE_REQUIRED" } });
+
+    const ministerTrip = await apiPost(ministerOnlySession.page, "/api/v2/trips", {
+      title: "E2E 纯 MINISTER 团队行程",
+      purpose: "验证创建后维护权限",
+      nodes: [{ plannedStartAt: "2026-08-17T09:00:00+08:00", plannedEndAt: "2026-08-17T10:00:00+08:00", locationName: "E2E MINISTER 地点", content: "TEST ONLY" }],
+    });
+    expect(ministerTrip.status).toBe(201);
+    const ministerTripId = ministerTrip.payload.data.id as string;
+    const ministerUpdate = await apiPost(ministerOnlySession.page, `/api/v2/trips/${ministerTripId}/update`, { title: "E2E 纯 MINISTER 已更新" });
+    expect(ministerUpdate.status).toBe(200);
+    const ministerCancel = await apiPost(ministerOnlySession.page, `/api/v2/trips/${ministerTripId}/cancel`, { reason: "E2E 纯 MINISTER 取消" });
+    expect(ministerCancel.status).toBe(200);
+    expect(await prisma.auditLog.findMany({
+      where: { actorPersonId: e2eUsers.ministerOnly.personId, entityId: ministerTripId },
+      orderBy: { actionCode: "asc" },
+      select: { actionCode: true },
+    })).toEqual([{ actionCode: "TRIP_CANCELED" }, { actionCode: "TRIP_CREATED" }, { actionCode: "TRIP_UPDATED" }]);
 
     const departmentTrip = await apiPost(departmentSession.page, "/api/v2/trips", {
       title: "E2E 部门县外行程",
@@ -173,8 +217,9 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
     expect(await prisma.outboxEvent.count({ where: { aggregateId: { in: [tripId, visitId] } } })).toBe(0);
     expect(await normal.evaluate(() => window.__tripGpsCalls)).toBe(0);
   } finally {
+    await prisma.person.deleteMany({ where: { id: noAccountPersonId } });
     await Promise.all([
-      normalSession.context.close(), ministerSession.context.close(), leaderSession.context.close(),
+      normalSession.context.close(), ministerSession.context.close(), ministerOnlySession.context.close(), leaderSession.context.close(),
       alumniSession.context.close(), departmentSession.context.close(), adminSession.context.close(),
     ]);
   }

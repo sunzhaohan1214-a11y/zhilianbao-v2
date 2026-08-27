@@ -100,7 +100,7 @@ function shanghaiDayBounds(at: Date): { start: Date; end: Date } {
 }
 
 export function isEligibleTripParticipant(person: { personStatus: string; account?: { status: string } | null }): boolean {
-  return person.personStatus === "ACTIVE" && person.account?.status !== "DISABLED";
+  return person.personStatus === "ACTIVE" && Boolean(person.account) && person.account?.status !== "DISABLED";
 }
 
 export function isLastActiveTripParticipant(participants: readonly { leftAt: Date | null }[]): boolean {
@@ -139,6 +139,9 @@ export function validateTripNodes(nodes: readonly TripNodeInput[], overallEndAt?
   if (nodes.length === 0) throw new TripError("TRIP_NODE_INVALID", "行程至少需要一个节点");
   const enterpriseIds = new Set<string>();
   const day = shanghaiDateKey(nodes[0].plannedStartAt);
+  if (overallEndAt && shanghaiDateKey(overallEndAt) !== day) {
+    throw new TripError("TRIP_NODE_INVALID", "总体结束时间必须与行程节点位于同一个北京时间自然日");
+  }
   let previousStart: Date | undefined;
   let latestMoment = nodes[0].plannedStartAt;
   return nodes.map((node, index) => {
@@ -150,6 +153,9 @@ export function validateTripNodes(nodes: readonly TripNodeInput[], overallEndAt?
     }
     if (shanghaiDateKey(node.plannedStartAt) !== day) {
       throw new TripError("TRIP_NODE_INVALID", "同一行程的节点必须位于同一个北京时间自然日");
+    }
+    if (node.plannedEndAt && shanghaiDateKey(node.plannedEndAt) !== day) {
+      throw new TripError("TRIP_NODE_INVALID", `第 ${index + 1} 个节点的结束时间必须与行程位于同一个北京时间自然日`);
     }
     if (node.enterpriseId) {
       if (enterpriseIds.has(node.enterpriseId)) {
@@ -175,6 +181,23 @@ export function validateTripNodes(nodes: readonly TripNodeInput[], overallEndAt?
     }
     return node;
   });
+}
+
+function finalTripSchedule(
+  trip: { nodes: readonly { plannedStartAt: Date; plannedEndAt: Date | null; enterpriseId: string | null; locationName: string; address: string | null; content: string }[]; overallEndAt: Date | null },
+  changes: TripUpdateInput,
+): { nodes: TripNodeInput[]; overallEndAt: Date | null } {
+  return {
+    nodes: changes.nodes ?? trip.nodes.map((node) => ({
+      plannedStartAt: node.plannedStartAt,
+      plannedEndAt: node.plannedEndAt ?? undefined,
+      enterpriseId: node.enterpriseId ?? undefined,
+      locationName: node.locationName,
+      address: node.address,
+      content: node.content,
+    })),
+    overallEndAt: changes.overallEndAt !== undefined ? changes.overallEndAt : trip.overallEndAt,
+  };
 }
 
 function hasActiveParticipant(
@@ -249,7 +272,7 @@ export class TripService {
       if (rows.length !== 1) throw new TripError("TRIP_PARTICIPANT_INVALID", "参与人不存在或不可用");
       const person = await tx.person.findUnique({ where: { id: personId }, include: { account: true } });
       if (!person || !isEligibleTripParticipant(person)) {
-        throw new TripError("TRIP_PARTICIPANT_INVALID", "参与人必须有效，且已有账号不得处于停用状态");
+        throw new TripError("TRIP_PARTICIPANT_INVALID", "参与人必须有效、已有账号，且账号不得处于停用状态");
       }
     }
   }
@@ -459,8 +482,12 @@ export class TripService {
   private async applyTripUpdate(tx: TripTransaction, trip: Awaited<ReturnType<TripRepository["findTrip"]>> & {}, changes: TripUpdateInput) {
     if (!trip) throw new TripError("TRIP_NOT_FOUND", "行程不存在");
     let normalizedNodes;
-    if (changes.nodes) {
-      normalizedNodes = validateTripNodes(changes.nodes, changes.overallEndAt === undefined ? trip.overallEndAt : changes.overallEndAt);
+    if (changes.nodes !== undefined || changes.overallEndAt !== undefined) {
+      const candidate = finalTripSchedule(trip, changes);
+      const validatedNodes = validateTripNodes(candidate.nodes, candidate.overallEndAt);
+      normalizedNodes = changes.nodes === undefined ? undefined : validatedNodes;
+    }
+    if (normalizedNodes) {
       await this.lockNormalEnterprises(tx, normalizedNodes.flatMap((node) => node.enterpriseId ? [node.enterpriseId] : []));
     }
     await tx.trip.update({ where: { id: trip.id }, data: {
@@ -483,7 +510,11 @@ export class TripService {
       const trip = await this.lockAndRequireTrip(tx, input.tripId);
       if (trip.createdByPersonId !== input.actor.personId) throw new TripError("TRIP_FORBIDDEN", "只有创建人可修改核心行程");
       if (trip.canceledAt || trip.result) throw new TripError("TRIP_STATE_CONFLICT", "已取消或已完成行程的核心事实已锁定");
-      if (changes.nodes) await this.requireAlumniPresence(tx, input.actor, changes.nodes, changes.overallEndAt ?? trip.overallEndAt);
+      if (changes.nodes !== undefined || changes.overallEndAt !== undefined) {
+        const candidate = finalTripSchedule(trip, changes);
+        validateTripNodes(candidate.nodes, candidate.overallEndAt);
+        await this.requireAlumniPresence(tx, input.actor, candidate.nodes, candidate.overallEndAt);
+      }
       const updated = await this.applyTripUpdate(tx, trip, changes);
       await writeTripAudit(tx, {
         ...input, actionCode: "TRIP_UPDATED", entityType: "TRIP", entityId: trip.id,
@@ -839,10 +870,7 @@ export class TripService {
   async participantOptions(input: ServiceInput) {
     await authorizeActor({ actor: input.actor, action: "trip.view" });
     return this.repository.prisma.person.findMany({
-      where: { personStatus: "ACTIVE", OR: [
-        { account: { is: null } },
-        { account: { is: { status: { not: "DISABLED" } } } },
-      ] },
+      where: { personStatus: "ACTIVE", account: { is: { status: { not: "DISABLED" } } } },
       orderBy: [{ name: "asc" }, { id: "asc" }],
       select: { id: true, name: true },
       take: 200,

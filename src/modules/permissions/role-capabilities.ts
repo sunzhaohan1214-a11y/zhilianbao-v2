@@ -32,6 +32,8 @@ export const TEAM_COORDINATOR_CAPABILITIES = [
   "presence.current.team_view",
   "trip.team.create",
   "trip.create.team",
+  "trip.update",
+  "trip.cancel",
   "report.monthly.team_view",
   "report.monthly.team_download",
   "demand.team_coordinator.remind",
