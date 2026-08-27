@@ -102,18 +102,41 @@ export class AnnouncementService {
     });
   }
 
-  private async attach(tx: Prisma.TransactionClient, input: { versionId: string; attachmentIds: string[]; actorId: string }) {
+  private async attach(tx: Prisma.TransactionClient, input: { announcementId: string; versionId: string; attachmentIds: string[]; actorId: string }) {
     for (const attachmentId of [...input.attachmentIds].sort()) {
       await tx.$queryRaw`SELECT id FROM attachments WHERE id = ${attachmentId} FOR UPDATE`;
       const attachment = await tx.attachment.findUnique({ where: { id: attachmentId } });
-      if (!attachment || attachment.uploadStatus !== "UPLOADED" || attachment.scanStatus !== "PASSED" || !attachment.objectKey) {
-        throw new AnnouncementError("ANNOUNCEMENT_ATTACHMENT_INVALID", "公告附件尚未完成安全扫描");
+      const links = await tx.attachmentLink.findMany({
+        where: { attachmentId },
+        orderBy: { id: "asc" },
+        select: { entityType: true, entityId: true, relationType: true },
+      });
+      const safeFile = attachment?.uploadStatus === "UPLOADED" && attachment.scanStatus === "PASSED" && Boolean(attachment.objectKey);
+      const isNewUpload = links.length === 0
+        && attachment?.uploadedByPersonId === input.actorId
+        && attachment.isTemporary
+        && safeFile;
+      let isSameAnnouncementHistory = false;
+      if (attachment && links.length > 0 && safeFile && links.every((link) => link.entityType === VERSION_ENTITY && link.relationType === ATTACHMENT_RELATION)) {
+        const sourceVersionIds = [...new Set(links.map(({ entityId }) => entityId))];
+        const sourceVersionCount = await tx.announcementVersion.count({
+          where: { id: { in: sourceVersionIds }, announcementId: input.announcementId },
+        });
+        isSameAnnouncementHistory = sourceVersionCount === sourceVersionIds.length;
       }
-      await tx.attachment.update({ where: { id: attachmentId }, data: { isTemporary: false, permissionLevel: "PARENT_AUTHORIZED" } });
-      await tx.attachmentLink.upsert({
-        where: { attachmentId_entityType_entityId_relationType: { attachmentId, entityType: VERSION_ENTITY, entityId: input.versionId, relationType: ATTACHMENT_RELATION } },
-        create: { attachmentId, entityType: VERSION_ENTITY, entityId: input.versionId, relationType: ATTACHMENT_RELATION, createdByPersonId: input.actorId },
-        update: {},
+      if (!attachment || (!isNewUpload && !isSameAnnouncementHistory)) {
+        throw new AnnouncementError("ANNOUNCEMENT_ATTACHMENT_INVALID", "公告附件无效或不允许绑定到当前公告");
+      }
+      await tx.attachmentLink.create({ data: {
+        attachmentId,
+        entityType: VERSION_ENTITY,
+        entityId: input.versionId,
+        relationType: ATTACHMENT_RELATION,
+        createdByPersonId: input.actorId,
+      } });
+      if (isNewUpload) await tx.attachment.update({
+        where: { id: attachmentId },
+        data: { isTemporary: false, permissionLevel: "PARENT_AUTHORIZED" },
       });
     }
   }
@@ -153,8 +176,9 @@ export class AnnouncementService {
       await tx.announcement.update({ where: { id: announcement.id }, data: { currentVersionId: version.id } });
       const now = new Date();
       await tx.announcementAudienceRule.createMany({ data: body.audience.map((rule) => ruleData(rule, announcement.id, input.actor.personId, now)) });
-      await this.attach(tx, { versionId: version.id, attachmentIds: body.attachmentIds, actorId: input.actor.personId });
+      await this.attach(tx, { announcementId: announcement.id, versionId: version.id, attachmentIds: body.attachmentIds, actorId: input.actor.personId });
       await audit(tx, { ...input, actionCode: "ANNOUNCEMENT_CREATED", entityId: announcement.id, after: { versionId: version.id, versionNo: 1, audienceCount: body.audience.length } });
+      await audit(tx, { ...input, actionCode: "ANNOUNCEMENT_VERSION_CREATED", entityId: announcement.id, after: { versionId: version.id, versionNo: 1 } });
       return { id: announcement.id, status: "DRAFT", currentVersion: version };
     });
   }
@@ -168,6 +192,9 @@ export class AnnouncementService {
       const now = new Date();
       const rules = (await this.activeRules(tx, item.id, now)).map(storedRule);
       const recipientIds = await resolveAudience(tx, rules, now);
+      if (recipientIds.length === 0) {
+        throw new AnnouncementError("ANNOUNCEMENT_AUDIENCE_EMPTY", "当前公告范围内没有可接收的有效内部账号，请调整发布范围后重试");
+      }
       await this.materialize(tx, item.currentVersion.id, recipientIds);
       await tx.announcement.update({ where: { id: item.id }, data: { status: "PUBLISHED", publishedAt: now, publishedByPersonId: input.actor.personId } });
       await tx.stateTransitionHistory.create({ data: { entityType: ENTITY, entityId: item.id, fromState: "DRAFT", toState: "PUBLISHED", actionCode: "ANNOUNCEMENT_PUBLISHED", actorPersonId: input.actor.personId, requestId: input.context?.requestId } });
@@ -200,7 +227,7 @@ export class AnnouncementService {
         reason: body.reason,
         createdByPersonId: input.actor.personId,
       } });
-      await this.attach(tx, { versionId: version.id, attachmentIds: nextAttachmentIds, actorId: input.actor.personId });
+      await this.attach(tx, { announcementId: item.id, versionId: version.id, attachmentIds: nextAttachmentIds, actorId: input.actor.personId });
       await tx.announcement.update({ where: { id: item.id }, data: { currentVersionId: version.id } });
       if (item.status === "PUBLISHED") {
         const rules = (await this.activeRules(tx, item.id)).map(storedRule);
@@ -208,6 +235,7 @@ export class AnnouncementService {
         await this.materialize(tx, version.id, recipientIds);
         await this.outbox.append({ eventType: "ANNOUNCEMENT_UPDATED", aggregateType: ENTITY, aggregateId: item.id, payload: { announcementId: item.id, versionId: version.id, recipientIds, needConfirm: version.needConfirm, eventKey: `v${version.versionNo}` }, dedupeKey: `announcement:updated:${version.id}` }, tx);
       }
+      await audit(tx, { ...input, actionCode: "ANNOUNCEMENT_VERSION_CREATED", entityId: item.id, after: { versionId: version.id, versionNo: version.versionNo } });
       await audit(tx, { ...input, actionCode: "ANNOUNCEMENT_CONTENT_UPDATED", entityId: item.id, before: { versionId: item.currentVersion.id, versionNo: item.currentVersion.versionNo }, after: { versionId: version.id, versionNo: version.versionNo }, reason: body.reason });
       return { id: item.id, unchanged: false, currentVersion: version };
     });
@@ -282,12 +310,16 @@ export class AnnouncementService {
   async read(input: Input & { announcementId: string }) {
     await authorizeActor({ actor: input.actor, action: "announcement.view" });
     return this.transaction(async (tx) => {
+      await this.lock(tx, input.announcementId);
       const item = await tx.announcement.findUnique({ where: { id: input.announcementId }, include: { currentVersion: true } });
       if (!item?.currentVersion || item.status !== "PUBLISHED") throw new AnnouncementError("ANNOUNCEMENT_NOT_FOUND", "公告不存在");
       const state = await tx.announcementRecipientState.findUnique({ where: { versionId_personId: { versionId: item.currentVersion.id, personId: input.actor.personId } } });
       if (!state || state.revokedAt) throw new AnnouncementError("ANNOUNCEMENT_NOT_FOUND", "公告不存在");
       const readAt = state.readAt ?? new Date();
-      if (!state.readAt) await tx.announcementRecipientState.update({ where: { id: state.id }, data: { readAt } });
+      if (!state.readAt) {
+        await tx.announcementRecipientState.update({ where: { id: state.id }, data: { readAt } });
+        await audit(tx, { ...input, actionCode: "ANNOUNCEMENT_READ", entityId: item.id, after: { versionId: item.currentVersion.id, versionNo: item.currentVersion.versionNo, readAt: readAt.toISOString() } });
+      }
       return { announcementId: item.id, versionId: item.currentVersion.id, readAt };
     });
   }
@@ -302,7 +334,10 @@ export class AnnouncementService {
       const state = await tx.announcementRecipientState.findUnique({ where: { versionId_personId: { versionId: item.currentVersion.id, personId: input.actor.personId } } });
       if (!state || state.revokedAt) throw new AnnouncementError("ANNOUNCEMENT_NOT_FOUND", "公告不存在");
       const confirmedAt = state.confirmedAt ?? new Date();
-      if (!state.confirmedAt) await tx.announcementRecipientState.update({ where: { id: state.id }, data: { confirmedAt } });
+      if (!state.confirmedAt) {
+        await tx.announcementRecipientState.update({ where: { id: state.id }, data: { confirmedAt } });
+        await audit(tx, { ...input, actionCode: "ANNOUNCEMENT_CONFIRMED", entityId: item.id, after: { versionId: item.currentVersion.id, versionNo: item.currentVersion.versionNo, confirmedAt: confirmedAt.toISOString() } });
+      }
       await completeTodos(tx, { aggregateType: ENTITY, aggregateId: item.id, personIds: [input.actor.personId], todoType: "ANNOUNCEMENT_CONFIRM", now: confirmedAt });
       return { announcementId: item.id, versionId: item.currentVersion.id, confirmedAt };
     });

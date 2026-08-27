@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAnnouncementSchema, updateAnnouncementAudienceSchema } from "@/modules/announcement/schemas";
 import { OUTBOX_EVENT_TYPES, outboxPayloadSchemas } from "@/modules/outbox/outbox-types";
+import { notificationListSchema } from "@/modules/notification/schemas";
 import { resolveCapabilities } from "@/modules/permissions/role-capabilities";
 
 describe("C-M3-003 announcement and notification foundation", () => {
@@ -45,5 +46,12 @@ describe("C-M3-003 announcement and notification foundation", () => {
     expect([...capabilities]).toEqual(expect.arrayContaining([
       "announcement.view", "announcement.confirm", "message.view.self", "message.read.self", "todo.view.self",
     ]));
+  });
+
+  it("parses message filters without coercing the string false to true", () => {
+    expect(notificationListSchema.parse({ unread: "true", type: "HELP_REOPENED", module: "HELP" })).toMatchObject({ unread: true, type: "HELP_REOPENED", module: "HELP" });
+    expect(notificationListSchema.parse({ unread: "false" }).unread).toBe(false);
+    expect(() => notificationListSchema.parse({ unread: "1" })).toThrow();
+    expect(() => notificationListSchema.parse({ module: "UNKNOWN" })).toThrow();
   });
 });
