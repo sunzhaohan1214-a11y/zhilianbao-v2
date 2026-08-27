@@ -11,6 +11,7 @@ import { InMemoryStorageAdapter } from "./storage/in-memory-storage-adapter";
 import type { StorageAdapter } from "./storage/storage-adapter";
 import { registerPolicyAttachmentAuthorizer } from "@/modules/policy/attachment-authorizer";
 import { registerDemandAttachmentAuthorizers } from "@/modules/demand/attachment-authorization";
+import { registerTripAttachmentAuthorizers } from "@/modules/trip/attachment-authorization";
 import { registerTalentAttachmentAuthorizers } from "@/modules/talent/attachment-authorizer";
 import { registerHelpAttachmentAuthorizers } from "@/modules/help/attachment-authorizer";
 import { registerAnnouncementAttachmentAuthorizer } from "@/modules/announcement/attachment-authorizer";
@@ -49,6 +50,7 @@ function createRuntime(): AttachmentRuntime {
   const parentAuthorizers = new AttachmentParentAuthorizerRegistry();
   registerPolicyAttachmentAuthorizer(parentAuthorizers);
   registerDemandAttachmentAuthorizers(parentAuthorizers);
+  registerTripAttachmentAuthorizers(parentAuthorizers);
   registerTalentAttachmentAuthorizers(parentAuthorizers);
   registerHelpAttachmentAuthorizers(parentAuthorizers);
   registerAnnouncementAttachmentAuthorizer(parentAuthorizers);

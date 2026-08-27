@@ -10,6 +10,10 @@ export default function MePage() {
           <p className="font-medium">来离宝</p>
           <p className="mt-1 text-sm text-neutral-500">填报完整来宝安排、查看当前在宝</p>
         </Link>
+        <Link href="/me/work/trips" className="mt-3 block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+          <p className="font-medium">工作行程</p>
+          <p className="mt-1 text-sm text-neutral-500">共享多节点行程、结果与企业走访</p>
+        </Link>
       </div>
       <div className="mt-6">
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">个人事务</p>
