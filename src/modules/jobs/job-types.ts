@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const JOB_TYPES = ["ATTACHMENT_SCAN", "ATTACHMENT_TEMP_CLEANUP", "REIMBURSEMENT_INVOICE_OCR", "REIMBURSEMENT_EXPORT"] as const;
+export const JOB_TYPES = ["ATTACHMENT_SCAN", "ATTACHMENT_TEMP_CLEANUP", "TRIP_RESULT_DUE", "REIMBURSEMENT_INVOICE_OCR", "REIMBURSEMENT_EXPORT"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const jobPayloadSchemas = {
@@ -8,6 +8,11 @@ export const jobPayloadSchemas = {
   ATTACHMENT_TEMP_CLEANUP: z.object({ limit: z.number().int().min(1).max(500).optional() }).strict(),
   REIMBURSEMENT_INVOICE_OCR: z.object({ invoiceId: z.uuid() }).strict(),
   REIMBURSEMENT_EXPORT: z.object({ exportTaskId: z.uuid() }).strict(),
+  TRIP_RESULT_DUE: z.object({
+    tripId: z.uuid(),
+    dueAt: z.iso.datetime(),
+    eventKey: z.string().min(1).max(120),
+  }).strict(),
 } satisfies Record<JobType, z.ZodType>;
 
 export type JobPayloadByType = {

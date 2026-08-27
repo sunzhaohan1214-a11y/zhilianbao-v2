@@ -11,6 +11,7 @@ import { JobHandlerRegistry } from "@/modules/jobs/handler-registry";
 import { JobRepository } from "@/modules/jobs/job-repository";
 import { JobRunner } from "@/modules/jobs/job-runner";
 import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attachment-uploaded-handler";
+import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { OutboxRepository } from "@/modules/outbox/outbox-repository";
@@ -37,6 +38,10 @@ async function enqueueCleanup(index: string, overrides: { maxRetries?: number; s
 }
 
 afterAll(async () => {
+  if (personIds.length > 0) {
+    await prisma.todo.deleteMany({ where: { personId: { in: personIds } } });
+    await prisma.message.deleteMany({ where: { personId: { in: personIds } } });
+  }
   await prisma.outboxEvent.deleteMany({ where: { dedupeKey: { startsWith: keyPrefix } } });
   await prisma.jobTask.deleteMany({ where: { idempotencyKey: { startsWith: keyPrefix } } });
   if (downstreamJobKeys.length > 0) {
@@ -214,6 +219,64 @@ describe("M0-006 Job Queue on real MySQL", () => {
 });
 
 describe("M0-006 Transactional Outbox on real MySQL", () => {
+  it("retries Claim collaboration delivery and keeps request-scoped messages and todos exact once", async () => {
+    const people = await Promise.all(["staff", "owner", "applicant", "invitee", "removed"].map((name) =>
+      prisma.person.create({ data: { name: `C-M3-003 ${name} ${runId}` } })));
+    personIds.push(...people.map(({ id }) => id));
+    const [staff, owner, applicant, invitee, removed] = people;
+    const demandId = randomUUID();
+    const applyId = randomUUID();
+    const otherApplyId = randomUUID();
+    const inviteId = randomUUID();
+    const base = new Date("2000-01-01T00:00:00.000Z");
+    const events = [
+      ["DEMAND_CLAIMED", [staff.id], [], undefined, demandId],
+      ["COLLABORATION_APPLIED", [owner.id], [owner.id], undefined, applyId],
+      ["COLLABORATION_APPLIED", [owner.id], [owner.id], undefined, otherApplyId],
+      ["COLLABORATION_INVITED", [invitee.id], [invitee.id], undefined, inviteId],
+      ["COLLABORATION_APPROVED", [applicant.id], [], [owner.id], applyId],
+      ["COLLABORATION_ACCEPTED", [owner.id], [], [invitee.id], inviteId],
+      ["COLLABORATOR_LEFT", [owner.id], [], undefined, randomUUID()],
+      ["COLLABORATOR_REMOVED", [removed.id], [], undefined, randomUUID()],
+    ] as const;
+    const created = [];
+    for (const [index, [eventType, recipientIds, todoRecipientIds, staleTodoRecipientIds, eventKey]] of events.entries()) {
+      created.push(await outbox.append({
+        eventType,
+        aggregateType: "DEMAND",
+        aggregateId: demandId,
+        payload: { aggregateId: demandId, recipientIds: [...recipientIds], todoRecipientIds: [...todoRecipientIds], ...(staleTodoRecipientIds ? { staleTodoRecipientIds: [...staleTodoRecipientIds] } : {}), eventKey },
+        dedupeKey: `${keyPrefix}:participation:${index}`,
+        occurredAt: new Date(base.getTime() + index),
+      }));
+    }
+    const registry = new OutboxHandlerRegistry();
+    let firstAttempt = true;
+    for (const eventType of ["DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED", "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] as const) {
+      const handler = new DemandParticipationNotificationHandler(eventType);
+      registry.register(eventType, eventType === "DEMAND_CLAIMED" ? { async handle(payload, context) {
+        if (firstAttempt) { firstAttempt = false; throw new Error("TRANSIENT_NOTIFICATION_FAILURE"); }
+        await handler.handle(payload, context);
+      } } : handler);
+    }
+    const consumer = new OutboxConsumer(registry, 3, noLog, prisma, { baseDelayMs: 0, random: () => 0 });
+    await consumer.consumeOne(base);
+    expect(await prisma.outboxEvent.findUniqueOrThrow({ where: { id: created[0].id } })).toMatchObject({ attempts: 1, publishedAt: null });
+    await prisma.outboxEvent.update({ where: { id: created[0].id }, data: { nextAttemptAt: new Date(0) } });
+    await consumer.consumeBatch(events.length + 1, new Date(base.getTime() + 60_000));
+
+    expect(await prisma.message.count({ where: { personId: { in: people.map(({ id }) => id) }, aggregateId: demandId } })).toBe(events.length);
+    expect(await prisma.todo.findFirstOrThrow({ where: { personId: owner.id, eventKey: applyId } })).toMatchObject({ todoType: "COLLABORATION_REVIEW", status: "STALE" });
+    expect(await prisma.todo.findFirstOrThrow({ where: { personId: owner.id, eventKey: otherApplyId } })).toMatchObject({ todoType: "COLLABORATION_REVIEW", status: "OPEN" });
+    expect(await prisma.todo.findFirstOrThrow({ where: { personId: invitee.id, eventKey: inviteId } })).toMatchObject({ todoType: "COLLABORATION_INVITE_RESPONSE", status: "STALE" });
+    expect(await prisma.todo.count({ where: { aggregateId: demandId } })).toBe(3);
+    expect(await prisma.message.count({ where: { personId: staff.id, messageType: "DEMAND_CLAIMED", aggregateId: demandId } })).toBe(1);
+
+    await prisma.outboxEvent.update({ where: { id: created[0].id }, data: { publishedAt: null, nextAttemptAt: new Date(0) } });
+    await consumer.consumeOne(new Date(base.getTime() + 120_000));
+    expect(await prisma.message.count({ where: { personId: staff.id, messageType: "DEMAND_CLAIMED", aggregateId: demandId } })).toBe(1);
+  });
+
   it("rolls business data and Outbox back together, then commits them together", async () => {
     const rolledPersonId = randomUUID();
     const rollbackKey = `${keyPrefix}:outbox:rollback`;

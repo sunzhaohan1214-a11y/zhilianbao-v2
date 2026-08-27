@@ -3,6 +3,8 @@ import type { Demand, DemandStatus, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import { PermissionError } from "@/modules/permissions/permission-errors";
 import type { PermissionActor } from "@/modules/permissions/types";
+import { OutboxRepository } from "@/modules/outbox/outbox-repository";
+import { activeAdministrators, activeAreaStaff } from "@/modules/notification/recipient-resolver";
 import { getCurrentMemberEligibility } from "@/modules/member-foundation/current-member-eligibility";
 import {
   DEMAND_ENTITY,
@@ -131,6 +133,7 @@ export function isDeterministicDuplicateTitle(source: string, candidate: string)
 
 export class FormalDemandService {
   constructor(private readonly repository = new FormalDemandRepository()) {}
+  private readonly outbox = new OutboxRepository();
 
   private async lockDemandOrThrow(tx: FormalDemandTransaction, demandId: string): Promise<void> {
     try {
@@ -591,6 +594,14 @@ export class FormalDemandService {
           after: snapshotDemand(updated),
           context: input.context,
         });
+        const recipients = await activeAdministrators(tx, submittedAt);
+        await this.outbox.append({
+          eventType: "DEMAND_SUBMITTED_REVIEW",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: [], todoRecipientIds: recipients, eventKey: submittedAt.toISOString() },
+          dedupeKey: `demand:submitted-review:${demand.id}:${submittedAt.toISOString()}`,
+        }, tx);
         const result = commandResult(updated);
         await tx.demandCommandIdempotency.create({ data: {
           actorPersonId: input.actor.personId,
@@ -680,6 +691,14 @@ export class FormalDemandService {
           reason: review.reason,
           context: input.context,
         });
+        const recipients = await activeAreaStaff(tx, demand.responsibleAreaId, reviewedAt);
+        await this.outbox.append({
+          eventType: "DEMAND_REVIEW_RETURNED",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: recipients, eventKey: reviewedAt.toISOString() },
+          dedupeKey: `demand:review-returned:${demand.id}:${reviewedAt.toISOString()}`,
+        }, tx);
         return commandResult(updated);
       }
 
@@ -729,6 +748,14 @@ export class FormalDemandService {
         after: snapshotDemand(updated),
         context: input.context,
       });
+      const recipients = [...new Set([demand.createdByPersonId, ...await activeAreaStaff(tx, demand.responsibleAreaId, reviewedAt)])];
+      await this.outbox.append({
+        eventType: "DEMAND_PUBLISHED",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: [], eventKey: reviewedAt.toISOString() },
+        dedupeKey: `demand:published:${demand.id}`,
+      }, tx);
       return commandResult(updated);
     });
   }
@@ -796,6 +823,14 @@ export class FormalDemandService {
         after: snapshotDemand(updated),
         context: input.context,
       });
+      const recipients = [...new Set([demand.createdByPersonId, ...await activeAreaStaff(tx, demand.responsibleAreaId, publishedAt)])];
+      await this.outbox.append({
+        eventType: "DEMAND_PUBLISHED",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: [], eventKey: publishedAt.toISOString() },
+        dedupeKey: `demand:published:${demand.id}`,
+      }, tx);
       return commandResult(updated);
     });
   }
@@ -869,6 +904,16 @@ export class FormalDemandService {
           metadata: { currentOwnerPersonId: input.actor.personId, batchId: eligibility.batchId },
           context: input.context,
         });
+        const recipients = (await activeAreaStaff(tx, demand.responsibleAreaId, now))
+          .filter((personId) => personId !== input.actor.personId);
+        await this.outbox.append({
+          eventType: "DEMAND_CLAIMED",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: [], eventKey: demand.id },
+          dedupeKey: `demand:claimed:${demand.id}`,
+          occurredAt: now,
+        }, tx);
         const result = claimCommandResult(updated, {
           personId: input.actor.personId,
           name: eligibility.person.name,
@@ -927,6 +972,13 @@ export class FormalDemandService {
           after: { requestId: request.id, personId: request.personId, requestType: request.requestType, status: request.status },
           context: input.context,
         });
+        await this.outbox.append({
+          eventType: "COLLABORATION_APPLIED",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: [owner.personId], todoRecipientIds: [owner.personId], eventKey: request.id },
+          dedupeKey: `demand:collaboration:applied:${request.id}`,
+        }, tx);
         return { id: request.id, demandId: request.demandId, personId: request.personId, requestType: request.requestType, status: request.status };
       });
     } catch (error) {
@@ -969,6 +1021,13 @@ export class FormalDemandService {
           after: { requestId: request.id, personId: request.personId, personName: target.person.name, requestType: request.requestType, status: request.status },
           context: input.context,
         });
+        await this.outbox.append({
+          eventType: "COLLABORATION_INVITED",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: [request.personId], todoRecipientIds: [request.personId], eventKey: request.id },
+          dedupeKey: `demand:collaboration:invited:${request.id}`,
+        }, tx);
         return { id: request.id, demandId: request.demandId, personId: request.personId, requestType: request.requestType, status: request.status };
       });
     } catch (error) {
@@ -1031,6 +1090,21 @@ export class FormalDemandService {
         after: { collaboratorId: collaborator.id, personId: collaborator.personId, personName: target.person.name, sourceType: collaborator.sourceType, status: collaborator.status },
         context: input.context,
       });
+      const approvedApplication = request.requestType === "APPLY";
+      await this.outbox.append({
+        eventType: approvedApplication ? "COLLABORATION_APPROVED" : "COLLABORATION_ACCEPTED",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: {
+          aggregateId: demand.id,
+          recipientIds: approvedApplication ? [request.personId] : [owner.personId],
+          todoRecipientIds: [],
+          staleTodoRecipientIds: approvedApplication ? [owner.personId] : [request.personId],
+          eventKey: request.id,
+        },
+        dedupeKey: `demand:collaboration:${approvedApplication ? "approved" : "accepted"}:${request.id}`,
+        occurredAt: now,
+      }, tx);
       return { id: collaborator.id, demandId: collaborator.demandId, personId: collaborator.personId, status: collaborator.status };
     });
   }
@@ -1041,7 +1115,7 @@ export class FormalDemandService {
     return this.repository.transaction(async (tx) => {
       await this.lockDemandOrThrow(tx, input.demandId);
       const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
-      await this.requireActiveOwner(tx, demand);
+      const owner = await this.requireActiveOwner(tx, demand);
       const collaboratorId = await this.repository.lockActiveCollaborator(tx, demand.id, input.actor.personId);
       if (!collaboratorId) throw new DemandError("DEMAND_COLLABORATION_NOT_FOUND", "当前账号不是该需求的有效协同人");
       const now = new Date();
@@ -1062,6 +1136,14 @@ export class FormalDemandService {
         reason: collaborator.endedReason ?? undefined,
         context: input.context,
       });
+      await this.outbox.append({
+        eventType: "COLLABORATOR_LEFT",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: { aggregateId: demand.id, recipientIds: [owner.personId], todoRecipientIds: [], eventKey: collaborator.id },
+        dedupeKey: `demand:collaborator:left:${collaborator.id}`,
+        occurredAt: now,
+      }, tx);
       return { id: collaborator.id, demandId: collaborator.demandId, personId: collaborator.personId, status: collaborator.status };
     });
   }
@@ -1098,6 +1180,13 @@ export class FormalDemandService {
         reason: collaborator.endedReason ?? undefined,
         context: input.context,
       });
+      await this.outbox.append({
+        eventType: "COLLABORATOR_REMOVED",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: { aggregateId: demand.id, recipientIds: [input.personId], todoRecipientIds: [], eventKey: collaborator.id },
+        dedupeKey: `demand:collaborator:removed:${collaborator.id}`,
+      }, tx);
       return { id: collaborator.id, demandId: collaborator.demandId, personId: collaborator.personId, status: collaborator.status };
     });
   }

@@ -11,6 +11,11 @@ describe("M0-006 worker foundation", () => {
       .toEqual({ attachmentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(() => parseJobPayload("ATTACHMENT_SCAN", { attachmentId: "not-a-uuid" })).toThrow();
     expect(() => parseJobPayload("ATTACHMENT_TEMP_CLEANUP", { limit: 501 })).toThrow();
+    expect(parseJobPayload("TRIP_RESULT_DUE", {
+      tripId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      dueAt: "2026-08-30T15:59:59.999Z",
+      eventKey: "2026-08-30T15:59:59.999Z",
+    })).toMatchObject({ tripId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
   });
 
   it("uses deterministic capped exponential backoff", () => {

@@ -51,8 +51,9 @@ describe("M1-002 Demand Lead contracts", () => {
     expect(formatBusinessNo("XQ", 2026, BigInt(128))).toBe("XQ-2026-000128");
   });
 
-  it("keeps consumerless Demand lifecycle events out of the Worker contract", () => {
-    expect(OUTBOX_EVENT_TYPES).toEqual(["TEST_ENTITY_CHANGED", "ATTACHMENT_UPLOADED"]);
+  it("keeps Demand Lead events out while allowing registered notification events", () => {
+    expect(OUTBOX_EVENT_TYPES).not.toContain("DEMAND_LEAD_CREATED");
+    expect(OUTBOX_EVENT_TYPES).toEqual(expect.arrayContaining(["DEMAND_SUBMITTED_REVIEW", "ANNOUNCEMENT_PUBLISHED"]));
   });
 
   it("parses scoped actionable merge-candidate search without exposing IDs as query text", () => {

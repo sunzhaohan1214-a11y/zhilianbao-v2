@@ -216,7 +216,17 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
     expect(await prisma.enterpriseVisit.count({ where: { tripId } })).toBe(3);
     expect(await prisma.visitSupplement.count({ where: { visitId } })).toBe(1);
     expect(await prisma.demandLead.count({ where: { visitId } })).toBe(2);
-    expect(await prisma.outboxEvent.count({ where: { aggregateId: { in: [tripId, visitId] } } })).toBe(0);
+    const tripEvents = await prisma.outboxEvent.findMany({
+      where: { aggregateType: "TRIP", aggregateId: tripId },
+      select: { eventType: true },
+      orderBy: { eventType: "asc" },
+    });
+    expect(tripEvents).toEqual([
+      { eventType: "TRIP_PARTICIPANT_ADDED" },
+      { eventType: "TRIP_PARTICIPANT_ADDED" },
+      { eventType: "TRIP_RESULT_DUE_SCHEDULED" },
+      { eventType: "TRIP_RESULT_SUBMITTED" },
+    ]);
     expect(await normal.evaluate(() => window.__tripGpsCalls)).toBe(0);
   } finally {
     await prisma.person.deleteMany({ where: { id: noAccountPersonId } });
