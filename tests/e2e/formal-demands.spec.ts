@@ -90,7 +90,7 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
 
   await login(page, e2eUsers.township);
   await page.goto(`/demands/${demandId}`);
-  await expect(page.getByText("请补充量化目标和实施边界")).toBeVisible();
+  await expect(page.getByText("请补充量化目标和实施边界").first()).toBeVisible();
   await page.getByLabel("企业原始需求描述", { exact: true }).fill("E2E 退回后补充量化目标，但仍由原录入方修改核心字段。");
   await page.getByRole("button", { name: "保存草稿修改" }).click();
   await expect(page.getByRole("status")).toHaveText("操作已完成。");
