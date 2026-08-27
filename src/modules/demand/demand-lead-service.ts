@@ -735,6 +735,21 @@ export class DemandLeadService {
         closedFromStatus: null,
       } });
       await writeDemandTransition(tx, { actor: input.actor, entityType: DEMAND_ENTITY, entityId: demand.id, toState: "DRAFT", actionCode: "DEMAND_DRAFT_CREATED_FROM_LEAD", metadata: { demandLeadId: lead.id, businessNo }, context: input.context });
+      await writeDemandAudit(tx, {
+        actor: input.actor,
+        actionCode: "DEMAND_DRAFT_CREATED_FROM_LEAD",
+        entityType: DEMAND_ENTITY,
+        entityId: demand.id,
+        after: {
+          businessNo,
+          status: "DRAFT",
+          enterpriseId: demand.enterpriseId,
+          selectedContactId: demand.selectedContactId,
+          responsibleAreaId: demand.responsibleAreaId,
+          demandLeadId: lead.id,
+        },
+        context: input.context,
+      });
       await writeDemandTransition(tx, { actor: input.actor, entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, fromState: lead.status, toState: "CONVERTED", actionCode: "DEMAND_LEAD_CONVERTED", metadata: { demandId: demand.id, businessNo }, context: input.context });
       await writeDemandAudit(tx, { actor: input.actor, actionCode: "DEMAND_LEAD_CONVERTED", entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, before: { status: lead.status }, after: { status: "CONVERTED", demandId: demand.id, businessNo }, context: input.context });
       return tx.demand.findUniqueOrThrow({ where: { id: demand.id }, include: { contactSnapshot: true, provenances: true } });

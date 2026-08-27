@@ -5,7 +5,7 @@ import { isAuthError } from "@/modules/identity/errors";
 import { isPermissionError } from "@/modules/permissions/permission-errors";
 import { isAttachmentError } from "@/modules/attachment/attachment-errors";
 import { isEnterpriseError } from "@/modules/enterprise/errors";
-import { isDemandLeadError } from "@/modules/demand/errors";
+import { isDemandError, isDemandLeadError } from "@/modules/demand/errors";
 import { isFoundationError } from "@/modules/member-foundation/errors";
 import { isPresenceError } from "@/modules/presence/errors";
 import { isMapError } from "@/modules/map/errors";
@@ -34,7 +34,7 @@ export function apiError(error: unknown, requestId: string = randomUUID()) {
       requestId,
     }, { status: error.status });
   }
-  if (isDemandLeadError(error)) {
+  if (isDemandLeadError(error) || isDemandError(error)) {
     return NextResponse.json({
       ok: false,
       error: { code: error.code, message: error.message, details: error.details ?? {} },

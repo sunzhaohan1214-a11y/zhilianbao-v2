@@ -141,8 +141,74 @@ export const demandLeadListQuerySchema = z.object({
 
 export const idempotencyKeySchema = trimmed(128, 8).regex(/^[A-Za-z0-9._:-]+$/);
 
+const demandType = z.enum(["TECHNICAL", "TALENT", "PROJECT", "OTHER"]);
+const demandUrgency = z.enum(["NORMAL", "URGENT"]);
+export const directDemandSourceTypeSchema = z.enum(["TOWNSHIP_DIRECT", "ADMIN_DIRECT"]);
+
+export const createFormalDemandSchema = z.object({
+  sourceType: directDemandSourceTypeSchema,
+  enterpriseId: z.uuid(),
+  selectedContactId: z.uuid(),
+  title: plainText(200),
+  originalDescription: plainText(5000),
+  demandType,
+  urgency: demandUrgency.default("NORMAL"),
+  responsibleAreaId: z.uuid(),
+  internalNote: optionalPlainText(2000),
+  attachmentIds,
+}).strict();
+
+export const updateDemandDraftSchema = z.object({
+  enterpriseId: z.uuid().optional(),
+  selectedContactId: z.uuid().optional(),
+  title: plainText(200).optional(),
+  originalDescription: plainText(5000).optional(),
+  demandType: demandType.optional(),
+  urgency: demandUrgency.optional(),
+  responsibleAreaId: z.uuid().optional(),
+  internalNote: z.union([plainText(2000), z.literal(""), z.null()]).optional(),
+  attachmentIds: z.array(z.uuid()).max(10).optional(),
+}).strict().refine((value) => Object.values(value).some((item) => item !== undefined), {
+  message: "至少填写一项草稿修改",
+});
+
+export const submitDemandReviewSchema = z.object({}).strict();
+
+export const reviewDemandSchema = z.object({
+  decision: z.enum(["APPROVE", "RETURN"]),
+  reason: optionalPlainText(500),
+  demandType: demandType.optional(),
+  urgency: demandUrgency.optional(),
+}).strict().superRefine((value, context) => {
+  if (value.decision === "RETURN" && !value.reason) {
+    context.addIssue({ code: "custom", path: ["reason"], message: "退回时必须填写原因" });
+  }
+});
+
+export const directPublishDemandSchema = z.object({}).strict();
+
+export const demandListQuerySchema = z.object({
+  status: optionalQueryString.pipe(z.enum([
+    "DRAFT", "PENDING_REVIEW", "RETURNED", "PENDING_CLAIM", "IN_PROGRESS",
+    "PENDING_CLOSE_REVIEW", "COMPLETED", "CANCELED", "MERGED",
+  ]).optional()),
+  type: optionalQueryString.pipe(demandType.optional()),
+  areaId: optionalQueryString.pipe(z.uuid().optional()),
+  batchId: optionalQueryString.pipe(z.uuid().optional()),
+  keyword: optionalQueryString.pipe(z.string().trim().max(100).optional()),
+  mine: z.preprocess(
+    (value) => value === "true" ? true : value === "false" || value === undefined || value === null || value === "" ? false : value,
+    z.boolean(),
+  ),
+  page: optionalInteger(1, 1_000_000),
+  pageSize: optionalInteger(20, 100),
+}).strict();
+
 export type PublicDemandLeadInput = z.infer<typeof publicDemandLeadSchema>;
 export type OtherDemandLeadInput = z.infer<typeof createOtherDemandLeadSchema>;
 export type MemberVisitDemandLeadInput = z.infer<typeof memberVisitDemandLeadSchema>;
 export type DemandLeadSupplementInput = z.infer<typeof addDemandLeadInfoSchema>;
 export type ConvertDemandLeadInput = z.infer<typeof convertDemandLeadSchema>;
+export type CreateFormalDemandInput = z.infer<typeof createFormalDemandSchema>;
+export type UpdateDemandDraftInput = z.infer<typeof updateDemandDraftSchema>;
+export type ReviewDemandInput = z.infer<typeof reviewDemandSchema>;
