@@ -56,11 +56,20 @@ export class DemandLeadRepository {
     for (const id of [...new Set(leadIds)].sort()) await this.lockLead(tx, id);
   }
 
-  async lockEnterprise(tx: DemandTransaction, enterpriseId: string): Promise<void> {
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM enterprises WHERE id = ${enterpriseId} FOR UPDATE
+  async lockEnterprise(tx: DemandTransaction, enterpriseId: string) {
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      name: string;
+      status: EnterpriseStatus;
+      responsibleAreaId: string;
+    }>>`
+      SELECT id, name, status, responsible_area_id AS responsibleAreaId
+      FROM enterprises
+      WHERE id = ${enterpriseId}
+      FOR UPDATE
     `;
     if (rows.length !== 1) throw new Error("ENTERPRISE_LOCK_TARGET_NOT_FOUND");
+    return rows[0];
   }
 
   async nextBusinessNo(tx: DemandTransaction, prefix: "XS" | "XQ", at = new Date()): Promise<string> {
@@ -90,13 +99,6 @@ export class DemandLeadRepository {
     });
   }
 
-  findEnterprise(tx: DemandTransaction, enterpriseId: string) {
-    return tx.enterprise.findUnique({
-      where: { id: enterpriseId },
-      select: { id: true, name: true, status: true, responsibleAreaId: true },
-    });
-  }
-
   findContact(tx: DemandTransaction, contactId: string) {
     return tx.enterpriseContact.findUnique({
       where: { id: contactId },
@@ -110,6 +112,24 @@ export class DemandLeadRepository {
         enterprise: { select: { id: true, name: true, status: true } },
       },
     });
+  }
+
+  async lockContact(tx: DemandTransaction, contactId: string) {
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      enterpriseId: string;
+      name: string;
+      positionTitle: string | null;
+      phone: string;
+      status: "ACTIVE" | "INACTIVE";
+    }>>`
+      SELECT id, enterprise_id AS enterpriseId, name,
+             position_title AS positionTitle, phone, status
+      FROM enterprise_contacts
+      WHERE id = ${contactId}
+      FOR UPDATE
+    `;
+    return rows[0] ?? null;
   }
 
   findLead(tx: DemandTransaction, leadId: string) {

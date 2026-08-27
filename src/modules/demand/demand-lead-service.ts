@@ -142,24 +142,20 @@ export class DemandLeadService {
     return area;
   }
 
-  private async requireNormalEnterprise(tx: DemandTransaction, enterpriseId: string) {
-    const enterprise = await this.repository.findEnterprise(tx, enterpriseId);
-    if (!enterprise || enterprise.status !== "NORMAL") {
-      throw new DemandLeadError("DEMAND_LEAD_ENTERPRISE_INVALID", "只能关联正常状态的正式企业");
-    }
-    return enterprise;
-  }
-
   private async lockAndRequireNormalEnterprise(tx: DemandTransaction, enterpriseId: string) {
+    let enterprise;
     try {
-      await this.repository.lockEnterprise(tx, enterpriseId);
+      enterprise = await this.repository.lockEnterprise(tx, enterpriseId);
     } catch (error) {
       if ((error as Error).message === "ENTERPRISE_LOCK_TARGET_NOT_FOUND") {
         throw new DemandLeadError("DEMAND_LEAD_ENTERPRISE_INVALID", "只能关联正常状态的正式企业");
       }
       throw error;
     }
-    return this.requireNormalEnterprise(tx, enterpriseId);
+    if (enterprise.status !== "NORMAL") {
+      throw new DemandLeadError("DEMAND_LEAD_ENTERPRISE_INVALID", "只能关联正常状态的正式企业");
+    }
+    return enterprise;
   }
 
   private async authorizeLead(actor: PermissionActor, action: "demand.lead.view" | "demand.lead.verify", areaId: string) {
@@ -664,8 +660,8 @@ export class DemandLeadService {
       }
       await this.requireArea(tx, lead.responsibleAreaId);
       const enterprise = await this.lockAndRequireNormalEnterprise(tx, lead.enterpriseId);
-      const contact = await this.repository.findContact(tx, conversion.selectedContactId);
-      if (!contact || contact.status !== "ACTIVE" || contact.enterpriseId !== enterprise.id || contact.enterprise.status !== "NORMAL") {
+      const contact = await this.repository.lockContact(tx, conversion.selectedContactId);
+      if (!contact || contact.status !== "ACTIVE" || contact.enterpriseId !== enterprise.id) {
         throw new DemandLeadError("DEMAND_LEAD_CONTACT_INVALID", "联系人不存在、已停用或不属于关联企业");
       }
       const currentBatches = await this.repository.lockCurrentBatch(tx);
