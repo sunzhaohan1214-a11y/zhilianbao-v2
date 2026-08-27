@@ -303,7 +303,7 @@ describe("M1-002 real MySQL Demand Lead workflow", () => {
     const demandSource = await governedEnterprise("需求依赖源", true);
     const demandTarget = await governedEnterprise("需求依赖目标");
     await prisma.demand.create({ data: {
-      businessNo: `XQ-2099-${randomUUID()}`,
+      businessNo: `XQ-2099-${randomUUID().slice(0, 8)}`,
       enterpriseId: demandSource.enterprise.id,
       responsibleAreaId: areaId,
       selectedContactId: demandSource.contact!.id,
