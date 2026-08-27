@@ -113,7 +113,7 @@ export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: str
   }
 
   return (
-    <form onSubmit={submit} onChange={() => { attempt.current = null; }} className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <form onSubmit={submit} className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="grid gap-5 sm:grid-cols-2">
         <label className="text-sm font-medium text-slate-700">企业名称
           <input name="enterpriseName" required maxLength={200} className="mt-2 w-full rounded-xl border border-slate-300 p-3" />
