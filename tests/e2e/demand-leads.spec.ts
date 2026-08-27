@@ -63,6 +63,8 @@ test("public browser retry reuses attachment references after the successful res
     if (finalPostCount === 1) {
       const serverResponse = await route.fetch();
       expect(serverResponse.status()).toBe(201);
+      const serverPayload = await serverResponse.json();
+      expect(serverPayload.data.referenceNo).toMatch(/^XS-\d{4}-\d{6}$/);
       await route.abort("failed");
       return;
     }
@@ -84,7 +86,9 @@ test("public browser retry reuses attachment references after the successful res
   await page.waitForTimeout(900);
   await page.getByRole("button", { name: "提交需求线索" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
+  const replayed = page.waitForResponse((response) => response.url().endsWith("/api/v2/public/demand-leads") && response.request().method() === "POST");
   await page.getByRole("button", { name: "提交需求线索" }).click();
+  expect((await replayed).status()).toBe(201);
   await expect(page.getByText(/参考编号 XS-/)).toBeVisible();
   expect(uploadIntentCount).toBe(1);
   expect(finalPostCount).toBe(2);
