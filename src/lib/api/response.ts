@@ -10,12 +10,20 @@ import { isFoundationError } from "@/modules/member-foundation/errors";
 import { isPresenceError } from "@/modules/presence/errors";
 import { isMapError } from "@/modules/map/errors";
 import { isPolicyError } from "@/modules/policy/errors";
+import { isTripError } from "@/modules/trip/errors";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
 }
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
+  if (isTripError(error)) {
+    return NextResponse.json({
+      ok: false,
+      error: { code: error.code, message: error.message, details: error.details ?? {} },
+      requestId,
+    }, { status: error.status });
+  }
   if (isPolicyError(error)) {
     return NextResponse.json({
       ok: false,

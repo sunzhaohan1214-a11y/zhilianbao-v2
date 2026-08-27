@@ -217,47 +217,55 @@ enum DemandProvenanceSourceType {
 }
 
 model Person {
-  id                            String                    @id @default(uuid()) @db.Char(36)
-  name                          String                    @db.VarChar(80)
-  contactPhone                  String?                   @map("contact_phone") @db.VarChar(30)
-  personStatus                  PersonStatus              @default(ACTIVE) @map("person_status")
-  createdAt                     DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
-  account                       Account?
-  phoneChanges                  AccountPhoneHistory[]     @relation("PhoneChangeAccount")
-  appointments                  Appointment[]
-  roleAssignments               RoleAssignment[]          @relation("RoleAssignmentPerson")
-  grantedRoleAssignments        RoleAssignment[]          @relation("RoleAssignmentGrantor")
-  specialPermissionGrants       SpecialPermissionGrant[]  @relation("PermissionGrantPerson")
-  grantedSpecialPermissions     SpecialPermissionGrant[]  @relation("PermissionGrantGrantor")
-  batchMemberships              BatchMembership[]
-  groupLeaderAssignments        GroupLeaderAssignment[]   @relation("GroupLeaderPerson")
-  grantedGroupLeaderAssignments GroupLeaderAssignment[]   @relation("GroupLeaderGrantor")
-  memberCapabilityProfile       MemberCapabilityProfile?  @relation("MemberCapabilityPerson")
-  updatedMemberCapabilities     MemberCapabilityProfile[] @relation("MemberCapabilityUpdater")
-  auditLogs                     AuditLog[]
-  stateTransitions              StateTransitionHistory[]
-  uploadedAttachments           Attachment[]              @relation("AttachmentUploader")
-  createdAttachmentLinks        AttachmentLink[]          @relation("AttachmentLinkCreator")
-  attachmentAccessLogs          AttachmentAccessLog[]     @relation("AttachmentAccessPerson")
-  createdEnterprises            Enterprise[]              @relation("EnterpriseCreator")
-  coordinatedEnterprises        Enterprise[]              @relation("EnterpriseCoordinateUpdater")
-  createdEnterpriseContacts     EnterpriseContact[]
-  submittedEnterpriseRequests   EnterpriseChangeRequest[] @relation("EnterpriseRequestSubmitter")
-  reviewedEnterpriseRequests    EnterpriseChangeRequest[] @relation("EnterpriseRequestReviewer")
-  enterpriseVersions            EnterpriseVersion[]
-  presenceReports               PresenceReport[]
-  createdPolicies                Policy[]                    @relation("PolicyCreator")
-  changedPolicyVersions          PolicyContentVersion[]      @relation("PolicyVersionChanger")
-  confirmedPolicyVersions        PolicyContentVersion[]      @relation("PolicyVersionConfirmer")
-  confirmedPolicyInterpretations PolicyAIInterpretation[]    @relation("PolicyInterpretationConfirmer")
-  createdPolicyReplacements      PolicyReplacementRelation[] @relation("PolicyReplacementCreator")
-  endedPolicyReplacements        PolicyReplacementRelation[] @relation("PolicyReplacementEnder")
-  sourcedDemandLeads            DemandLead[]              @relation("DemandLeadSourcePerson")
-  createdDemandLeads            DemandLead[]              @relation("DemandLeadCreator")
-  demandLeadSupplements         DemandLeadSupplement[]
-  createdDemands                Demand[]                  @relation("DemandCreator")
-  createdMapBoundaryVersions   MapBoundaryVersion[]      @relation("MapBoundaryCreator")
+  id                             String                       @id @default(uuid()) @db.Char(36)
+  name                           String                       @db.VarChar(80)
+  contactPhone                   String?                      @map("contact_phone") @db.VarChar(30)
+  personStatus                   PersonStatus                 @default(ACTIVE) @map("person_status")
+  createdAt                      DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                      DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  account                        Account?
+  phoneChanges                   AccountPhoneHistory[]        @relation("PhoneChangeAccount")
+  appointments                   Appointment[]
+  roleAssignments                RoleAssignment[]             @relation("RoleAssignmentPerson")
+  grantedRoleAssignments         RoleAssignment[]             @relation("RoleAssignmentGrantor")
+  specialPermissionGrants        SpecialPermissionGrant[]     @relation("PermissionGrantPerson")
+  grantedSpecialPermissions      SpecialPermissionGrant[]     @relation("PermissionGrantGrantor")
+  batchMemberships               BatchMembership[]
+  groupLeaderAssignments         GroupLeaderAssignment[]      @relation("GroupLeaderPerson")
+  grantedGroupLeaderAssignments  GroupLeaderAssignment[]      @relation("GroupLeaderGrantor")
+  memberCapabilityProfile        MemberCapabilityProfile?     @relation("MemberCapabilityPerson")
+  updatedMemberCapabilities      MemberCapabilityProfile[]    @relation("MemberCapabilityUpdater")
+  auditLogs                      AuditLog[]
+  stateTransitions               StateTransitionHistory[]
+  uploadedAttachments            Attachment[]                 @relation("AttachmentUploader")
+  createdAttachmentLinks         AttachmentLink[]             @relation("AttachmentLinkCreator")
+  attachmentAccessLogs           AttachmentAccessLog[]        @relation("AttachmentAccessPerson")
+  createdEnterprises             Enterprise[]                 @relation("EnterpriseCreator")
+  coordinatedEnterprises         Enterprise[]                 @relation("EnterpriseCoordinateUpdater")
+  createdEnterpriseContacts      EnterpriseContact[]
+  submittedEnterpriseRequests    EnterpriseChangeRequest[]    @relation("EnterpriseRequestSubmitter")
+  reviewedEnterpriseRequests     EnterpriseChangeRequest[]    @relation("EnterpriseRequestReviewer")
+  enterpriseVersions             EnterpriseVersion[]
+  presenceReports                PresenceReport[]
+  createdPolicies                Policy[]                     @relation("PolicyCreator")
+  changedPolicyVersions          PolicyContentVersion[]       @relation("PolicyVersionChanger")
+  confirmedPolicyVersions        PolicyContentVersion[]       @relation("PolicyVersionConfirmer")
+  confirmedPolicyInterpretations PolicyAIInterpretation[]     @relation("PolicyInterpretationConfirmer")
+  createdPolicyReplacements      PolicyReplacementRelation[]  @relation("PolicyReplacementCreator")
+  endedPolicyReplacements        PolicyReplacementRelation[]  @relation("PolicyReplacementEnder")
+  sourcedDemandLeads             DemandLead[]                 @relation("DemandLeadSourcePerson")
+  createdDemandLeads             DemandLead[]                 @relation("DemandLeadCreator")
+  demandLeadSupplements          DemandLeadSupplement[]
+  createdDemands                 Demand[]                     @relation("DemandCreator")
+  createdMapBoundaryVersions     MapBoundaryVersion[]         @relation("MapBoundaryCreator")
+  createdTrips                   Trip[]                       @relation("TripCreator")
+  canceledTrips                  Trip[]                       @relation("TripCanceler")
+  tripParticipations             TripParticipant[]            @relation("TripParticipantPerson")
+  addedTripParticipations        TripParticipant[]            @relation("TripParticipantAdder")
+  submittedTripResults           TripResult[]                 @relation("TripResultSubmitter")
+  visitSupplements               VisitSupplement[]            @relation("VisitSupplementCreator")
+  tripIdempotencyRecords         TripIdempotency[]            @relation("TripIdempotencyActor")
+  visitLeadIdempotencyRecords    VisitDemandLeadIdempotency[] @relation("VisitLeadIdempotencyActor")
 
   @@index([personStatus])
   @@map("persons")
@@ -404,18 +412,18 @@ model OrganizationAreaMapping {
 }
 
 model MapBoundaryVersion {
-  id                  String             @id @default(uuid()) @db.Char(36)
-  areaId              String             @map("area_id") @db.Char(36)
-  versionNo           Int                @map("version_no") @db.UnsignedInt
-  geoJson             Json               @map("geo_json")
-  checksum            String             @db.Char(64)
-  sourceFilename      String?            @map("source_filename") @db.VarChar(255)
-  isCurrent           Boolean            @default(false) @map("is_current")
-  changeReason        String             @map("change_reason") @db.VarChar(500)
-  createdByPersonId   String             @map("created_by_person_id") @db.Char(36)
-  createdAt           DateTime           @default(now()) @map("created_at") @db.DateTime(3)
-  area                AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  createdByPerson     Person             @relation("MapBoundaryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  id                String             @id @default(uuid()) @db.Char(36)
+  areaId            String             @map("area_id") @db.Char(36)
+  versionNo         Int                @map("version_no") @db.UnsignedInt
+  geoJson           Json               @map("geo_json")
+  checksum          String             @db.Char(64)
+  sourceFilename    String?            @map("source_filename") @db.VarChar(255)
+  isCurrent         Boolean            @default(false) @map("is_current")
+  changeReason      String             @map("change_reason") @db.VarChar(500)
+  createdByPersonId String             @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.DateTime(3)
+  area              AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  createdByPerson   Person             @relation("MapBoundaryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
 
   @@unique([areaId, versionNo])
   @@index([areaId, isCurrent])
@@ -555,28 +563,28 @@ model GroupLeaderAssignment {
 }
 
 model MemberCapabilityProfile {
-  id                       String                      @id @default(uuid()) @db.Char(36)
-  personId                 String                      @unique @map("person_id") @db.Char(36)
-  professionalDirection    String?                     @map("professional_direction") @db.VarChar(500)
-  coordinatableResources   String?                     @map("coordinatable_resources") @db.Text
-  personalIntroduction     String?                     @map("personal_introduction") @db.Text
-  updatedByPersonId        String                      @map("updated_by_person_id") @db.Char(36)
-  createdAt                DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
-  person                   Person                      @relation("MemberCapabilityPerson", fields: [personId], references: [id], onDelete: Restrict)
-  updatedByPerson          Person                      @relation("MemberCapabilityUpdater", fields: [updatedByPersonId], references: [id], onDelete: Restrict)
-  industries               MemberCapabilityIndustry[]
-  preferredDemandTypes     MemberPreferredDemandType[]
+  id                     String                      @id @default(uuid()) @db.Char(36)
+  personId               String                      @unique @map("person_id") @db.Char(36)
+  professionalDirection  String?                     @map("professional_direction") @db.VarChar(500)
+  coordinatableResources String?                     @map("coordinatable_resources") @db.Text
+  personalIntroduction   String?                     @map("personal_introduction") @db.Text
+  updatedByPersonId      String                      @map("updated_by_person_id") @db.Char(36)
+  createdAt              DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
+  person                 Person                      @relation("MemberCapabilityPerson", fields: [personId], references: [id], onDelete: Restrict)
+  updatedByPerson        Person                      @relation("MemberCapabilityUpdater", fields: [updatedByPersonId], references: [id], onDelete: Restrict)
+  industries             MemberCapabilityIndustry[]
+  preferredDemandTypes   MemberPreferredDemandType[]
 
   @@index([updatedByPersonId, updatedAt])
   @@map("member_capability_profiles")
 }
 
 model MemberIndustry {
-  id             String                      @id @default(uuid()) @db.Char(36)
-  name           String                      @unique @db.VarChar(100)
-  status         RecordStatus                @default(ACTIVE)
-  createdAt      DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  id             String                     @id @default(uuid()) @db.Char(36)
+  name           String                     @unique @db.VarChar(100)
+  status         RecordStatus               @default(ACTIVE)
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
   capabilityUses MemberCapabilityIndustry[]
 
   @@index([status, name])
@@ -584,11 +592,11 @@ model MemberIndustry {
 }
 
 model MemberCapabilityIndustry {
-  personId  String                  @map("person_id") @db.Char(36)
-  industryId String                 @map("industry_id") @db.Char(36)
-  createdAt DateTime                @default(now()) @map("created_at") @db.DateTime(3)
-  profile   MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
-  industry  MemberIndustry          @relation(fields: [industryId], references: [id], onDelete: Restrict)
+  personId   String                  @map("person_id") @db.Char(36)
+  industryId String                  @map("industry_id") @db.Char(36)
+  createdAt  DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  profile    MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
+  industry   MemberIndustry          @relation(fields: [industryId], references: [id], onDelete: Restrict)
 
   @@id([personId, industryId])
   @@index([industryId, personId])
@@ -596,10 +604,10 @@ model MemberCapabilityIndustry {
 }
 
 model MemberPreferredDemandType {
-  personId  String                  @map("person_id") @db.Char(36)
-  demandType MemberDemandType       @map("demand_type")
-  createdAt DateTime                @default(now()) @map("created_at") @db.DateTime(3)
-  profile   MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
+  personId   String                  @map("person_id") @db.Char(36)
+  demandType MemberDemandType        @map("demand_type")
+  createdAt  DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  profile    MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
 
   @@id([personId, demandType])
   @@index([demandType, personId])
@@ -663,23 +671,183 @@ model StateTransitionHistory {
 }
 
 model PresenceReport {
-  id                  String   @id @default(uuid()) @db.Char(36)
-  personId            String   @map("person_id") @db.Char(36)
-  arrivalAt           DateTime @map("arrival_at") @db.DateTime(3)
-  expectedDepartureAt DateTime @map("expected_departure_at") @db.DateTime(3)
-  origin              String?  @db.VarChar(200)
-  transportMode       String?  @map("transport_mode") @db.VarChar(100)
-  trainFlightNo       String?  @map("train_flight_no") @db.VarChar(100)
-  note                String?  @db.VarChar(1000)
+  id                  String    @id @default(uuid()) @db.Char(36)
+  personId            String    @map("person_id") @db.Char(36)
+  arrivalAt           DateTime  @map("arrival_at") @db.DateTime(3)
+  expectedDepartureAt DateTime  @map("expected_departure_at") @db.DateTime(3)
+  origin              String?   @db.VarChar(200)
+  transportMode       String?   @map("transport_mode") @db.VarChar(100)
+  trainFlightNo       String?   @map("train_flight_no") @db.VarChar(100)
+  note                String?   @db.VarChar(1000)
   canceledAt          DateTime? @map("canceled_at") @db.DateTime(3)
-  cancelReason        String?  @map("cancel_reason") @db.VarChar(500)
-  createdAt           DateTime @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.DateTime(3)
-  person              Person   @relation(fields: [personId], references: [id], onDelete: Restrict)
+  cancelReason        String?   @map("cancel_reason") @db.VarChar(500)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  person              Person    @relation(fields: [personId], references: [id], onDelete: Restrict)
 
   @@index([personId, canceledAt, arrivalAt, expectedDepartureAt], map: "presence_person_active_interval_idx")
   @@index([arrivalAt, expectedDepartureAt], map: "presence_current_interval_idx")
   @@map("presence_reports")
+}
+
+model Trip {
+  id                 String            @id @default(uuid()) @db.Char(36)
+  title              String            @db.VarChar(200)
+  purpose            String            @db.Text
+  note               String?           @db.Text
+  sharingRestricted  Boolean           @default(false) @map("sharing_restricted")
+  overallEndAt       DateTime?         @map("overall_end_at") @db.DateTime(3)
+  createdByPersonId  String            @map("created_by_person_id") @db.Char(36)
+  canceledAt         DateTime?         @map("canceled_at") @db.DateTime(3)
+  canceledByPersonId String?           @map("canceled_by_person_id") @db.Char(36)
+  cancelReason       String?           @map("cancel_reason") @db.VarChar(500)
+  createdAt          DateTime          @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.DateTime(3)
+  createdByPerson    Person            @relation("TripCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  canceledByPerson   Person?           @relation("TripCanceler", fields: [canceledByPersonId], references: [id], onDelete: Restrict)
+  participants       TripParticipant[]
+  nodes              TripNode[]
+  result             TripResult?
+  visits             EnterpriseVisit[]
+  idempotencyRecords TripIdempotency[]
+  demandLeads        DemandLead[]
+
+  @@index([createdByPersonId, createdAt])
+  @@index([canceledAt, createdAt])
+  @@map("trips")
+}
+
+model TripParticipant {
+  id              String    @id @default(uuid()) @db.Char(36)
+  tripId          String    @map("trip_id") @db.Char(36)
+  personId        String    @map("person_id") @db.Char(36)
+  isCreator       Boolean   @default(false) @map("is_creator")
+  joinedAt        DateTime  @default(now()) @map("joined_at") @db.DateTime(3)
+  leftAt          DateTime? @map("left_at") @db.DateTime(3)
+  addedByPersonId String    @map("added_by_person_id") @db.Char(36)
+  trip            Trip      @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  person          Person    @relation("TripParticipantPerson", fields: [personId], references: [id], onDelete: Restrict)
+  addedByPerson   Person    @relation("TripParticipantAdder", fields: [addedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([tripId, personId])
+  @@index([personId, leftAt, joinedAt])
+  @@index([addedByPersonId, joinedAt])
+  @@map("trip_participants")
+}
+
+model TripNode {
+  id                String           @id @default(uuid()) @db.Char(36)
+  tripId            String           @map("trip_id") @db.Char(36)
+  sequenceNo        Int              @map("sequence_no") @db.UnsignedInt
+  plannedStartAt    DateTime         @map("planned_start_at") @db.DateTime(3)
+  plannedEndAt      DateTime?        @map("planned_end_at") @db.DateTime(3)
+  enterpriseId      String?          @map("enterprise_id") @db.Char(36)
+  locationName      String           @map("location_name") @db.VarChar(200)
+  address           String?          @db.VarChar(500)
+  content           String           @db.Text
+  nodeResultSummary String?          @map("node_result_summary") @db.Text
+  createdAt         DateTime         @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime         @updatedAt @map("updated_at") @db.DateTime(3)
+  trip              Trip             @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  enterprise        Enterprise?      @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  visit             EnterpriseVisit?
+
+  @@unique([tripId, sequenceNo])
+  @@unique([tripId, enterpriseId])
+  @@index([enterpriseId, plannedStartAt])
+  @@index([plannedStartAt, plannedEndAt])
+  @@map("trip_nodes")
+}
+
+model TripResult {
+  id                  String            @id @default(uuid()) @db.Char(36)
+  tripId              String            @unique @map("trip_id") @db.Char(36)
+  resultSummary       String            @map("result_summary") @db.Text
+  nextStep            String?           @map("next_step") @db.Text
+  submittedByPersonId String            @map("submitted_by_person_id") @db.Char(36)
+  submittedAt         DateTime          @default(now()) @map("submitted_at") @db.DateTime(3)
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.DateTime(3)
+  trip                Trip              @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  submittedByPerson   Person            @relation("TripResultSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
+  visits              EnterpriseVisit[]
+  idempotencyRecords  TripIdempotency[]
+
+  @@index([submittedByPersonId, submittedAt])
+  @@map("trip_results")
+}
+
+model EnterpriseVisit {
+  id                      String                       @id @default(uuid()) @db.Char(36)
+  tripId                  String                       @map("trip_id") @db.Char(36)
+  tripNodeId              String                       @unique @map("trip_node_id") @db.Char(36)
+  enterpriseId            String                       @map("enterprise_id") @db.Char(36)
+  visitedAt               DateTime                     @map("visited_at") @db.DateTime(3)
+  visitSummary            String?                      @map("visit_summary") @db.Text
+  createdFromTripResultId String                       @map("created_from_trip_result_id") @db.Char(36)
+  createdAt               DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt               DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  trip                    Trip                         @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  tripNode                TripNode                     @relation(fields: [tripNodeId], references: [id], onDelete: Restrict)
+  enterprise              Enterprise                   @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  createdFromTripResult   TripResult                   @relation(fields: [createdFromTripResultId], references: [id], onDelete: Restrict)
+  supplements             VisitSupplement[]
+  demandLeads             DemandLead[]
+  leadIdempotencyRecords  VisitDemandLeadIdempotency[]
+
+  @@unique([tripId, enterpriseId])
+  @@index([enterpriseId, visitedAt])
+  @@index([createdFromTripResultId])
+  @@map("enterprise_visits")
+}
+
+model VisitSupplement {
+  id                String          @id @default(uuid()) @db.Char(36)
+  visitId           String          @map("visit_id") @db.Char(36)
+  content           String          @db.Text
+  createdByPersonId String          @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime        @default(now()) @map("created_at") @db.DateTime(3)
+  visit             EnterpriseVisit @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  createdByPerson   Person          @relation("VisitSupplementCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([visitId, createdAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("visit_supplements")
+}
+
+model TripIdempotency {
+  id            String      @id @default(uuid()) @db.Char(36)
+  actorPersonId String      @map("actor_person_id") @db.Char(36)
+  actionCode    String      @map("action_code") @db.VarChar(64)
+  keyHash       String      @map("key_hash") @db.Char(64)
+  payloadHash   String      @map("payload_hash") @db.Char(64)
+  tripId        String      @map("trip_id") @db.Char(36)
+  tripResultId  String?     @map("trip_result_id") @db.Char(36)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.DateTime(3)
+  actorPerson   Person      @relation("TripIdempotencyActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
+  trip          Trip        @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  tripResult    TripResult? @relation(fields: [tripResultId], references: [id], onDelete: Restrict)
+
+  @@unique([actorPersonId, actionCode, keyHash])
+  @@index([tripId, createdAt])
+  @@index([tripResultId])
+  @@map("trip_idempotency")
+}
+
+model VisitDemandLeadIdempotency {
+  id            String          @id @default(uuid()) @db.Char(36)
+  actorPersonId String          @map("actor_person_id") @db.Char(36)
+  visitId       String          @map("visit_id") @db.Char(36)
+  keyHash       String          @map("key_hash") @db.Char(64)
+  payloadHash   String          @map("payload_hash") @db.Char(64)
+  demandLeadId  String          @map("demand_lead_id") @db.Char(36)
+  createdAt     DateTime        @default(now()) @map("created_at") @db.DateTime(3)
+  actorPerson   Person          @relation("VisitLeadIdempotencyActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
+  visit         EnterpriseVisit @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  demandLead    DemandLead      @relation(fields: [demandLeadId], references: [id], onDelete: Restrict)
+
+  @@unique([actorPersonId, visitId, keyHash])
+  @@index([demandLeadId])
+  @@map("visit_demand_lead_idempotency")
 }
 
 model OutboxEvent {
@@ -834,6 +1002,8 @@ model Enterprise {
   coordinateUpdatedBy    Person?                   @relation("EnterpriseCoordinateUpdater", fields: [coordinateUpdatedById], references: [id], onDelete: Restrict)
   demandLeads            DemandLead[]
   demands                Demand[]
+  tripNodes              TripNode[]
+  visits                 EnterpriseVisit[]
 
   @@index([status, responsibleAreaId])
   @@index([name])
@@ -1088,10 +1258,15 @@ model DemandLead {
   supplements              DemandLeadSupplement[]
   provenances              DemandProvenance[]
   publicIdempotency        DemandLeadPublicIdempotency[]
+  trip                     Trip?                         @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  visit                    EnterpriseVisit?              @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  visitIdempotencyRecords  VisitDemandLeadIdempotency[]
 
   @@index([responsibleAreaId, status, createdAt])
   @@index([enterpriseId, status])
   @@index([sourcePersonId, sourceAt])
+  @@index([tripId])
+  @@index([visitId])
   @@index([mergedIntoLeadId])
   @@index([convertedDemandId])
   @@map("demand_leads")

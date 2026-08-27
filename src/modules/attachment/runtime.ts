@@ -11,6 +11,7 @@ import { InMemoryStorageAdapter } from "./storage/in-memory-storage-adapter";
 import type { StorageAdapter } from "./storage/storage-adapter";
 import { registerPolicyAttachmentAuthorizer } from "@/modules/policy/attachment-authorizer";
 import { registerDemandAttachmentAuthorizers } from "@/modules/demand/attachment-authorization";
+import { registerTripAttachmentAuthorizers } from "@/modules/trip/attachment-authorization";
 
 type AttachmentRuntime = {
   storage: StorageAdapter;
@@ -46,6 +47,7 @@ function createRuntime(): AttachmentRuntime {
   const parentAuthorizers = new AttachmentParentAuthorizerRegistry();
   registerPolicyAttachmentAuthorizer(parentAuthorizers);
   registerDemandAttachmentAuthorizers(parentAuthorizers);
+  registerTripAttachmentAuthorizers(parentAuthorizers);
   const scanner = isTest ? new FakeCleanScanner() : new UnavailableFileScanAdapter();
   return {
     storage,
