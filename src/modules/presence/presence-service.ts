@@ -191,7 +191,7 @@ export class PresenceService {
   async current(input: ServiceInput & { now?: Date }) {
     await authorizeActor({ actor: input.actor, action: "presence.current.view" });
     const now = input.now ?? new Date();
-    const rows = await this.repository.listCurrent(now);
+    const { rows, currentActiveBatchCount } = await this.repository.listCurrent(now);
     const unique = new Map<string, (typeof rows)[number]>();
     const duplicatePersonIds = new Set<string>();
     for (const row of rows) {
@@ -204,11 +204,19 @@ export class PresenceService {
         personIds: [...duplicatePersonIds],
       });
     }
+    const currentBatchConfigurationInvalid = currentActiveBatchCount !== 1;
+    if (currentBatchConfigurationInvalid) {
+      console.warn("Presence current classification found invalid current ACTIVE batch count", {
+        currentActiveBatchCount,
+      });
+    }
     const items = [...unique.values()].map((row) => ({
       person: {
         id: row.person.id,
         name: row.person.name,
-        memberType: row.person.batchMemberships.length > 0 ? "CURRENT" as const : "ALUMNI" as const,
+        memberType: row.person.batchMemberships.length > 0 && row.person.roleAssignments.length > 0
+          ? "CURRENT" as const
+          : "ALUMNI" as const,
       },
       arrivalAt: row.arrivalAt,
       expectedDepartureAt: row.expectedDepartureAt,
@@ -218,8 +226,14 @@ export class PresenceService {
       currentCount: items.filter(({ person }) => person.memberType === "CURRENT").length,
       alumniCount: items.filter(({ person }) => person.memberType === "ALUMNI").length,
       items,
-      ...(input.actor.hasGlobalOperational && duplicatePersonIds.size > 0
-        ? { diagnostics: { duplicatePersonCount: duplicatePersonIds.size } }
+      ...(input.actor.hasGlobalOperational && (duplicatePersonIds.size > 0 || currentBatchConfigurationInvalid)
+        ? { diagnostics: {
+            ...(duplicatePersonIds.size > 0 ? { duplicatePersonCount: duplicatePersonIds.size } : {}),
+            ...(currentBatchConfigurationInvalid ? {
+              currentActiveBatchCount,
+              configurationIssues: ["CURRENT_ACTIVE_BATCH_COUNT_INVALID" as const],
+            } : {}),
+          } }
         : {}),
     };
   }

@@ -46,29 +46,48 @@ export class PresenceRepository {
   }
 
   listCurrent(now: Date) {
-    return this.prisma.presenceReport.findMany({
-      where: { canceledAt: null, arrivalAt: { lte: now }, expectedDepartureAt: { gt: now } },
-      orderBy: [{ personId: "asc" }, { arrivalAt: "desc" }, { id: "asc" }],
-      select: {
-        id: true,
-        personId: true,
-        arrivalAt: true,
-        expectedDepartureAt: true,
-        person: {
-          select: {
-            id: true,
-            name: true,
-            batchMemberships: {
-              where: {
-                status: "ACTIVE",
-                batch: { isCurrent: true, status: "ACTIVE" },
+    return this.prisma.$transaction(async (tx) => {
+      const currentActiveBatches = await tx.batch.findMany({
+        where: { isCurrent: true, status: "ACTIVE" },
+        select: { id: true },
+      });
+      const currentBatchId = currentActiveBatches.length === 1 ? currentActiveBatches[0].id : undefined;
+      const rows = await tx.presenceReport.findMany({
+        where: { canceledAt: null, arrivalAt: { lte: now }, expectedDepartureAt: { gt: now } },
+        orderBy: [{ personId: "asc" }, { arrivalAt: "desc" }, { id: "asc" }],
+        select: {
+          id: true,
+          personId: true,
+          arrivalAt: true,
+          expectedDepartureAt: true,
+          person: {
+            select: {
+              id: true,
+              name: true,
+              batchMemberships: {
+                where: currentBatchId ? {
+                  batchId: currentBatchId,
+                  status: "ACTIVE",
+                  startDate: { lte: now },
+                  OR: [{ endDate: null }, { endDate: { gt: now } }],
+                } : { id: { in: [] } },
+                select: { id: true },
+                take: 1,
               },
-              select: { id: true },
-              take: 1,
+              roleAssignments: {
+                where: {
+                  roleCode: "MEMBER_CURRENT",
+                  effectiveAt: { lte: now },
+                  OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
+                },
+                select: { id: true },
+                take: 1,
+              },
             },
           },
         },
-      },
+      });
+      return { rows, currentActiveBatchCount: currentActiveBatches.length };
     });
   }
 
