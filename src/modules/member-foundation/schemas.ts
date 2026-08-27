@@ -16,6 +16,11 @@ export const memberListQuerySchema = z.object({
   pageSize: pageNumber(20, 100),
 }).strict();
 
+export const collaborationCandidateQuerySchema = z.object({
+  keyword: optionalQuery.pipe(z.string().trim().max(80).optional()),
+  limit: pageNumber(20, 50),
+}).strict();
+
 export const capabilityProfileSchema = z.object({
   professionalDirection: optionalText(500),
   coordinatableResources: optionalText(5000),

@@ -13,6 +13,9 @@ import { isDemandCommandIdempotencyUniqueConflict } from "@/modules/demand/error
 import { isDeterministicDuplicateTitle } from "@/modules/demand/formal-demand-service";
 import {
   createFormalDemandSchema,
+  applyDemandCollaborationSchema,
+  claimDemandSchema,
+  demandCollaborationPersonSchema,
   demandListQuerySchema,
   reviewDemandSchema,
   updateDemandDraftSchema,
@@ -123,7 +126,7 @@ describe("M1-003 Formal Demand contracts", () => {
     expect(isDeterministicDuplicateTitle("高端装备技术改造需求", "人才招聘合作")).toBe(false);
   });
 
-  it("parses server-side list filters and makes mine explicitly unsupported until M1-004", () => {
+  it("parses server-side list filters including the M1-004 mine relation filter", () => {
     expect(demandListQuerySchema.parse({
       status: "PENDING_CLAIM",
       type: "TECHNICAL",
@@ -131,6 +134,24 @@ describe("M1-003 Formal Demand contracts", () => {
       page: "2",
       pageSize: "30",
     })).toMatchObject({ status: "PENDING_CLAIM", type: "TECHNICAL", mine: true, page: 2, pageSize: 30 });
+  });
+
+  it("keeps claim and collaboration commands strict and server-owned", () => {
+    expect(claimDemandSchema.safeParse({}).success).toBe(true);
+    expect(claimDemandSchema.safeParse({ ownerPersonId: crypto.randomUUID() }).success).toBe(false);
+    expect(applyDemandCollaborationSchema.safeParse({}).success).toBe(true);
+    expect(applyDemandCollaborationSchema.safeParse({ status: "ACCEPTED" }).success).toBe(false);
+    expect(demandCollaborationPersonSchema.safeParse({ personId: crypto.randomUUID() }).success).toBe(true);
+    expect(demandCollaborationPersonSchema.safeParse({ personId: "手工输入人员编号" }).success).toBe(false);
+  });
+
+  it("grants participation capabilities to current members but not plain administrators or alumni", async () => {
+    const member = actor(["MEMBER_CURRENT"]);
+    for (const action of ["demand.claim", "demand.collaboration.apply", "demand.collaboration.manage"] as const) {
+      await expect(authorizeActor({ actor: member, action })).resolves.toMatchObject({ allowed: true });
+      await expect(authorizeActor({ actor: actor(["ADMIN"]), action })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+      await expect(authorizeActor({ actor: actor(["MEMBER_ALUMNI_PLATFORM"]), action })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
+    }
   });
 
   it("denies township direct publish and grants review/direct publish only to administrators", async () => {

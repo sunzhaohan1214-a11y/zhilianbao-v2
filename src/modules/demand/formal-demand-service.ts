@@ -3,6 +3,7 @@ import type { Demand, DemandStatus, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import { PermissionError } from "@/modules/permissions/permission-errors";
 import type { PermissionActor } from "@/modules/permissions/types";
+import { getCurrentMemberEligibility } from "@/modules/member-foundation/current-member-eligibility";
 import {
   DEMAND_ENTITY,
   DEMAND_PRE_PUBLISH_STATUSES,
@@ -16,12 +17,16 @@ import {
   formalDemandDraftEditSource,
   type DirectDemandSourceType,
 } from "./formal-demand-access";
-import { DemandError, isDemandCommandIdempotencyUniqueConflict } from "./errors";
+import { DemandError, isDemandCommandIdempotencyUniqueConflict, isPrismaUniqueConflict } from "./errors";
 import { FormalDemandRepository, type FormalDemandTransaction } from "./repository/formal-demand-repository";
 import {
   createFormalDemandSchema,
+  applyDemandCollaborationSchema,
+  claimDemandSchema,
   demandListQuerySchema,
+  demandCollaborationPersonSchema,
   directPublishDemandSchema,
+  endDemandCollaborationSchema,
   idempotencyKeySchema,
   reviewDemandSchema,
   submitDemandReviewSchema,
@@ -33,6 +38,7 @@ type LockedEnterprise = NonNullable<Awaited<ReturnType<FormalDemandRepository["l
 type LockedContact = NonNullable<Awaited<ReturnType<FormalDemandRepository["lockContact"]>>>;
 
 const SUBMIT_ACTION = "DEMAND_SUBMIT_REVIEW";
+const CLAIM_ACTION = "DEMAND_CLAIM";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -64,6 +70,32 @@ function jsonCommandResult(value: Prisma.JsonValue): ReturnType<typeof commandRe
     status: String(item.status) as DemandStatus,
     submittedAt: item.submittedAt === null ? null : String(item.submittedAt),
     firstPublishedAt: item.firstPublishedAt === null ? null : String(item.firstPublishedAt),
+  };
+}
+
+function claimCommandResult(
+  demand: Pick<Demand, "id" | "businessNo" | "status">,
+  owner: { personId: string; name: string },
+  claimedAt: Date,
+) {
+  return {
+    demandId: demand.id,
+    businessNo: demand.businessNo,
+    status: demand.status,
+    owner,
+    claimedAt: claimedAt.toISOString(),
+  };
+}
+
+function jsonClaimCommandResult(value: Prisma.JsonValue): ReturnType<typeof claimCommandResult> {
+  const item = value as Record<string, unknown>;
+  const owner = item.owner as Record<string, unknown>;
+  return {
+    demandId: String(item.demandId),
+    businessNo: String(item.businessNo),
+    status: String(item.status) as DemandStatus,
+    owner: { personId: String(owner.personId), name: String(owner.name) },
+    claimedAt: String(item.claimedAt),
   };
 }
 
@@ -99,6 +131,56 @@ export function isDeterministicDuplicateTitle(source: string, candidate: string)
 
 export class FormalDemandService {
   constructor(private readonly repository = new FormalDemandRepository()) {}
+
+  private async lockDemandOrThrow(tx: FormalDemandTransaction, demandId: string): Promise<void> {
+    try {
+      await this.repository.lockDemand(tx, demandId);
+    } catch (error) {
+      if ((error as Error).message === "DEMAND_LOCK_TARGET_NOT_FOUND") {
+        throw new DemandError("DEMAND_NOT_FOUND", "需求不存在或当前账号无权查看");
+      }
+      throw error;
+    }
+  }
+
+  private async requireEligibleCurrentMember(tx: FormalDemandTransaction, personId: string) {
+    const eligibility = await getCurrentMemberEligibility(tx, personId);
+    if (!eligibility.eligible || !eligibility.batchId || !eligibility.person) {
+      throw new DemandError("DEMAND_MEMBER_INELIGIBLE", "当前人员不是可参与需求的在任团员", {
+        reason: eligibility.reason ?? "UNKNOWN",
+      });
+    }
+    return { batchId: eligibility.batchId, person: eligibility.person };
+  }
+
+  private async requireActiveOwner(tx: FormalDemandTransaction, demand: Pick<Demand, "id" | "status" | "currentOwnerPersonId">) {
+    if (demand.status !== "IN_PROGRESS" || !demand.currentOwnerPersonId) {
+      throw new DemandError("DEMAND_STATE_CONFLICT", "需求尚未进入由有效负责人跟进的状态");
+    }
+    const activeOwners = await tx.demandOwnerHistory.findMany({
+      where: { demandId: demand.id, activeKey: 1, expiredAt: null },
+      select: { personId: true, batchId: true },
+      take: 2,
+    });
+    if (activeOwners.length !== 1 || activeOwners[0].personId !== demand.currentOwnerPersonId) {
+      throw new DemandError("DEMAND_STATE_CONFLICT", "需求负责人数据不一致，已拒绝继续操作");
+    }
+    return activeOwners[0];
+  }
+
+  private async requireNoPendingOrActiveCollaboration(
+    tx: FormalDemandTransaction,
+    demandId: string,
+    personId: string,
+  ): Promise<void> {
+    const [pending, active] = await Promise.all([
+      tx.demandCollaborationRequest.count({ where: { demandId, personId, status: "PENDING", pendingKey: 1 } }),
+      tx.demandCollaborator.count({ where: { demandId, personId, status: "ACTIVE", activeKey: 1 } }),
+    ]);
+    if (pending > 0 || active > 0) {
+      throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "该人员已有待处理申请/邀请或正在协同");
+    }
+  }
 
   async formOptions(input: ServiceInput & { sourceType: DirectDemandSourceType }) {
     await authorizeActor({ actor: input.actor, action: "demand.formal.create" });
@@ -718,6 +800,308 @@ export class FormalDemandService {
     });
   }
 
+  async claim(input: ServiceInput & { demandId: string; body: unknown; idempotencyKey?: string | null }) {
+    claimDemandSchema.parse(input.body);
+    const idempotencyKey = idempotencyKeySchema.safeParse(input.idempotencyKey);
+    if (!idempotencyKey.success) {
+      throw new DemandError("DEMAND_IDEMPOTENCY_REQUIRED", "认领需求必须提供有效 Idempotency-Key");
+    }
+    await authorizeActor({ actor: input.actor, action: "demand.claim" });
+    const keyHash = sha256(idempotencyKey.data);
+    const payloadHash = sha256(JSON.stringify({ demandId: input.demandId }));
+    try {
+      return await this.repository.transaction(async (tx) => {
+        await this.lockDemandOrThrow(tx, input.demandId);
+        const replay = await this.repository.findIdempotencyForUpdate(tx, {
+          actorPersonId: input.actor.personId,
+          action: CLAIM_ACTION,
+          keyHash,
+        });
+        if (replay) {
+          if (replay.demandId !== input.demandId || replay.payloadHash !== payloadHash) {
+            throw new DemandError("DEMAND_IDEMPOTENCY_CONFLICT", "同一 Idempotency-Key 不能用于不同需求");
+          }
+          return jsonClaimCommandResult(replay.responseJson);
+        }
+        const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
+        if (demand.status !== "PENDING_CLAIM" || demand.firstPublishedAt === null || demand.currentOwnerPersonId !== null) {
+          throw new DemandError("DEMAND_ALREADY_CLAIMED", "需求已被认领或当前状态不可认领");
+        }
+        const eligibility = await this.requireEligibleCurrentMember(tx, input.actor.personId);
+        const activeOwnerCount = await tx.demandOwnerHistory.count({ where: {
+          demandId: demand.id,
+          activeKey: 1,
+          expiredAt: null,
+        } });
+        if (activeOwnerCount !== 0) {
+          throw new DemandError("DEMAND_ALREADY_CLAIMED", "需求已存在有效负责人");
+        }
+        const now = new Date();
+        await tx.demandOwnerHistory.create({ data: {
+          demandId: demand.id,
+          personId: input.actor.personId,
+          batchId: eligibility.batchId,
+          effectiveAt: now,
+          changeType: "CLAIM",
+          createdByPersonId: input.actor.personId,
+          activeKey: 1,
+        } });
+        const updated = await tx.demand.update({
+          where: { id: demand.id },
+          data: { status: "IN_PROGRESS", currentOwnerPersonId: input.actor.personId },
+        });
+        await writeDemandAudit(tx, {
+          actor: input.actor,
+          actionCode: "DEMAND_CLAIMED",
+          entityType: DEMAND_ENTITY,
+          entityId: demand.id,
+          before: { status: demand.status, currentOwnerPersonId: null },
+          after: { status: updated.status, currentOwnerPersonId: updated.currentOwnerPersonId },
+          context: input.context,
+        });
+        await writeDemandTransition(tx, {
+          actor: input.actor,
+          entityType: DEMAND_ENTITY,
+          entityId: demand.id,
+          fromState: demand.status,
+          toState: updated.status,
+          actionCode: "DEMAND_CLAIMED",
+          metadata: { currentOwnerPersonId: input.actor.personId, batchId: eligibility.batchId },
+          context: input.context,
+        });
+        const result = claimCommandResult(updated, {
+          personId: input.actor.personId,
+          name: eligibility.person.name,
+        }, now);
+        await tx.demandCommandIdempotency.create({ data: {
+          actorPersonId: input.actor.personId,
+          action: CLAIM_ACTION,
+          keyHash,
+          payloadHash,
+          demandId: demand.id,
+          responseJson: result,
+        } });
+        return result;
+      });
+    } catch (error) {
+      if (!isDemandCommandIdempotencyUniqueConflict(error)) throw error;
+      const replay = await this.repository.findIdempotency({
+        actorPersonId: input.actor.personId,
+        action: CLAIM_ACTION,
+        keyHash,
+      });
+      if (!replay) throw error;
+      if (replay.demandId !== input.demandId || replay.payloadHash !== payloadHash) {
+        throw new DemandError("DEMAND_IDEMPOTENCY_CONFLICT", "同一 Idempotency-Key 不能用于不同需求");
+      }
+      return jsonClaimCommandResult(replay.responseJson);
+    }
+  }
+
+  async applyCollaboration(input: ServiceInput & { demandId: string; body: unknown }) {
+    applyDemandCollaborationSchema.parse(input.body);
+    await authorizeActor({ actor: input.actor, action: "demand.collaboration.apply" });
+    try {
+      return await this.repository.transaction(async (tx) => {
+        await this.lockDemandOrThrow(tx, input.demandId);
+        const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
+        const owner = await this.requireActiveOwner(tx, demand);
+        await this.requireEligibleCurrentMember(tx, input.actor.personId);
+        if (owner.personId === input.actor.personId) {
+          throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "负责人无需申请协同自己的需求");
+        }
+        await this.requireNoPendingOrActiveCollaboration(tx, demand.id, input.actor.personId);
+        const request = await tx.demandCollaborationRequest.create({ data: {
+          demandId: demand.id,
+          personId: input.actor.personId,
+          requestType: "APPLY",
+          status: "PENDING",
+          requestedByPersonId: input.actor.personId,
+          pendingKey: 1,
+        } });
+        await writeDemandAudit(tx, {
+          actor: input.actor,
+          actionCode: "DEMAND_COLLABORATION_APPLIED",
+          entityType: DEMAND_ENTITY,
+          entityId: demand.id,
+          after: { requestId: request.id, personId: request.personId, requestType: request.requestType, status: request.status },
+          context: input.context,
+        });
+        return { id: request.id, demandId: request.demandId, personId: request.personId, requestType: request.requestType, status: request.status };
+      });
+    } catch (error) {
+      if (isPrismaUniqueConflict(error)) {
+        throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "该人员已有待处理申请/邀请或正在协同");
+      }
+      throw error;
+    }
+  }
+
+  async inviteCollaboration(input: ServiceInput & { demandId: string; body: unknown }) {
+    const command = demandCollaborationPersonSchema.parse(input.body);
+    await authorizeActor({ actor: input.actor, action: "demand.collaboration.manage" });
+    try {
+      return await this.repository.transaction(async (tx) => {
+        await this.lockDemandOrThrow(tx, input.demandId);
+        const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
+        const owner = await this.requireActiveOwner(tx, demand);
+        if (owner.personId !== input.actor.personId) {
+          throw new PermissionError("FORBIDDEN_SCOPE", "只有当前有效负责人可以邀请协同人");
+        }
+        if (command.personId === owner.personId) {
+          throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "负责人不能邀请自己成为协同人");
+        }
+        const target = await this.requireEligibleCurrentMember(tx, command.personId);
+        await this.requireNoPendingOrActiveCollaboration(tx, demand.id, command.personId);
+        const request = await tx.demandCollaborationRequest.create({ data: {
+          demandId: demand.id,
+          personId: command.personId,
+          requestType: "INVITE",
+          status: "PENDING",
+          requestedByPersonId: input.actor.personId,
+          pendingKey: 1,
+        } });
+        await writeDemandAudit(tx, {
+          actor: input.actor,
+          actionCode: "DEMAND_COLLABORATION_INVITED",
+          entityType: DEMAND_ENTITY,
+          entityId: demand.id,
+          after: { requestId: request.id, personId: request.personId, personName: target.person.name, requestType: request.requestType, status: request.status },
+          context: input.context,
+        });
+        return { id: request.id, demandId: request.demandId, personId: request.personId, requestType: request.requestType, status: request.status };
+      });
+    } catch (error) {
+      if (isPrismaUniqueConflict(error)) {
+        throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "该人员已有待处理申请/邀请或正在协同");
+      }
+      throw error;
+    }
+  }
+
+  async approveCollaboration(input: ServiceInput & { demandId: string; personId: string; body: unknown }) {
+    applyDemandCollaborationSchema.parse(input.body);
+    return this.repository.transaction(async (tx) => {
+      await this.lockDemandOrThrow(tx, input.demandId);
+      const requestId = await this.repository.lockCollaborationRequest(tx, input.demandId, input.personId);
+      if (!requestId) throw new DemandError("DEMAND_COLLABORATION_NOT_FOUND", "待处理的协同申请或邀请不存在");
+      const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
+      const owner = await this.requireActiveOwner(tx, demand);
+      const request = await tx.demandCollaborationRequest.findUniqueOrThrow({ where: { id: requestId } });
+      if (request.requestType === "APPLY") {
+        await authorizeActor({ actor: input.actor, action: "demand.collaboration.manage" });
+        if (owner.personId !== input.actor.personId) {
+          throw new PermissionError("FORBIDDEN_SCOPE", "只有当前有效负责人可以批准协同申请");
+        }
+      } else {
+        await authorizeActor({ actor: input.actor, action: "demand.collaboration.apply" });
+        if (request.personId !== input.actor.personId) {
+          throw new PermissionError("FORBIDDEN_SCOPE", "只有受邀本人可以接受协同邀请");
+        }
+      }
+      const target = await this.requireEligibleCurrentMember(tx, request.personId);
+      const existing = await tx.demandCollaborator.count({ where: {
+        demandId: demand.id,
+        personId: request.personId,
+        status: "ACTIVE",
+        activeKey: 1,
+      } });
+      if (existing !== 0) throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "该人员已在协同中");
+      const now = new Date();
+      const collaborator = await tx.demandCollaborator.create({ data: {
+        demandId: demand.id,
+        personId: request.personId,
+        sourceRequestId: request.id,
+        sourceType: request.requestType,
+        status: "ACTIVE",
+        effectiveAt: now,
+        activeKey: 1,
+      } });
+      await tx.demandCollaborationRequest.update({ where: { id: request.id }, data: {
+        status: "ACCEPTED",
+        pendingKey: null,
+        decidedByPersonId: input.actor.personId,
+        decidedAt: now,
+      } });
+      await writeDemandAudit(tx, {
+        actor: input.actor,
+        actionCode: "DEMAND_COLLABORATION_ACCEPTED",
+        entityType: DEMAND_ENTITY,
+        entityId: demand.id,
+        after: { collaboratorId: collaborator.id, personId: collaborator.personId, personName: target.person.name, sourceType: collaborator.sourceType, status: collaborator.status },
+        context: input.context,
+      });
+      return { id: collaborator.id, demandId: collaborator.demandId, personId: collaborator.personId, status: collaborator.status };
+    });
+  }
+
+  async leaveCollaboration(input: ServiceInput & { demandId: string; body: unknown }) {
+    const command = endDemandCollaborationSchema.parse(input.body);
+    await authorizeActor({ actor: input.actor, action: "demand.collaboration.apply" });
+    return this.repository.transaction(async (tx) => {
+      await this.lockDemandOrThrow(tx, input.demandId);
+      const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
+      await this.requireActiveOwner(tx, demand);
+      const collaboratorId = await this.repository.lockActiveCollaborator(tx, demand.id, input.actor.personId);
+      if (!collaboratorId) throw new DemandError("DEMAND_COLLABORATION_NOT_FOUND", "当前账号不是该需求的有效协同人");
+      const now = new Date();
+      const collaborator = await tx.demandCollaborator.update({ where: { id: collaboratorId }, data: {
+        status: "LEFT",
+        activeKey: null,
+        expiredAt: now,
+        endedReason: command.reason,
+        endedByPersonId: input.actor.personId,
+      } });
+      await writeDemandAudit(tx, {
+        actor: input.actor,
+        actionCode: "DEMAND_COLLABORATOR_LEFT",
+        entityType: DEMAND_ENTITY,
+        entityId: demand.id,
+        before: { collaboratorId, personId: input.actor.personId, status: "ACTIVE" },
+        after: { collaboratorId, personId: input.actor.personId, status: collaborator.status },
+        reason: collaborator.endedReason ?? undefined,
+        context: input.context,
+      });
+      return { id: collaborator.id, demandId: collaborator.demandId, personId: collaborator.personId, status: collaborator.status };
+    });
+  }
+
+  async removeCollaborator(input: ServiceInput & { demandId: string; personId: string; body: unknown }) {
+    const command = endDemandCollaborationSchema.parse(input.body);
+    await authorizeActor({ actor: input.actor, action: "demand.collaboration.manage" });
+    return this.repository.transaction(async (tx) => {
+      await this.lockDemandOrThrow(tx, input.demandId);
+      const demand = await tx.demand.findUniqueOrThrow({ where: { id: input.demandId } });
+      const owner = await this.requireActiveOwner(tx, demand);
+      if (owner.personId !== input.actor.personId) {
+        throw new PermissionError("FORBIDDEN_SCOPE", "只有当前有效负责人可以移除协同人");
+      }
+      if (input.personId === owner.personId) {
+        throw new DemandError("DEMAND_COLLABORATION_CONFLICT", "负责人不能作为协同人被移除");
+      }
+      const collaboratorId = await this.repository.lockActiveCollaborator(tx, demand.id, input.personId);
+      if (!collaboratorId) throw new DemandError("DEMAND_COLLABORATION_NOT_FOUND", "该人员不是需求的有效协同人");
+      const collaborator = await tx.demandCollaborator.update({ where: { id: collaboratorId }, data: {
+        status: "REMOVED",
+        activeKey: null,
+        expiredAt: new Date(),
+        endedReason: command.reason,
+        endedByPersonId: input.actor.personId,
+      } });
+      await writeDemandAudit(tx, {
+        actor: input.actor,
+        actionCode: "DEMAND_COLLABORATOR_REMOVED",
+        entityType: DEMAND_ENTITY,
+        entityId: demand.id,
+        before: { collaboratorId, personId: input.personId, status: "ACTIVE" },
+        after: { collaboratorId, personId: input.personId, status: collaborator.status },
+        reason: collaborator.endedReason ?? undefined,
+        context: input.context,
+      });
+      return { id: collaborator.id, demandId: collaborator.demandId, personId: collaborator.personId, status: collaborator.status };
+    });
+  }
+
   async list(input: ServiceInput & { query: unknown }) {
     const query = demandListQuerySchema.parse(input.query);
     await authorizeActor({
@@ -725,16 +1109,7 @@ export class FormalDemandService {
       action: "demand.view",
       resource: { resourceType: "demand", requiredScope: "GLOBAL_PUBLISHED" },
     });
-    if (query.mine) {
-      return {
-        items: [],
-        total: 0,
-        page: query.page,
-        pageSize: query.pageSize,
-        mineUnsupported: "OWNER_NOT_AVAILABLE_UNTIL_M1_004",
-      };
-    }
-    return this.repository.list({
+    const result = await this.repository.list({
       includeAllPrePublish: input.actor.hasGlobalOperational && input.actor.capabilities.has("demand.lead.view"),
       prePublishAreaIds: input.actor.capabilities.has("demand.lead.view") ? input.actor.townshipAreaIds : [],
       status: query.status,
@@ -742,9 +1117,17 @@ export class FormalDemandService {
       areaId: query.areaId,
       batchId: query.batchId,
       keyword: query.keyword,
+      minePersonId: query.mine ? input.actor.personId : undefined,
       page: query.page,
       pageSize: query.pageSize,
     });
+    return {
+      ...result,
+      items: result.items.map(({ currentOwnerPerson, ...item }) => ({
+        ...item,
+        currentOwner: currentOwnerPerson,
+      })),
+    };
   }
 
   async detail(input: ServiceInput & { demandId: string }) {
@@ -766,10 +1149,54 @@ export class FormalDemandService {
     const duplicateCandidates = input.actor.capabilities.has("demand.review")
       ? await this.duplicateCandidates({ actor: input.actor, demandId: demand.id, alreadyAuthorized: true })
       : [];
-    const safeDemand = { ...demand, reviews: undefined };
+    const currentOwnerPerson = demand.currentOwnerPerson;
+    const collaborationRequests = demand.collaborationRequests;
+    const collaborators = demand.collaborators;
+    const safeDemand = {
+      ...demand,
+      reviews: undefined,
+      currentOwnerPerson: undefined,
+      ownerHistories: undefined,
+      collaborationRequests: undefined,
+      collaborators: undefined,
+    };
     const published = isPublished(demand.status);
+    const pendingCollaborationForMe = collaborationRequests.find(({ personId }) => personId === input.actor.personId) ?? null;
+    const isOwner = demand.currentOwnerPersonId === input.actor.personId;
+    const isAdministratorViewer = isAdministrator(input.actor) && input.actor.hasGlobalOperational;
+    const visiblePendingRequests = collaborationRequests
+      .filter((request) => isOwner || isAdministratorViewer || request.personId === input.actor.personId)
+      .map((request) => ({
+        id: request.id,
+        person: request.person,
+        requestType: request.requestType,
+        status: request.status,
+        requestedAt: request.requestedAt,
+        requestedBy: request.requestedByPerson,
+      }));
+    const isCollaborator = collaborators.some(({ personId }) => personId === input.actor.personId);
+    const myRelation = isOwner
+      ? "OWNER"
+      : isCollaborator
+        ? "COLLABORATOR"
+        : pendingCollaborationForMe?.requestType === "APPLY"
+          ? "APPLIED_PENDING"
+          : pendingCollaborationForMe?.requestType === "INVITE"
+            ? "INVITED_PENDING"
+            : "NONE";
     return {
       ...safeDemand,
+      currentOwner: currentOwnerPerson,
+      collaborators: collaborators.map(({ person, ...collaborator }) => ({ ...collaborator, person })),
+      pendingCollaborationForMe: pendingCollaborationForMe ? {
+        id: pendingCollaborationForMe.id,
+        personId: pendingCollaborationForMe.personId,
+        requestType: pendingCollaborationForMe.requestType,
+        status: pendingCollaborationForMe.status,
+        requestedAt: pendingCollaborationForMe.requestedAt,
+      } : null,
+      pendingCollaborationRequests: visiblePendingRequests,
+      myRelation: myRelation as "NONE" | "OWNER" | "COLLABORATOR" | "APPLIED_PENDING" | "INVITED_PENDING",
       internalNote: published ? null : demand.internalNote,
       selectedContact: published && demand.contactSnapshot ? {
         id: demand.selectedContactId,

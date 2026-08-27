@@ -9,7 +9,7 @@ import { FormalDemandService } from "@/modules/demand";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 test.describe.configure({ mode: "serial" });
-test.setTimeout(120_000);
+test.setTimeout(180_000);
 
 async function login(browser: Browser, user: { phone: string; password: string }) {
   const context = await browser.newContext();
@@ -51,7 +51,7 @@ function demandPayload(title: string, attachmentIds: string[] = [], sourceType: 
 
 test.beforeEach(async () => { await seedAuthFixtures(); });
 
-test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve every M1-003 boundary", async ({ browser }) => {
+test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve every M1 boundary", async ({ browser }) => {
   const prisma = getPrismaClient();
   const suffix = randomUUID().slice(0, 8);
   const removableName = `formal-e2e-remove-${suffix}.pdf`;
@@ -187,7 +187,67 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   await expect(page.getByText("13800003001")).toBeVisible();
   await expect(page.getByText(retainedName)).toBeVisible();
   await expect(page.getByText(removableName)).toHaveCount(0);
-  await expect(page.getByText(/认领|协作|进展录入|办理进度/)).toHaveCount(0);
+  await page.getByRole("button", { name: "我要对接" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
+  await expect(page.getByText("对接中", { exact: true })).toBeVisible();
+  await expect(page.getByText("当前负责人：E2E normal", { exact: true })).toBeVisible();
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.groupLeader);
+  page = authenticated.page;
+  await page.goto(`/demands/${demandId}`);
+  const losingClaim = await post(page, `/api/v2/demands/${demandId}/claim`, {}, { "Idempotency-Key": `loser-${suffix}` });
+  expect(losingClaim).toMatchObject({ status: 409, payload: { error: { code: "DEMAND_ALREADY_CLAIMED" } } });
+  await page.getByRole("button", { name: "申请协同" }).click();
+  await expect(page.getByText("协同申请待主责确认", { exact: true })).toBeVisible();
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.normal);
+  page = authenticated.page;
+  await page.goto(`/demands/${demandId}`);
+  await expect(page.getByText("E2E groupLeader", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "同意协同" }).click();
+  await expect(page.getByText("协同人：E2E groupLeader", { exact: true })).toBeVisible();
+  await page.getByLabel("按姓名搜索协同人").fill("E2E minister");
+  await expect(page.getByText("E2E minister", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "发出邀请" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.minister);
+  page = authenticated.page;
+  await page.goto(`/demands/${demandId}`);
+  await page.getByRole("button", { name: "接受协同邀请" }).click();
+  await expect(page.getByText("协同中", { exact: true })).toBeVisible();
+  await expect(page.getByText(/AI推荐|匹配理由|匹配度|愿意协助|暂不参与/)).toHaveCount(0);
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.groupLeader);
+  page = authenticated.page;
+  await page.goto(`/demands/${demandId}`);
+  expect((await post(page, `/api/v2/demands/${demandId}/collaboration/leave`, { reason: "E2E 阶段任务完成" })).status).toBe(200);
+  await page.goto("/demands?mine=true");
+  await expect(page.getByRole("link", { name: new RegExp(`E2E 已修改核心标题 ${suffix}`) })).toHaveCount(0);
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.normal);
+  page = authenticated.page;
+  await page.goto(`/demands/${demandId}`);
+  expect((await post(page, `/api/v2/demands/${demandId}/collaboration/${e2eUsers.minister.personId}/remove`, { reason: "E2E 调整协同分工" })).status).toBe(200);
+  await page.goto("/demands?mine=true");
+  await expect(page.getByRole("link", { name: new RegExp(`E2E 已修改核心标题 ${suffix}`) })).toBeVisible();
+
+  const collaborationHistory = await prisma.demandCollaborator.findMany({ where: { demandId }, select: { personId: true, status: true, expiredAt: true, endedReason: true } });
+  expect(collaborationHistory).toEqual(expect.arrayContaining([
+    expect.objectContaining({ personId: e2eUsers.groupLeader.personId, status: "LEFT", expiredAt: expect.any(Date), endedReason: "E2E 阶段任务完成" }),
+    expect.objectContaining({ personId: e2eUsers.minister.personId, status: "REMOVED", expiredAt: expect.any(Date), endedReason: "E2E 调整协同分工" }),
+  ]));
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.minister);
+  page = authenticated.page;
+  await page.goto("/demands?mine=true");
+  await expect(page.getByRole("link", { name: new RegExp(`E2E 已修改核心标题 ${suffix}`) })).toHaveCount(0);
 
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.admin);
@@ -195,7 +255,33 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   const directPublished = await post(page, `/api/v2/demands/${adminDraftId}/direct-publish`, {});
   expect(directPublished.status).toBe(200);
   expect(directPublished.payload.data).toMatchObject({ status: "PENDING_CLAIM", firstPublishedAt: expect.any(String) });
+  const ministerOnlyDraft = await post(page, "/api/v2/demands", demandPayload(`E2E 部长单角色拒绝 ${suffix}`, [], "ADMIN_DIRECT"));
+  expect(ministerOnlyDraft.status).toBe(201);
+  const ministerOnlyDemandId = ministerOnlyDraft.payload.data.id as string;
+  expect((await post(page, `/api/v2/demands/${ministerOnlyDemandId}/direct-publish`, {})).status).toBe(200);
   await page.goto(`/admin/demands/${adminDraftId}`);
   await expect(page.getByText("待对接", { exact: true })).toBeVisible();
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.alumni);
+  page = authenticated.page;
+  await page.goto(`/demands/${ministerOnlyDemandId}`);
+  await expect(page.getByRole("button", { name: "我要对接" })).toHaveCount(0);
+  expect((await post(page, `/api/v2/demands/${ministerOnlyDemandId}/claim`, {}, { "Idempotency-Key": `alumni-${suffix}` })).status).toBe(403);
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.minister);
+  page = authenticated.page;
+  await page.goto(`/demands/${adminDraftId}`);
+  expect((await post(page, `/api/v2/demands/${adminDraftId}/claim`, {}, { "Idempotency-Key": `minister-member-${suffix}` })).status).toBe(200);
+  await prisma.roleAssignment.updateMany({ where: { personId: e2eUsers.minister.personId, roleCode: "MEMBER_CURRENT", expiredAt: null }, data: { expiredAt: new Date() } });
+
+  await authenticated.context.close();
+  authenticated = await login(browser, e2eUsers.minister);
+  page = authenticated.page;
+  await page.goto(`/demands/${ministerOnlyDemandId}`);
+  await expect(page.getByRole("button", { name: "我要对接" })).toHaveCount(0);
+  expect((await post(page, `/api/v2/demands/${ministerOnlyDemandId}/claim`, {}, { "Idempotency-Key": `minister-only-${suffix}` })).status).toBe(403);
+  expect(await prisma.outboxEvent.count({ where: { aggregateId: { in: [demandId, adminDraftId, ministerOnlyDemandId] } } })).toBe(0);
   await authenticated.context.close();
 });

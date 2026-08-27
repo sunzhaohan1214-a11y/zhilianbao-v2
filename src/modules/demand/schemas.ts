@@ -186,6 +186,10 @@ export const reviewDemandSchema = z.object({
 });
 
 export const directPublishDemandSchema = z.object({}).strict();
+export const claimDemandSchema = z.object({}).strict();
+export const applyDemandCollaborationSchema = z.object({}).strict();
+export const demandCollaborationPersonSchema = z.object({ personId: z.uuid() }).strict();
+export const endDemandCollaborationSchema = z.object({ reason: plainText(500) }).strict();
 
 export const demandListQuerySchema = z.object({
   status: optionalQueryString.pipe(z.enum([

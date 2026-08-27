@@ -154,6 +154,7 @@ export class FormalDemandRepository {
     areaId?: string;
     batchId?: string;
     keyword?: string;
+    minePersonId?: string;
     page: number;
     pageSize: number;
   }) {
@@ -169,6 +170,12 @@ export class FormalDemandRepository {
             }] : []),
           ],
         };
+    const mine: Prisma.DemandWhereInput | null = input.minePersonId ? {
+      OR: [
+        { currentOwnerPersonId: input.minePersonId },
+        { collaborators: { some: { personId: input.minePersonId, status: "ACTIVE", activeKey: 1 } } },
+      ],
+    } : null;
     const where: Prisma.DemandWhereInput = {
       AND: [
         visibility,
@@ -184,6 +191,7 @@ export class FormalDemandRepository {
           { title: { contains: input.keyword } },
           { enterprise: { name: { contains: input.keyword } } },
         ] }] : []),
+        ...(mine ? [mine] : []),
       ],
     };
     const [total, items] = await Promise.all([
@@ -205,6 +213,7 @@ export class FormalDemandRepository {
           createdAt: true,
           enterprise: { select: { id: true, name: true } },
           responsibleArea: { select: { id: true, name: true } },
+          currentOwnerPerson: { select: { id: true, name: true } },
           provenances: { select: { sourceType: true }, orderBy: { createdAt: "asc" } },
         },
       }),
@@ -231,6 +240,24 @@ export class FormalDemandRepository {
         createdByPerson: { select: { id: true, name: true } },
         reviewedByPerson: { select: { id: true, name: true } },
         publishedByPerson: { select: { id: true, name: true } },
+        currentOwnerPerson: { select: { id: true, name: true } },
+        ownerHistories: {
+          where: { activeKey: 1 },
+          select: { id: true, personId: true, batchId: true, effectiveAt: true },
+        },
+        collaborators: {
+          where: { status: "ACTIVE", activeKey: 1 },
+          include: { person: { select: { id: true, name: true } } },
+          orderBy: [{ effectiveAt: "asc" }, { id: "asc" }],
+        },
+        collaborationRequests: {
+          where: { status: "PENDING", pendingKey: 1 },
+          include: {
+            person: { select: { id: true, name: true } },
+            requestedByPerson: { select: { id: true, name: true } },
+          },
+          orderBy: [{ requestedAt: "asc" }, { id: "asc" }],
+        },
       },
     });
   }
@@ -287,5 +314,37 @@ export class FormalDemandRepository {
 
   findIdempotency(input: { actorPersonId: string; action: string; keyHash: string }) {
     return this.prisma.demandCommandIdempotency.findFirst({ where: input });
+  }
+
+  async lockCollaborationRequest(
+    tx: FormalDemandTransaction,
+    demandId: string,
+    personId: string,
+  ): Promise<string | null> {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM demand_collaboration_requests
+      WHERE demand_id = ${demandId}
+        AND person_id = ${personId}
+        AND status = 'PENDING'
+        AND pending_key = 1
+      FOR UPDATE
+    `;
+    return rows[0]?.id ?? null;
+  }
+
+  async lockActiveCollaborator(
+    tx: FormalDemandTransaction,
+    demandId: string,
+    personId: string,
+  ): Promise<string | null> {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM demand_collaborators
+      WHERE demand_id = ${demandId}
+        AND person_id = ${personId}
+        AND status = 'ACTIVE'
+        AND active_key = 1
+      FOR UPDATE
+    `;
+    return rows[0]?.id ?? null;
   }
 }

@@ -225,6 +225,31 @@ enum DemandReviewDecision {
   RETURN
 }
 
+enum DemandOwnerChangeType {
+  CLAIM
+  TRANSFER
+  OWNER_EXIT_APPROVED
+  CROSS_BATCH_TRANSFER
+}
+
+enum DemandCollaborationRequestType {
+  APPLY
+  INVITE
+}
+
+enum DemandCollaborationRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum DemandCollaboratorStatus {
+  ACTIVE
+  LEFT
+  REMOVED
+}
+
 enum TalentScopeType {
   DOMESTIC
   OVERSEAS
@@ -372,6 +397,14 @@ model Person {
   publishedDemands               Demand[]                      @relation("DemandPublisher")
   demandReviews                  DemandReview[]
   demandCommandIdempotencies     DemandCommandIdempotency[]
+  currentlyOwnedDemands          Demand[]                     @relation("DemandCurrentOwner")
+  demandOwnerHistories           DemandOwnerHistory[]         @relation("DemandOwnerPerson")
+  createdDemandOwnerHistories    DemandOwnerHistory[]         @relation("DemandOwnerHistoryCreator")
+  demandCollaborationRequests    DemandCollaborationRequest[] @relation("DemandCollaborationTarget")
+  requestedDemandCollaborations  DemandCollaborationRequest[] @relation("DemandCollaborationRequester")
+  decidedDemandCollaborations    DemandCollaborationRequest[] @relation("DemandCollaborationDecider")
+  demandCollaborations           DemandCollaborator[]         @relation("DemandCollaboratorPerson")
+  endedDemandCollaborations      DemandCollaborator[]         @relation("DemandCollaboratorEnder")
 
   @@index([personStatus])
   @@map("persons")
@@ -622,6 +655,7 @@ model Batch {
   groupLeaderAssignments GroupLeaderAssignment[]
   createdDemands         Demand[]                @relation("DemandCreationBatch")
   followedDemands        Demand[]                @relation("DemandFollowBatch")
+  demandOwnerHistories   DemandOwnerHistory[]
 
   @@index([status, isCurrent])
   @@index([year])
@@ -1416,41 +1450,46 @@ model DemandLeadPublicIdempotency {
 }
 
 model Demand {
-  id                   String                 @id @default(uuid()) @db.Char(36)
-  businessNo           String                 @unique @map("business_no") @db.VarChar(32)
-  enterpriseId         String                 @map("enterprise_id") @db.Char(36)
-  responsibleAreaId    String                 @map("responsible_area_id") @db.Char(36)
-  selectedContactId    String                 @map("selected_contact_id") @db.Char(36)
-  title                String                 @db.VarChar(200)
-  originalDescription  String                 @map("original_description") @db.Text
-  demandType           DemandType             @map("demand_type")
-  urgency              DemandUrgency          @default(NORMAL)
-  status               DemandStatus           @default(DRAFT)
-  creationBatchId      String                 @map("creation_batch_id") @db.Char(36)
-  currentFollowBatchId String                 @map("current_follow_batch_id") @db.Char(36)
-  isCrossBatch         Boolean                @default(false) @map("is_cross_batch")
-  firstPublishedAt     DateTime?              @map("first_published_at") @db.DateTime(3)
-  submittedAt          DateTime?              @map("submitted_at") @db.DateTime(3)
-  reviewedAt           DateTime?              @map("reviewed_at") @db.DateTime(3)
-  reviewedByPersonId   String?                @map("reviewed_by_person_id") @db.Char(36)
-  publishedByPersonId  String?                @map("published_by_person_id") @db.Char(36)
-  internalNote         String?                @map("internal_note") @db.VarChar(2000)
-  createdByPersonId    String                 @map("created_by_person_id") @db.Char(36)
-  createdAt            DateTime               @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt            DateTime               @updatedAt @map("updated_at") @db.DateTime(3)
-  enterprise           Enterprise             @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
-  responsibleArea      AdministrativeArea     @relation(fields: [responsibleAreaId], references: [id], onDelete: Restrict)
-  selectedContact      EnterpriseContact      @relation(fields: [selectedContactId], references: [id], onDelete: Restrict)
-  creationBatch        Batch                  @relation("DemandCreationBatch", fields: [creationBatchId], references: [id], onDelete: Restrict)
-  currentFollowBatch   Batch                  @relation("DemandFollowBatch", fields: [currentFollowBatchId], references: [id], onDelete: Restrict)
-  createdByPerson      Person                 @relation("DemandCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
-  reviewedByPerson     Person?                @relation("DemandReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
-  publishedByPerson    Person?                @relation("DemandPublisher", fields: [publishedByPersonId], references: [id], onDelete: Restrict)
-  convertedLeads       DemandLead[]           @relation("ConvertedDemand")
-  provenances          DemandProvenance[]
-  contactSnapshot      DemandContactSnapshot?
-  reviews              DemandReview[]
-  commandIdempotencies DemandCommandIdempotency[]
+  id                    String                       @id @default(uuid()) @db.Char(36)
+  businessNo            String                       @unique @map("business_no") @db.VarChar(32)
+  enterpriseId          String                       @map("enterprise_id") @db.Char(36)
+  responsibleAreaId     String                       @map("responsible_area_id") @db.Char(36)
+  selectedContactId     String                       @map("selected_contact_id") @db.Char(36)
+  title                 String                       @db.VarChar(200)
+  originalDescription   String                       @map("original_description") @db.Text
+  demandType            DemandType                   @map("demand_type")
+  urgency               DemandUrgency                @default(NORMAL)
+  status                DemandStatus                 @default(DRAFT)
+  creationBatchId       String                       @map("creation_batch_id") @db.Char(36)
+  currentFollowBatchId  String                       @map("current_follow_batch_id") @db.Char(36)
+  isCrossBatch          Boolean                      @default(false) @map("is_cross_batch")
+  firstPublishedAt      DateTime?                    @map("first_published_at") @db.DateTime(3)
+  submittedAt           DateTime?                    @map("submitted_at") @db.DateTime(3)
+  reviewedAt            DateTime?                    @map("reviewed_at") @db.DateTime(3)
+  reviewedByPersonId    String?                      @map("reviewed_by_person_id") @db.Char(36)
+  publishedByPersonId   String?                      @map("published_by_person_id") @db.Char(36)
+  currentOwnerPersonId  String?                      @map("current_owner_person_id") @db.Char(36)
+  internalNote          String?                      @map("internal_note") @db.VarChar(2000)
+  createdByPersonId     String                       @map("created_by_person_id") @db.Char(36)
+  createdAt             DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  enterprise            Enterprise                   @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  responsibleArea       AdministrativeArea           @relation(fields: [responsibleAreaId], references: [id], onDelete: Restrict)
+  selectedContact       EnterpriseContact            @relation(fields: [selectedContactId], references: [id], onDelete: Restrict)
+  creationBatch         Batch                        @relation("DemandCreationBatch", fields: [creationBatchId], references: [id], onDelete: Restrict)
+  currentFollowBatch    Batch                        @relation("DemandFollowBatch", fields: [currentFollowBatchId], references: [id], onDelete: Restrict)
+  createdByPerson       Person                       @relation("DemandCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  reviewedByPerson      Person?                      @relation("DemandReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
+  publishedByPerson     Person?                      @relation("DemandPublisher", fields: [publishedByPersonId], references: [id], onDelete: Restrict)
+  currentOwnerPerson    Person?                      @relation("DemandCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict)
+  convertedLeads        DemandLead[]                 @relation("ConvertedDemand")
+  provenances           DemandProvenance[]
+  contactSnapshot       DemandContactSnapshot?
+  reviews               DemandReview[]
+  commandIdempotencies  DemandCommandIdempotency[]
+  ownerHistories        DemandOwnerHistory[]
+  collaborationRequests DemandCollaborationRequest[]
+  collaborators         DemandCollaborator[]
 
   @@index([responsibleAreaId, status, createdAt])
   @@index([enterpriseId, status])
@@ -1459,7 +1498,78 @@ model Demand {
   @@index([status, firstPublishedAt])
   @@index([reviewedByPersonId, reviewedAt])
   @@index([publishedByPersonId, firstPublishedAt])
+  @@index([currentOwnerPersonId, status])
   @@map("demands")
+}
+
+model DemandOwnerHistory {
+  id                String                @id @default(uuid()) @db.Char(36)
+  demandId          String                @map("demand_id") @db.Char(36)
+  personId          String                @map("person_id") @db.Char(36)
+  batchId           String                @map("batch_id") @db.Char(36)
+  effectiveAt       DateTime              @default(now()) @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime?             @map("expired_at") @db.DateTime(3)
+  reason            String?               @db.VarChar(500)
+  changeType        DemandOwnerChangeType @map("change_type")
+  createdByPersonId String                @map("created_by_person_id") @db.Char(36)
+  activeKey         Int?                  @default(1) @map("active_key") @db.UnsignedTinyInt
+  createdAt         DateTime              @default(now()) @map("created_at") @db.DateTime(3)
+  demand            Demand                @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  person            Person                @relation("DemandOwnerPerson", fields: [personId], references: [id], onDelete: Restrict)
+  batch             Batch                 @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  createdByPerson   Person                @relation("DemandOwnerHistoryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, activeKey])
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([batchId, effectiveAt, expiredAt])
+  @@map("demand_owner_histories")
+}
+
+model DemandCollaborationRequest {
+  id                    String                           @id @default(uuid()) @db.Char(36)
+  demandId              String                           @map("demand_id") @db.Char(36)
+  personId              String                           @map("person_id") @db.Char(36)
+  requestType           DemandCollaborationRequestType   @map("request_type")
+  status                DemandCollaborationRequestStatus @default(PENDING)
+  requestedByPersonId   String                           @map("requested_by_person_id") @db.Char(36)
+  decidedByPersonId     String?                          @map("decided_by_person_id") @db.Char(36)
+  requestedAt           DateTime                         @default(now()) @map("requested_at") @db.DateTime(3)
+  decidedAt             DateTime?                        @map("decided_at") @db.DateTime(3)
+  pendingKey            Int?                             @default(1) @map("pending_key") @db.UnsignedTinyInt
+  demand                Demand                           @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  person                Person                           @relation("DemandCollaborationTarget", fields: [personId], references: [id], onDelete: Restrict)
+  requestedByPerson     Person                           @relation("DemandCollaborationRequester", fields: [requestedByPersonId], references: [id], onDelete: Restrict)
+  decidedByPerson       Person?                          @relation("DemandCollaborationDecider", fields: [decidedByPersonId], references: [id], onDelete: Restrict)
+  resultingCollaborator DemandCollaborator?
+
+  @@unique([demandId, personId, pendingKey])
+  @@index([demandId, status, requestedAt])
+  @@index([personId, status, requestedAt])
+  @@map("demand_collaboration_requests")
+}
+
+model DemandCollaborator {
+  id              String                         @id @default(uuid()) @db.Char(36)
+  demandId        String                         @map("demand_id") @db.Char(36)
+  personId        String                         @map("person_id") @db.Char(36)
+  sourceRequestId String?                        @unique @map("source_request_id") @db.Char(36)
+  sourceType      DemandCollaborationRequestType @map("source_type")
+  status          DemandCollaboratorStatus       @default(ACTIVE)
+  effectiveAt     DateTime                       @default(now()) @map("effective_at") @db.DateTime(3)
+  expiredAt       DateTime?                      @map("expired_at") @db.DateTime(3)
+  endedReason     String?                        @map("ended_reason") @db.VarChar(500)
+  endedByPersonId String?                        @map("ended_by_person_id") @db.Char(36)
+  activeKey       Int?                           @default(1) @map("active_key") @db.UnsignedTinyInt
+  createdAt       DateTime                       @default(now()) @map("created_at") @db.DateTime(3)
+  demand          Demand                         @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  person          Person                         @relation("DemandCollaboratorPerson", fields: [personId], references: [id], onDelete: Restrict)
+  sourceRequest   DemandCollaborationRequest?    @relation(fields: [sourceRequestId], references: [id], onDelete: Restrict)
+  endedByPerson   Person?                        @relation("DemandCollaboratorEnder", fields: [endedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, personId, activeKey])
+  @@index([demandId, status, effectiveAt])
+  @@index([personId, status, effectiveAt])
+  @@map("demand_collaborators")
 }
 
 model DemandProvenance {
@@ -1495,13 +1605,13 @@ model DemandReview {
   decision         DemandReviewDecision
   returnReason     String?              @map("return_reason") @db.VarChar(500)
   reviewerPersonId String               @map("reviewer_person_id") @db.Char(36)
-  demandTypeBefore DemandType            @map("demand_type_before")
-  demandTypeAfter  DemandType            @map("demand_type_after")
-  urgencyBefore    DemandUrgency         @map("urgency_before")
-  urgencyAfter     DemandUrgency         @map("urgency_after")
-  reviewedAt       DateTime              @default(now()) @map("reviewed_at") @db.DateTime(3)
-  demand           Demand                @relation(fields: [demandId], references: [id], onDelete: Restrict)
-  reviewerPerson   Person                @relation(fields: [reviewerPersonId], references: [id], onDelete: Restrict)
+  demandTypeBefore DemandType           @map("demand_type_before")
+  demandTypeAfter  DemandType           @map("demand_type_after")
+  urgencyBefore    DemandUrgency        @map("urgency_before")
+  urgencyAfter     DemandUrgency        @map("urgency_after")
+  reviewedAt       DateTime             @default(now()) @map("reviewed_at") @db.DateTime(3)
+  demand           Demand               @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  reviewerPerson   Person               @relation(fields: [reviewerPersonId], references: [id], onDelete: Restrict)
 
   @@index([demandId, reviewedAt])
   @@index([reviewerPersonId, reviewedAt])

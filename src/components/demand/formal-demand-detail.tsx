@@ -1,5 +1,6 @@
 import type { FormalDemandService } from "@/modules/demand";
 import { FormalDemandActions } from "./formal-demand-actions";
+import { FormalDemandParticipation } from "./formal-demand-participation";
 
 type Detail = Awaited<ReturnType<FormalDemandService["detail"]>>;
 type Timeline = Awaited<ReturnType<FormalDemandService["timeline"]>>;
@@ -30,6 +31,7 @@ const actionLabel: Record<string, string> = {
   DEMAND_REVIEW_RETURNED: "管理员退回",
   DEMAND_REVIEW_APPROVED_AND_PUBLISHED: "审核通过并发布",
   DEMAND_ADMIN_DIRECT_PUBLISHED: "管理员代录直接发布",
+  DEMAND_CLAIMED: "团员认领并开始跟进",
 };
 
 function shanghai(value: Date | null): string {
@@ -44,6 +46,11 @@ export function FormalDemandDetail({
   canSubmit,
   canReview,
   canDirectPublish,
+  canClaim,
+  canApplyCollaboration,
+  canManageCollaboration,
+  canAcceptInvitation,
+  canLeaveCollaboration,
 }: {
   demand: Detail;
   timeline: Timeline;
@@ -52,6 +59,11 @@ export function FormalDemandDetail({
   canSubmit: boolean;
   canReview: boolean;
   canDirectPublish: boolean;
+  canClaim: boolean;
+  canApplyCollaboration: boolean;
+  canManageCollaboration: boolean;
+  canAcceptInvitation: boolean;
+  canLeaveCollaboration: boolean;
 }) {
   return (
     <section className="space-y-6">
@@ -60,6 +72,8 @@ export function FormalDemandDetail({
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">{demand.title}</h1>
         <div className="mt-3 flex flex-wrap gap-2 text-sm"><span className="rounded-full bg-blue-50 px-3 py-1 text-blue-700">{statusLabel[demand.status] ?? demand.status}</span><span className="rounded-full bg-slate-100 px-3 py-1">{typeLabel[demand.demandType] ?? demand.demandType}</span><span className="rounded-full bg-slate-100 px-3 py-1">{demand.urgency === "URGENT" ? "紧急" : "普通"}</span></div>
       </header>
+
+      {(demand.firstPublishedAt || canClaim) && <FormalDemandParticipation demand={demand} canClaim={canClaim} canApplyCollaboration={canApplyCollaboration} canManageCollaboration={canManageCollaboration} canAcceptInvitation={canAcceptInvitation} canLeaveCollaboration={canLeaveCollaboration} />}
 
       {demand.latestReturnReason && <article className="rounded-2xl border border-red-200 bg-red-50 p-5"><p className="text-sm font-medium text-red-700">最新退回原因</p><p className="mt-2 whitespace-pre-wrap text-red-950">{demand.latestReturnReason}</p></article>}
 
