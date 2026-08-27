@@ -8,6 +8,7 @@ import { validateReimbursementExpenses } from "@/modules/reimbursement/reimburse
 import { buildReimbursementPdf, buildReimbursementXlsx } from "@/modules/reimbursement/export/report-builders";
 import { ReimbursementOcrJobHandler } from "@/modules/jobs/handlers/reimbursement-ocr-handler";
 import { ReimbursementExportJobHandler } from "@/modules/jobs/handlers/reimbursement-export-handler";
+import { isSubmitIdempotencyUniqueConflict } from "@/modules/reimbursement/errors";
 
 describe("B-M3-001 reimbursement rules", () => {
   it("accepts only the exact four travel expense types", () => {
@@ -60,5 +61,10 @@ describe("B-M3-001 reimbursement rules", () => {
     await new ReimbursementOcrJobHandler(ocr as never).handle({ invoiceId: crypto.randomUUID() });
     await new ReimbursementExportJobHandler(exporter as never).handle({ exportTaskId: crypto.randomUUID() });
     expect(ocr.process).toHaveBeenCalledOnce(); expect(exporter.process).toHaveBeenCalledOnce();
+  });
+
+  it("recognizes only the nested submit idempotency unique target from Prisma MySQL", () => {
+    expect(isSubmitIdempotencyUniqueConflict({ code: "P2002", meta: { driverAdapterError: { cause: { constraint: { fields: ["actor_person_id", "idempotency_key_hash"] } } } } })).toBe(true);
+    expect(isSubmitIdempotencyUniqueConflict({ code: "P2002", meta: { target: ["business_no"] } })).toBe(false);
   });
 });

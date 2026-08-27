@@ -27,7 +27,13 @@ export const isReimbursementError = (error: unknown): error is ReimbursementErro
 export function isSubmitIdempotencyUniqueConflict(error: unknown) {
   if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "P2002") return false;
   const meta = "meta" in error && typeof error.meta === "object" && error.meta ? error.meta as Record<string, unknown> : {};
-  const values = [meta.target, meta.constraint].flatMap((v) => Array.isArray(v) ? v : [v]).filter((v): v is string => typeof v === "string");
+  const values: string[] = [];
+  const collect = (value: unknown): void => {
+    if (typeof value === "string") values.push(value);
+    else if (Array.isArray(value)) value.forEach(collect);
+    else if (typeof value === "object" && value !== null) Object.values(value).forEach(collect);
+  };
+  collect(meta);
   const joined = values.join("|").replace(/[^a-z0-9]/gi, "").toLowerCase();
   return values.includes("reimbursement_submit_idempotency_key")
     || (joined.includes("actorpersonid") && joined.includes("idempotencykeyhash"));

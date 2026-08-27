@@ -40,6 +40,14 @@ function stateSnapshot(value: { status: ReimbursementStatus; totalAmount: Prisma
   return { status: value.status, totalAmount: value.totalAmount.toString(), currentSubmissionVersionId: value.currentSubmissionVersionId };
 }
 
+function submitResponse(value: Prisma.JsonValue) {
+  const record = value as Record<string, string | number>;
+  return {
+    id: String(record.id), businessNo: String(record.businessNo), status: String(record.status),
+    submissionVersionId: String(record.submissionVersionId), versionNo: Number(record.versionNo), totalAmount: String(record.totalAmount),
+  };
+}
+
 const CORRECTIONS: Record<string, readonly string[]> = {
   PENDING_ONLINE_REVIEW: ["RETURNED", "VERIFIED_PENDING_PAPER"], RETURNED: ["PENDING_ONLINE_REVIEW", "VERIFIED_PENDING_PAPER"],
   VERIFIED_PENDING_PAPER: ["RETURNED", "PAPER_RECEIVED"], PAPER_RECEIVED: ["VERIFIED_PENDING_PAPER", "FINANCE_SUBMITTED"],
@@ -131,7 +139,6 @@ export class ReimbursementService {
   }
 
   async detail(input: Input & { reimbursementId: string }) {
-    await authorizeActor({ actor: input.actor, action: "reimbursement.view.self" });
     return this.repository.transaction(async (tx) => {
       const item = await this.repository.findVisible(tx, input.reimbursementId, input.actor);
       if (!item) throw new ReimbursementError("REIMBURSEMENT_NOT_FOUND", "报销单不存在或无权查看");
@@ -249,7 +256,7 @@ export class ReimbursementService {
         const previous = await tx.reimbursementCommandIdempotency.findUnique({ where: { actorPersonId_idempotencyKeyHash: { actorPersonId: input.actor.personId, idempotencyKeyHash: keyHash } } });
         if (previous) {
           if (previous.reimbursementId !== item.id || previous.payloadHash !== payloadHash) throw new ReimbursementError("REIMBURSEMENT_IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同报销提交");
-          return previous.responseJson;
+          return submitResponse(previous.responseJson);
         }
         if (!EDITABLE_STATUSES.includes(item.status as typeof EDITABLE_STATUSES[number])) throw new ReimbursementError("REIMBURSEMENT_STATE_CONFLICT", "仅草稿或退回状态可提交");
         if (!item.expenses.length) throw new ReimbursementError("REIMBURSEMENT_EXPENSE_INVALID", "至少填写一项费用后才能提交");
@@ -269,7 +276,7 @@ export class ReimbursementService {
         const maxVersion = await tx.reimbursementSubmissionVersion.aggregate({ where: { reimbursementId: item.id }, _max: { versionNo: true } });
         const now = new Date();
         const version = await tx.reimbursementSubmissionVersion.create({ data: { reimbursementId: item.id, versionNo: (maxVersion._max.versionNo ?? 0) + 1,
-          reasonSnapshot: item.reason, tripSnapshotJson: trip ? json({ id: trip.id, title: trip.title, purpose: trip.purpose, overallEndAt: trip.overallEndAt, result: trip.result, nodes: trip.nodes }) : undefined,
+          reasonSnapshot: item.reason, tripSnapshotJson: trip ? json({ id: trip.id, title: trip.title, purpose: trip.purpose, overallEndAt: trip.overallEndAt, result: trip.result, nodes: trip.nodes, participants: trip.participants }) : undefined,
           expenseSnapshotJson: json(item.expenses), invoiceSnapshotJson: json(item.invoices.map(({ attachment, ...invoice }) => ({ ...invoice, attachment }))),
           totalAmount: total, submittedByPersonId: input.actor.personId, submittedAt: now } });
         const updated = await tx.reimbursement.update({ where: { id: item.id }, data: { status: "PENDING_ONLINE_REVIEW", totalAmount: total,
@@ -285,7 +292,7 @@ export class ReimbursementService {
       const previous = await this.repository.findSubmitIdempotency({ actorPersonId: input.actor.personId, idempotencyKeyHash: keyHash });
       if (!previous) throw error;
       if (previous.reimbursementId !== input.reimbursementId || previous.payloadHash !== payloadHash) throw new ReimbursementError("REIMBURSEMENT_IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同报销提交");
-      return previous.responseJson;
+      return submitResponse(previous.responseJson);
     }
   }
 
