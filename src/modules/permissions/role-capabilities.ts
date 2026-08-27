@@ -18,6 +18,9 @@ export const INTERNAL_BASE_CAPABILITIES = [
   "announcement.view",
   "announcement.confirm",
   "ai.assistant.use",
+  "help.view",
+  "help.update",
+  "help.complete",
   "attachment.upload",
   "attachment.temporary_self_access",
   "attachment.abort_self",
@@ -59,8 +62,8 @@ const MEMBER_CURRENT_CAPABILITIES = [
   "reimbursement.submit",
   "reimbursement.withdraw",
   "help.create",
-  "help.view",
   "help.withdraw",
+  "help.reopen",
 ] as const satisfies readonly Capability[];
 
 const MEMBER_ALUMNI_CAPABILITIES = [
@@ -105,6 +108,7 @@ const TOWNSHIP_CAPABILITIES = [
   "visit.view",
   "visit.supplement",
   "visit.lead.create",
+  "help.claim",
   "report.view",
   "report.monthly.download",
   "report.export",
@@ -121,6 +125,7 @@ const DEPARTMENT_CAPABILITIES = [
   "trip.cancel",
   "trip.result.add",
   "visit.view",
+  "help.claim",
   "report.view",
   "report.monthly.download",
   "report.export",

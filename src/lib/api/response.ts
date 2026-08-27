@@ -11,12 +11,16 @@ import { isPresenceError } from "@/modules/presence/errors";
 import { isMapError } from "@/modules/map/errors";
 import { isPolicyError } from "@/modules/policy/errors";
 import { isTalentError } from "@/modules/talent/errors";
+import { isHelpError } from "@/modules/help/errors";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
 }
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
+  if (isHelpError(error)) {
+    return NextResponse.json({ ok: false, error: { code: error.code, message: error.message, details: error.details ?? {} }, requestId }, { status: error.status });
+  }
   if (isTalentError(error)) {
     return NextResponse.json({ ok: false, error: { code: error.code, message: error.message, details: error.details ?? {} }, requestId }, { status: error.status });
   }
