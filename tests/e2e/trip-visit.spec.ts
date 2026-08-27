@@ -60,6 +60,11 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
   const normal = normalSession.page;
 
   try {
+    const prisma = getPrismaClient();
+    await prisma.enterprise.createMany({ data: [
+      { id: enterpriseE2e.enterprise2Id, name: "E2E 荷乡科技企业", responsibleAreaId: enterpriseE2e.areaAId, address: "宝应县安宜镇测试大道2号", mainProducts: "新能源装备", createdByPersonId: e2eUsers.admin.personId },
+      { id: enterpriseE2e.enterprise3Id, name: "E2E 湖畔制造企业", responsibleAreaId: enterpriseE2e.areaBId, address: "宝应县射阳湖镇测试大道3号", mainProducts: "精密制造", createdByPersonId: e2eUsers.admin.personId },
+    ] });
     const created = await apiPost(normal, "/api/v2/trips", {
       title: "E2E 三企业共享行程",
       purpose: "逐项验证工作行程与企业走访",
@@ -150,7 +155,6 @@ test("B-M2-004 Trip, participant, Visit and DemandLead acceptance chain", async 
     expect(lockedUpdate.status).toBe(409);
     expect(lockedUpdate.payload).toMatchObject({ error: { code: "TRIP_STATE_CONFLICT" } });
 
-    const prisma = getPrismaClient();
     const sourceBefore = await prisma.demandLead.findUniqueOrThrow({ where: { id: leadOne.payload.data.id }, select: {
       sourceType: true, sourceChannel: true, sourceAt: true, tripId: true, visitId: true, rawContent: true,
     } });

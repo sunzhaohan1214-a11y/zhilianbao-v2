@@ -19,6 +19,7 @@ export const enterpriseE2e = {
   areaBId: "30000000-0000-4000-8000-000000000002",
   organizationId: "40000000-0000-4000-8000-000000000001",
   dispatchOrganizationId: "40000000-0000-4000-8000-000000000002",
+  departmentOrganizationId: "40000000-0000-4000-8000-000000000003",
   batchId: "50000000-0000-4000-8000-000000000001",
   enterpriseId: "60000000-0000-4000-8000-000000000001",
   enterprise2Id: "60000000-0000-4000-8000-000000000002",
@@ -196,18 +197,18 @@ export async function seedAuthFixtures() {
     await prisma.administrativeArea.upsert({ where: { id }, create: { id, name, type: "TOWNSHIP" }, update: { name, status: "ACTIVE" } });
   }
   await prisma.organization.upsert({ where: { id: enterpriseE2e.organizationId }, create: { id: enterpriseE2e.organizationId, name: "E2E 安宜镇", type: "TOWNSHIP_ORG" }, update: { status: "ACTIVE" } });
+  await prisma.organization.upsert({ where: { id: enterpriseE2e.departmentOrganizationId }, create: { id: enterpriseE2e.departmentOrganizationId, name: "E2E 县级部门", type: "DEPARTMENT" }, update: { name: "E2E 县级部门", type: "DEPARTMENT", status: "ACTIVE" } });
   const mapping = await prisma.organizationAreaMapping.findFirst({ where: { organizationId: enterpriseE2e.organizationId, areaId: enterpriseE2e.areaAId, expiredAt: null } });
   if (!mapping) await prisma.organizationAreaMapping.create({ data: { organizationId: enterpriseE2e.organizationId, areaId: enterpriseE2e.areaAId, effectiveAt: new Date("2026-01-01") } });
+  await prisma.departmentTownshipRelation.deleteMany({ where: { departmentOrganizationId: enterpriseE2e.departmentOrganizationId } });
+  await prisma.departmentTownshipRelation.create({ data: { departmentOrganizationId: enterpriseE2e.departmentOrganizationId, areaId: enterpriseE2e.areaAId, effectiveAt: new Date("2026-01-01") } });
   await prisma.appointment.createMany({ data: [
     { personId: e2eUsers.township.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "企业服务专员", effectiveAt: new Date("2026-01-01") },
     { personId: e2eUsers.normal.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "挂职专员", effectiveAt: new Date("2026-01-01") },
     { personId: e2eUsers.admin.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "历史任职", effectiveAt: new Date("2025-01-01"), expiredAt: new Date("2025-12-31") },
+    { personId: e2eUsers.department.personId, organizationId: enterpriseE2e.departmentOrganizationId, positionTitle: "部门工作人员", effectiveAt: new Date("2026-01-01") },
   ] });
   await prisma.enterprise.create({ data: { id: enterpriseE2e.enterpriseId, name: "宝应智造示范企业", responsibleAreaId: enterpriseE2e.areaAId, address: "宝应县安宜镇测试大道1号", creditCode: "91321023E2ETEST001", mainProducts: "智能装备、工业软件与技术服务", introduction: "用于 M1-001 关键链路验收。", createdByPersonId: e2eUsers.admin.personId } });
-  await prisma.enterprise.createMany({ data: [
-    { id: enterpriseE2e.enterprise2Id, name: "E2E 荷乡科技企业", responsibleAreaId: enterpriseE2e.areaAId, address: "宝应县安宜镇测试大道2号", mainProducts: "新能源装备", createdByPersonId: e2eUsers.admin.personId },
-    { id: enterpriseE2e.enterprise3Id, name: "E2E 湖畔制造企业", responsibleAreaId: enterpriseE2e.areaBId, address: "宝应县射阳湖镇测试大道3号", mainProducts: "精密制造", createdByPersonId: e2eUsers.admin.personId },
-  ] });
   await prisma.enterpriseContact.create({ data: { id: enterpriseE2e.contactId, enterpriseId: enterpriseE2e.enterpriseId, name: "王经理", positionTitle: "企业联系人", phone: "13800003001", isPrimary: true, createdByPersonId: e2eUsers.admin.personId } });
   await prisma.enterprise.update({ where: { id: enterpriseE2e.enterpriseId }, data: { primaryContactId: enterpriseE2e.contactId } });
   await prisma.enterpriseVersion.create({ data: { enterpriseId: enterpriseE2e.enterpriseId, versionNo: 1, snapshotJson: { name: "宝应智造示范企业", currentVersion: 1 }, changeType: "CREATE", changedByPersonId: e2eUsers.admin.personId } });
