@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { HelpRequest, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
+import { OutboxRepository } from "@/modules/outbox/outbox-repository";
+import { activeOrganizationStaff } from "@/modules/notification/recipient-resolver";
 import { writeHelpAudit, writeHelpTransition, type HelpMutationContext } from "./audit";
 import { HelpError, isHelpCommandIdempotencyUniqueConflict } from "./errors";
 import { HelpRepository, type HelpTransaction } from "./repository/help-repository";
@@ -53,6 +55,7 @@ function hash(value: string) {
 
 export class HelpService {
   constructor(private readonly repository = new HelpRepository()) {}
+  private readonly outbox = new OutboxRepository();
 
   private async requireLocked(tx: HelpTransaction, helpRequestId: string) {
     try {
@@ -292,6 +295,13 @@ export class HelpService {
         after: stateSnapshot(updated),
         reason: body.reason,
       });
+      await this.outbox.append({
+        eventType: "HELP_ASSIGNED_PERSON",
+        aggregateType: "HELP_REQUEST",
+        aggregateId: help.id,
+        payload: { aggregateId: help.id, recipientIds: [assignee.id], todoRecipientIds: [assignee.id], eventKey: now.toISOString() },
+        dedupeKey: `help:assigned:${help.id}:${now.toISOString()}`,
+      }, tx);
       const detail = await this.repository.findById(tx, help.id);
       if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
       return this.decorateDetail(tx, detail);
@@ -356,6 +366,14 @@ export class HelpService {
         after: stateSnapshot(updated),
         reason: body.reason,
       });
+      const recipients = await activeOrganizationStaff(tx, organization.id, now);
+      await this.outbox.append({
+        eventType: "HELP_TRANSFERRED_ORG",
+        aggregateType: "HELP_REQUEST",
+        aggregateId: help.id,
+        payload: { aggregateId: help.id, recipientIds: recipients, todoRecipientIds: recipients, eventKey: now.toISOString() },
+        dedupeKey: `help:transferred-org:${help.id}:${now.toISOString()}`,
+      }, tx);
       const detail = await this.repository.findById(tx, help.id);
       if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
       return this.decorateDetail(tx, detail);
@@ -452,6 +470,13 @@ export class HelpService {
           before: stateSnapshot(help),
           after: stateSnapshot(updated),
         });
+        await this.outbox.append({
+          eventType: "HELP_CLAIMED",
+          aggregateType: "HELP_REQUEST",
+          aggregateId: help.id,
+          payload: { aggregateId: help.id, recipientIds: [help.submitterPersonId], todoRecipientIds: [input.actor.personId], eventKey: now.toISOString() },
+          dedupeKey: `help:claimed:${help.id}`,
+        }, tx);
         await tx.helpCommandIdempotency.create({
           data: {
             helpRequestId: help.id,
@@ -568,6 +593,13 @@ export class HelpService {
         before: stateSnapshot(help),
         after: { ...stateSnapshot(updated), completionSummaryLength: body.completionSummary.length },
       });
+      await this.outbox.append({
+        eventType: "HELP_COMPLETED",
+        aggregateType: "HELP_REQUEST",
+        aggregateId: help.id,
+        payload: { aggregateId: help.id, recipientIds: [help.submitterPersonId], todoRecipientIds: [], eventKey: completedAt.toISOString() },
+        dedupeKey: `help:completed:${help.id}:${completedAt.toISOString()}`,
+      }, tx);
       const detail = await this.repository.findById(tx, help.id);
       if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
       return this.decorateDetail(tx, detail);
@@ -613,6 +645,13 @@ export class HelpService {
         after: stateSnapshot(updated),
         reason: body.reason,
       });
+      await this.outbox.append({
+        eventType: "HELP_WITHDRAWN",
+        aggregateType: "HELP_REQUEST",
+        aggregateId: help.id,
+        payload: { aggregateId: help.id, recipientIds: [], todoRecipientIds: [], eventKey: withdrawnAt.toISOString() },
+        dedupeKey: `help:withdrawn:${help.id}`,
+      }, tx);
       const detail = await this.repository.findById(tx, help.id);
       if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
       return this.decorateDetail(tx, detail);
@@ -662,6 +701,13 @@ export class HelpService {
         after: stateSnapshot(updated),
         reason: body.reason,
       });
+      await this.outbox.append({
+        eventType: "HELP_REOPENED",
+        aggregateType: "HELP_REQUEST",
+        aggregateId: help.id,
+        payload: { aggregateId: help.id, recipientIds: [help.currentOwnerPersonId], todoRecipientIds: [help.currentOwnerPersonId], eventKey: reopenedAt.toISOString() },
+        dedupeKey: `help:reopened:${help.id}:${reopenedAt.toISOString()}`,
+      }, tx);
       const detail = await this.repository.findById(tx, help.id);
       if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
       return this.decorateDetail(tx, detail);
@@ -727,6 +773,13 @@ export class HelpService {
         after: stateSnapshot(updated),
         reason: body.reason,
       });
+      await this.outbox.append({
+        eventType: "HELP_REASSIGNED",
+        aggregateType: "HELP_REQUEST",
+        aggregateId: help.id,
+        payload: { aggregateId: help.id, recipientIds: [...new Set([help.currentOwnerPersonId, assignee.id, help.submitterPersonId])], todoRecipientIds: [assignee.id], staleTodoRecipientIds: [help.currentOwnerPersonId], eventKey: now.toISOString() },
+        dedupeKey: `help:reassigned:${help.id}:${now.toISOString()}`,
+      }, tx);
       const detail = await this.repository.findById(tx, help.id);
       if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
       return this.decorateDetail(tx, detail);

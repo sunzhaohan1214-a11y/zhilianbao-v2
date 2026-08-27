@@ -137,6 +137,7 @@ describe("M1-004 real MySQL demand claim and collaboration", () => {
     expect(await prisma.auditLog.count({ where: { entityId: sameKeyDemand.id, actionCode: "DEMAND_CLAIMED" } })).toBe(1);
     expect(await prisma.stateTransitionHistory.count({ where: { entityId: sameKeyDemand.id, actionCode: "DEMAND_CLAIMED" } })).toBe(1);
     expect(await prisma.demandCommandIdempotency.count({ where: { demandId: sameKeyDemand.id, action: "DEMAND_CLAIM" } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: sameKeyDemand.id, eventType: "DEMAND_CLAIMED" } })).toBe(1);
 
     const demand = await publishedDemand();
     const members = await Promise.all(Array.from({ length: 20 }, () => actorFixture(["MEMBER_CURRENT"])));
@@ -161,7 +162,7 @@ describe("M1-004 real MySQL demand claim and collaboration", () => {
     expect(await prisma.demandOwnerHistory.count({ where: { demandId: demand.id, activeKey: 1 } })).toBe(1);
     expect(await prisma.auditLog.count({ where: { entityType: "DEMAND", entityId: demand.id, actionCode: "DEMAND_CLAIMED" } })).toBe(1);
     expect(await prisma.stateTransitionHistory.count({ where: { entityType: "DEMAND", entityId: demand.id, actionCode: "DEMAND_CLAIMED" } })).toBe(1);
-    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id } })).toBe(0);
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: "DEMAND_CLAIMED" } })).toBe(1);
 
     const other = await publishedDemand();
     await expect(service.claim({ actor: winner, demandId: other.id, body: {}, idempotencyKey: winnerKey }))
@@ -265,7 +266,12 @@ describe("M1-004 real MySQL demand claim and collaboration", () => {
       .rejects.toMatchObject({ code: "DEMAND_MEMBER_INELIGIBLE" });
     await expect(service.inviteCollaboration({ actor: admin, demandId: demand.id, body: { personId: raced.personId } }))
       .rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY", status: 403 });
-    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id } })).toBe(0);
+    const requestEvents = await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: { in: ["COLLABORATION_APPLIED", "COLLABORATION_INVITED"] } } });
+    const decisionEvents = await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: { in: ["COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED"] } } });
+    const endEvents = await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: { in: ["COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] } } });
+    expect(requestEvents).toBe(await prisma.demandCollaborationRequest.count({ where: { demandId: demand.id } }));
+    expect(decisionEvents).toBe(await prisma.demandCollaborator.count({ where: { demandId: demand.id } }));
+    expect(endEvents).toBe(await prisma.demandCollaborator.count({ where: { demandId: demand.id, status: { in: ["LEFT", "REMOVED"] } } }));
   }, 30_000);
 
   it("enforces collaboration relation permissions and claim role negatives", async () => {

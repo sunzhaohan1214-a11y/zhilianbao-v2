@@ -6,6 +6,8 @@ import { formalDemandPageAccess } from "@/lib/demand/formal-page-access";
 import { getCurrentSessionByToken } from "@/modules/identity/session-service";
 import { resolvePermissionActor } from "@/modules/permissions/actor-resolver";
 import { FormalDemandService } from "@/modules/demand";
+import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
+import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 test.describe.configure({ mode: "serial" });
@@ -32,6 +34,24 @@ async function post(page: Page, path: string, body: unknown, headers: Record<str
     });
     return { status: response.status, payload: await response.json() };
   }, { path, body, headers });
+}
+
+async function deliverDemandParticipationEvents(demandId: string) {
+  const prisma = getPrismaClient();
+  const registry = new OutboxHandlerRegistry();
+  for (const eventType of ["DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED", "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] as const) {
+    registry.register(eventType, new DemandParticipationNotificationHandler(eventType));
+  }
+  await prisma.$transaction(async (tx) => {
+    const events = await tx.outboxEvent.findMany({
+      where: { aggregateId: demandId, publishedAt: null, eventType: { in: ["DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED", "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] } },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    });
+    for (const event of events) {
+      await registry.dispatch(event, tx);
+      await tx.outboxEvent.update({ where: { id: event.id }, data: { publishedAt: new Date(), lastError: null, nextAttemptAt: null } });
+    }
+  });
 }
 
 function demandPayload(title: string, attachmentIds: string[] = [], sourceType: "TOWNSHIP_DIRECT" | "ADMIN_DIRECT" = "TOWNSHIP_DIRECT") {
@@ -191,6 +211,9 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await expect(page.getByText("对接中", { exact: true })).toBeVisible();
   await expect(page.getByText("当前负责人：E2E normal", { exact: true })).toBeVisible();
+  await deliverDemandParticipationEvents(demandId);
+  expect(await prisma.message.count({ where: { personId: e2eUsers.township.personId, aggregateId: demandId, messageType: "DEMAND_CLAIMED", title: "需求已被认领" } })).toBe(1);
+  expect(await prisma.todo.count({ where: { aggregateId: demandId, todoType: { startsWith: "DEMAND_CLAIM" } } })).toBe(0);
 
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.groupLeader);
@@ -200,6 +223,9 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   expect(losingClaim).toMatchObject({ status: 409, payload: { error: { code: "DEMAND_ALREADY_CLAIMED" } } });
   await page.getByRole("button", { name: "申请协同" }).click();
   await expect(page.getByText("协同申请待主责确认", { exact: true })).toBeVisible();
+  await deliverDemandParticipationEvents(demandId);
+  const application = await prisma.demandCollaborationRequest.findFirstOrThrow({ where: { demandId, personId: e2eUsers.groupLeader.personId, requestType: "APPLY" } });
+  expect(await prisma.todo.findFirstOrThrow({ where: { personId: e2eUsers.normal.personId, eventKey: application.id } })).toMatchObject({ todoType: "COLLABORATION_REVIEW", status: "OPEN" });
 
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.normal);
@@ -208,10 +234,16 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   await expect(page.getByText("E2E groupLeader", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "同意协同" }).click();
   await expect(page.getByText("协同人：E2E groupLeader", { exact: true })).toBeVisible();
+  await deliverDemandParticipationEvents(demandId);
+  expect(await prisma.todo.findFirstOrThrow({ where: { personId: e2eUsers.normal.personId, eventKey: application.id } })).toMatchObject({ status: "STALE" });
+  expect(await prisma.message.count({ where: { personId: e2eUsers.groupLeader.personId, aggregateId: demandId, messageType: "COLLABORATION_APPROVED" } })).toBe(1);
   await page.getByLabel("按姓名搜索协同人").fill("E2E minister");
   await expect(page.getByText("E2E minister", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "发出邀请" }).click();
   await expect(page.getByRole("status")).toHaveText("操作已完成。");
+  await deliverDemandParticipationEvents(demandId);
+  const invitation = await prisma.demandCollaborationRequest.findFirstOrThrow({ where: { demandId, personId: e2eUsers.minister.personId, requestType: "INVITE" } });
+  expect(await prisma.todo.findFirstOrThrow({ where: { personId: e2eUsers.minister.personId, eventKey: invitation.id } })).toMatchObject({ todoType: "COLLABORATION_INVITE_RESPONSE", status: "OPEN" });
 
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.minister);
@@ -219,6 +251,9 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   await page.goto(`/demands/${demandId}`);
   await page.getByRole("button", { name: "接受协同邀请" }).click();
   await expect(page.getByText("协同中", { exact: true })).toBeVisible();
+  await deliverDemandParticipationEvents(demandId);
+  expect(await prisma.todo.findFirstOrThrow({ where: { personId: e2eUsers.minister.personId, eventKey: invitation.id } })).toMatchObject({ status: "STALE" });
+  expect(await prisma.message.count({ where: { personId: e2eUsers.normal.personId, aggregateId: demandId, messageType: "COLLABORATION_ACCEPTED" } })).toBe(1);
   await expect(page.getByText(/AI推荐|匹配理由|匹配度|愿意协助|暂不参与/)).toHaveCount(0);
 
   await authenticated.context.close();
@@ -226,6 +261,8 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   page = authenticated.page;
   await page.goto(`/demands/${demandId}`);
   expect((await post(page, `/api/v2/demands/${demandId}/collaboration/leave`, { reason: "E2E 阶段任务完成" })).status).toBe(200);
+  await deliverDemandParticipationEvents(demandId);
+  expect(await prisma.message.count({ where: { personId: e2eUsers.normal.personId, aggregateId: demandId, messageType: "COLLABORATOR_LEFT" } })).toBe(1);
   await page.goto("/demands?mine=true");
   await expect(page.getByRole("link", { name: new RegExp(`E2E 已修改核心标题 ${suffix}`) })).toHaveCount(0);
 
@@ -234,6 +271,8 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   page = authenticated.page;
   await page.goto(`/demands/${demandId}`);
   expect((await post(page, `/api/v2/demands/${demandId}/collaboration/${e2eUsers.minister.personId}/remove`, { reason: "E2E 调整协同分工" })).status).toBe(200);
+  await deliverDemandParticipationEvents(demandId);
+  expect(await prisma.message.count({ where: { personId: e2eUsers.minister.personId, aggregateId: demandId, messageType: "COLLABORATOR_REMOVED" } })).toBe(1);
   await page.goto("/demands?mine=true");
   await expect(page.getByRole("link", { name: new RegExp(`E2E 已修改核心标题 ${suffix}`) })).toBeVisible();
 
@@ -282,6 +321,6 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   await page.goto(`/demands/${ministerOnlyDemandId}`);
   await expect(page.getByRole("button", { name: "我要对接" })).toHaveCount(0);
   expect((await post(page, `/api/v2/demands/${ministerOnlyDemandId}/claim`, {}, { "Idempotency-Key": `minister-only-${suffix}` })).status).toBe(403);
-  expect(await prisma.outboxEvent.count({ where: { aggregateId: { in: [demandId, adminDraftId, ministerOnlyDemandId] } } })).toBe(0);
+  expect(await prisma.outboxEvent.count({ where: { aggregateId: demandId, publishedAt: { not: null } } })).toBeGreaterThanOrEqual(7);
   await authenticated.context.close();
 });

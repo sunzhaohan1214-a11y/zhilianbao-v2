@@ -331,13 +331,13 @@ describe("M1-003 real MySQL formal demand workflow", () => {
     await expect(prisma.attachmentLink.delete({ where: { id: sourceLink.id } })).rejects.toThrow();
   });
 
-  it("keeps deterministic duplicate candidates and no consumerless lifecycle outbox", async () => {
+  it("keeps deterministic duplicate candidates and emits the consumed publish event", async () => {
     const source = await createDraft(admin, { title: "工业机器人视觉检测系统" });
     await service.directPublish({ actor: admin, demandId: source.id, body: {} });
     const candidate = await createDraft(township, { title: "机器人视觉检测" });
     const duplicates = await service.duplicateCandidates({ actor: admin, demandId: candidate.id });
     expect(duplicates).toEqual([expect.objectContaining({ id: source.id })]);
-    expect(await prisma.outboxEvent.count({ where: { aggregateId: { in: [source.id, candidate.id] } } })).toBe(0);
+    expect(await prisma.outboxEvent.count({ where: { eventType: "DEMAND_PUBLISHED", aggregateId: source.id } })).toBe(1);
   });
 
   it("linearizes submit/approve/direct-publish against enterprise merge/disable and contact disable", async () => {

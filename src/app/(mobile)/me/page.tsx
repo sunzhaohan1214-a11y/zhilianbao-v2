@@ -21,6 +21,9 @@ export default function MePage() {
           <p className="font-medium">办事求助</p>
           <p className="mt-1 text-sm text-neutral-500">发起住宿、交通、用餐、工作与生活求助</p>
         </Link>
+        <Link href="/messages" className="mt-3 block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5"><p className="font-medium">消息</p><p className="mt-1 text-sm text-neutral-500">查看业务状态与公告更新</p></Link>
+        <Link href="/todos" className="mt-3 block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5"><p className="font-medium">待办</p><p className="mt-1 text-sm text-neutral-500">查看当前可以立即处理的事项</p></Link>
+        <Link href="/announcements" className="mt-3 block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5"><p className="font-medium">通知公告</p><p className="mt-1 text-sm text-neutral-500">查看公告与确认要求</p></Link>
       </div>
       <Link href="/account/security" className="mt-6 block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
         <p className="font-medium">账号安全</p>

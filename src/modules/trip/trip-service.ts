@@ -3,6 +3,7 @@ import type { Prisma, Trip } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { DemandLeadService } from "@/modules/demand";
+import { OutboxRepository } from "@/modules/outbox/outbox-repository";
 import { writeTripAudit, writeTripTransition, type TripMutationContext } from "./audit";
 import {
   ENTERPRISE_VISIT_ENTITY,
@@ -211,7 +212,19 @@ export class TripService {
   constructor(
     private readonly repository = new TripRepository(),
     private readonly demandLeadService = new DemandLeadService(),
+    private readonly outbox = new OutboxRepository(),
   ) {}
+
+  private async scheduleResultDue(tx: TripTransaction, trip: Parameters<typeof effectiveTripEnd>[0] & { id: string }) {
+    const dueAt = effectiveTripEnd(trip).toISOString();
+    await this.outbox.append({
+      eventType: "TRIP_RESULT_DUE_SCHEDULED",
+      aggregateType: "TRIP",
+      aggregateId: trip.id,
+      payload: { tripId: trip.id, dueAt, eventKey: dueAt },
+      dedupeKey: `trip-result-due-scheduled:${trip.id}:${dueAt}`,
+    }, tx);
+  }
 
   private async lockAndRequireTrip(tx: TripTransaction, tripId: string) {
     try {
@@ -407,6 +420,17 @@ export class TripService {
         entityId: trip.id,
         after: tripSnapshot(trip),
       });
+      await this.scheduleResultDue(tx, trip);
+      const addedRecipients = participants.filter((personId) => personId !== input.actor.personId);
+      if (addedRecipients.length > 0) {
+        await this.outbox.append({
+          eventType: "TRIP_PARTICIPANT_ADDED",
+          aggregateType: "TRIP",
+          aggregateId: trip.id,
+          payload: { tripId: trip.id, recipientIds: addedRecipients, eventKey: `created:${trip.id}` },
+          dedupeKey: `trip-participant-added:${trip.id}:created`,
+        }, tx);
+      }
       return this.present(trip);
     });
   }
@@ -449,6 +473,14 @@ export class TripService {
         actorPersonId: input.actor.personId,
         requestId: input.context?.requestId,
       } });
+      const eventKey = participant.joinedAt.toISOString();
+      await this.outbox.append({
+        eventType: "TRIP_PARTICIPANT_ADDED",
+        aggregateType: "TRIP",
+        aggregateId: trip.id,
+        payload: { tripId: trip.id, recipientIds: [personId], eventKey },
+        dedupeKey: `trip-participant-added:${trip.id}:${personId}:${eventKey}`,
+      }, tx);
       return participant;
     });
   }
@@ -520,6 +552,15 @@ export class TripService {
         ...input, actionCode: "TRIP_UPDATED", entityType: "TRIP", entityId: trip.id,
         before: tripSnapshot(trip), after: tripSnapshot(updated),
       });
+      await this.scheduleResultDue(tx, updated);
+      const recipientIds = updated.participants.filter(({ leftAt }) => leftAt === null).map(({ personId }) => personId);
+      await this.outbox.append({
+        eventType: "TRIP_UPDATED",
+        aggregateType: "TRIP",
+        aggregateId: trip.id,
+        payload: { tripId: trip.id, recipientIds, eventKey: updated.updatedAt.toISOString() },
+        dedupeKey: `trip-updated:${trip.id}:${updated.updatedAt.toISOString()}`,
+      }, tx);
       return this.present(updated);
     });
   }
@@ -547,6 +588,18 @@ export class TripService {
       await writeTripTransition(tx, {
         ...input, entityId: trip.id, fromState, toState: "CANCELED", actionCode: "TRIP_CANCELED", reason,
       });
+      await this.outbox.append({
+        eventType: "TRIP_CANCELED",
+        aggregateType: "TRIP",
+        aggregateId: trip.id,
+        payload: {
+          tripId: trip.id,
+          recipientIds: updated.participants.filter(({ leftAt }) => leftAt === null).map(({ personId }) => personId),
+          eventKey: now.toISOString(),
+        },
+        dedupeKey: `trip-canceled:${trip.id}`,
+        occurredAt: now,
+      }, tx);
       return this.present(updated, now);
     });
   }
@@ -645,6 +698,18 @@ export class TripService {
           ...input, entityId: trip.id, fromState, toState: "COMPLETED", actionCode: "TRIP_RESULT_SUBMITTED",
           metadata: { tripResultId: result.id, enterpriseVisitCount: trip.nodes.filter(({ enterpriseId }) => enterpriseId).length },
         });
+        await this.outbox.append({
+          eventType: "TRIP_RESULT_SUBMITTED",
+          aggregateType: "TRIP",
+          aggregateId: trip.id,
+          payload: {
+            tripId: trip.id,
+            recipientIds: trip.participants.filter(({ leftAt }) => leftAt === null).map(({ personId }) => personId),
+            eventKey: result.id,
+          },
+          dedupeKey: `trip-result-submitted:${result.id}`,
+          occurredAt: now,
+        }, tx);
         const completed = await tx.trip.findUniqueOrThrow({ where: { id: trip.id }, include: tripDetailInclude });
         return this.present(completed, now);
       });
