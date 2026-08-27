@@ -12,6 +12,7 @@ import type { StorageAdapter } from "./storage/storage-adapter";
 import { registerPolicyAttachmentAuthorizer } from "@/modules/policy/attachment-authorizer";
 import { registerDemandAttachmentAuthorizers } from "@/modules/demand/attachment-authorization";
 import { registerTalentAttachmentAuthorizers } from "@/modules/talent/attachment-authorizer";
+import { registerHelpAttachmentAuthorizers } from "@/modules/help/attachment-authorizer";
 
 type AttachmentRuntime = {
   storage: StorageAdapter;
@@ -48,6 +49,7 @@ function createRuntime(): AttachmentRuntime {
   registerPolicyAttachmentAuthorizer(parentAuthorizers);
   registerDemandAttachmentAuthorizers(parentAuthorizers);
   registerTalentAttachmentAuthorizers(parentAuthorizers);
+  registerHelpAttachmentAuthorizers(parentAuthorizers);
   const scanner = isTest ? new FakeCleanScanner() : new UnavailableFileScanAdapter();
   return {
     storage,
