@@ -225,52 +225,111 @@ enum DemandReviewDecision {
   RETURN
 }
 
+enum TalentScopeType {
+  DOMESTIC
+  OVERSEAS
+}
+
+enum TalentStatus {
+  ACTIVE
+  DISABLED
+  MERGED
+}
+
+enum TalentChangeRequestType {
+  CREATE
+  CORRECTION
+}
+
+enum TalentChangeRequestStatus {
+  PENDING_REVIEW
+  APPROVED
+  RETURNED
+  CLOSED
+}
+
+enum TalentVersionChangeType {
+  CREATE
+  CHANGE_REQUEST_APPROVED
+  FORMAL_CORRECTION
+  CONTACT_PERSON_CHANGED
+  DISABLE
+  MERGE
+}
+
+enum TalentTownshipRoundStatus {
+  IN_PROGRESS
+  COMPLETED
+  WITHDRAWN
+}
+
+enum TalentAIExtractionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CONFIRMED
+}
+
 model Person {
-  id                            String                    @id @default(uuid()) @db.Char(36)
-  name                          String                    @db.VarChar(80)
-  contactPhone                  String?                   @map("contact_phone") @db.VarChar(30)
-  personStatus                  PersonStatus              @default(ACTIVE) @map("person_status")
-  createdAt                     DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
-  account                       Account?
-  phoneChanges                  AccountPhoneHistory[]     @relation("PhoneChangeAccount")
-  appointments                  Appointment[]
-  roleAssignments               RoleAssignment[]          @relation("RoleAssignmentPerson")
-  grantedRoleAssignments        RoleAssignment[]          @relation("RoleAssignmentGrantor")
-  specialPermissionGrants       SpecialPermissionGrant[]  @relation("PermissionGrantPerson")
-  grantedSpecialPermissions     SpecialPermissionGrant[]  @relation("PermissionGrantGrantor")
-  batchMemberships              BatchMembership[]
-  groupLeaderAssignments        GroupLeaderAssignment[]   @relation("GroupLeaderPerson")
-  grantedGroupLeaderAssignments GroupLeaderAssignment[]   @relation("GroupLeaderGrantor")
-  memberCapabilityProfile       MemberCapabilityProfile?  @relation("MemberCapabilityPerson")
-  updatedMemberCapabilities     MemberCapabilityProfile[] @relation("MemberCapabilityUpdater")
-  auditLogs                     AuditLog[]
-  stateTransitions              StateTransitionHistory[]
-  uploadedAttachments           Attachment[]              @relation("AttachmentUploader")
-  createdAttachmentLinks        AttachmentLink[]          @relation("AttachmentLinkCreator")
-  attachmentAccessLogs          AttachmentAccessLog[]     @relation("AttachmentAccessPerson")
-  createdEnterprises            Enterprise[]              @relation("EnterpriseCreator")
-  coordinatedEnterprises        Enterprise[]              @relation("EnterpriseCoordinateUpdater")
-  createdEnterpriseContacts     EnterpriseContact[]
-  submittedEnterpriseRequests   EnterpriseChangeRequest[] @relation("EnterpriseRequestSubmitter")
-  reviewedEnterpriseRequests    EnterpriseChangeRequest[] @relation("EnterpriseRequestReviewer")
-  enterpriseVersions            EnterpriseVersion[]
-  presenceReports               PresenceReport[]
-  createdPolicies                Policy[]                    @relation("PolicyCreator")
-  changedPolicyVersions          PolicyContentVersion[]      @relation("PolicyVersionChanger")
-  confirmedPolicyVersions        PolicyContentVersion[]      @relation("PolicyVersionConfirmer")
-  confirmedPolicyInterpretations PolicyAIInterpretation[]    @relation("PolicyInterpretationConfirmer")
-  createdPolicyReplacements      PolicyReplacementRelation[] @relation("PolicyReplacementCreator")
-  endedPolicyReplacements        PolicyReplacementRelation[] @relation("PolicyReplacementEnder")
-  sourcedDemandLeads            DemandLead[]              @relation("DemandLeadSourcePerson")
-  createdDemandLeads            DemandLead[]              @relation("DemandLeadCreator")
-  demandLeadSupplements         DemandLeadSupplement[]
-  createdDemands                Demand[]                  @relation("DemandCreator")
-  createdMapBoundaryVersions   MapBoundaryVersion[]      @relation("MapBoundaryCreator")
-  reviewedDemands               Demand[]                  @relation("DemandReviewer")
-  publishedDemands              Demand[]                  @relation("DemandPublisher")
-  demandReviews                 DemandReview[]
-  demandCommandIdempotencies    DemandCommandIdempotency[]
+  id                             String                       @id @default(uuid()) @db.Char(36)
+  name                           String                       @db.VarChar(80)
+  contactPhone                   String?                      @map("contact_phone") @db.VarChar(30)
+  personStatus                   PersonStatus                 @default(ACTIVE) @map("person_status")
+  createdAt                      DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                      DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  account                        Account?
+  phoneChanges                   AccountPhoneHistory[]        @relation("PhoneChangeAccount")
+  appointments                   Appointment[]
+  roleAssignments                RoleAssignment[]             @relation("RoleAssignmentPerson")
+  grantedRoleAssignments         RoleAssignment[]             @relation("RoleAssignmentGrantor")
+  specialPermissionGrants        SpecialPermissionGrant[]     @relation("PermissionGrantPerson")
+  grantedSpecialPermissions      SpecialPermissionGrant[]     @relation("PermissionGrantGrantor")
+  batchMemberships               BatchMembership[]
+  groupLeaderAssignments         GroupLeaderAssignment[]      @relation("GroupLeaderPerson")
+  grantedGroupLeaderAssignments  GroupLeaderAssignment[]      @relation("GroupLeaderGrantor")
+  memberCapabilityProfile        MemberCapabilityProfile?     @relation("MemberCapabilityPerson")
+  updatedMemberCapabilities      MemberCapabilityProfile[]    @relation("MemberCapabilityUpdater")
+  auditLogs                      AuditLog[]
+  stateTransitions               StateTransitionHistory[]
+  uploadedAttachments            Attachment[]                 @relation("AttachmentUploader")
+  createdAttachmentLinks         AttachmentLink[]             @relation("AttachmentLinkCreator")
+  attachmentAccessLogs           AttachmentAccessLog[]        @relation("AttachmentAccessPerson")
+  createdEnterprises             Enterprise[]                 @relation("EnterpriseCreator")
+  coordinatedEnterprises         Enterprise[]                 @relation("EnterpriseCoordinateUpdater")
+  createdEnterpriseContacts      EnterpriseContact[]
+  submittedEnterpriseRequests    EnterpriseChangeRequest[]    @relation("EnterpriseRequestSubmitter")
+  reviewedEnterpriseRequests     EnterpriseChangeRequest[]    @relation("EnterpriseRequestReviewer")
+  enterpriseVersions             EnterpriseVersion[]
+  presenceReports                PresenceReport[]
+  createdPolicies                Policy[]                     @relation("PolicyCreator")
+  changedPolicyVersions          PolicyContentVersion[]       @relation("PolicyVersionChanger")
+  confirmedPolicyVersions        PolicyContentVersion[]       @relation("PolicyVersionConfirmer")
+  confirmedPolicyInterpretations PolicyAIInterpretation[]     @relation("PolicyInterpretationConfirmer")
+  createdPolicyReplacements      PolicyReplacementRelation[]  @relation("PolicyReplacementCreator")
+  endedPolicyReplacements        PolicyReplacementRelation[]  @relation("PolicyReplacementEnder")
+  sourcedDemandLeads             DemandLead[]                 @relation("DemandLeadSourcePerson")
+  createdDemandLeads             DemandLead[]                 @relation("DemandLeadCreator")
+  demandLeadSupplements          DemandLeadSupplement[]
+  createdDemands                 Demand[]                     @relation("DemandCreator")
+  createdMapBoundaryVersions     MapBoundaryVersion[]         @relation("MapBoundaryCreator")
+  createdTalents                 Talent[]                     @relation("TalentCreator")
+  recommendedTalents             Talent[]                     @relation("TalentOriginalRecommender")
+  contactedTalents               Talent[]                     @relation("TalentCurrentContact")
+  submittedTalentRequests        TalentChangeRequest[]        @relation("TalentRequestSubmitter")
+  reviewedTalentRequests         TalentChangeRequest[]        @relation("TalentRequestReviewer")
+  changedTalentVersions          TalentVersion[]              @relation("TalentVersionChanger")
+  talentContactHistories         TalentContactPersonHistory[] @relation("TalentContactPerson")
+  changedTalentContacts          TalentContactPersonHistory[] @relation("TalentContactChanger")
+  startedTalentRounds            TalentTownshipRound[]        @relation("TalentRoundStarter")
+  handledTalentRounds            TalentTownshipRound[]        @relation("TalentRoundHandler")
+  voidedTalentRounds             TalentTownshipRound[]        @relation("TalentRoundVoider")
+  talentRoundProgresses          TalentTownshipProgress[]     @relation("TalentProgressCreator")
+  requestedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIRequester")
+  confirmedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIConfirmer")
+  reviewedDemands                Demand[]                     @relation("DemandReviewer")
+  publishedDemands               Demand[]                     @relation("DemandPublisher")
+  demandReviews                  DemandReview[]
+  demandCommandIdempotencies     DemandCommandIdempotency[]
 
   @@index([personStatus])
   @@map("persons")
@@ -394,6 +453,7 @@ model AdministrativeArea {
   publicAttachments          Attachment[]                 @relation("PublicAttachmentArea")
   demandLeads                DemandLead[]
   demands                    Demand[]
+  talentTownshipRounds       TalentTownshipRound[]
 
   @@index([parentId])
   @@index([type, status, sortOrder])
@@ -417,18 +477,18 @@ model OrganizationAreaMapping {
 }
 
 model MapBoundaryVersion {
-  id                  String             @id @default(uuid()) @db.Char(36)
-  areaId              String             @map("area_id") @db.Char(36)
-  versionNo           Int                @map("version_no") @db.UnsignedInt
-  geoJson             Json               @map("geo_json")
-  checksum            String             @db.Char(64)
-  sourceFilename      String?            @map("source_filename") @db.VarChar(255)
-  isCurrent           Boolean            @default(false) @map("is_current")
-  changeReason        String             @map("change_reason") @db.VarChar(500)
-  createdByPersonId   String             @map("created_by_person_id") @db.Char(36)
-  createdAt           DateTime           @default(now()) @map("created_at") @db.DateTime(3)
-  area                AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  createdByPerson     Person             @relation("MapBoundaryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  id                String             @id @default(uuid()) @db.Char(36)
+  areaId            String             @map("area_id") @db.Char(36)
+  versionNo         Int                @map("version_no") @db.UnsignedInt
+  geoJson           Json               @map("geo_json")
+  checksum          String             @db.Char(64)
+  sourceFilename    String?            @map("source_filename") @db.VarChar(255)
+  isCurrent         Boolean            @default(false) @map("is_current")
+  changeReason      String             @map("change_reason") @db.VarChar(500)
+  createdByPersonId String             @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.DateTime(3)
+  area              AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  createdByPerson   Person             @relation("MapBoundaryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
 
   @@unique([areaId, versionNo])
   @@index([areaId, isCurrent])
@@ -568,28 +628,28 @@ model GroupLeaderAssignment {
 }
 
 model MemberCapabilityProfile {
-  id                       String                      @id @default(uuid()) @db.Char(36)
-  personId                 String                      @unique @map("person_id") @db.Char(36)
-  professionalDirection    String?                     @map("professional_direction") @db.VarChar(500)
-  coordinatableResources   String?                     @map("coordinatable_resources") @db.Text
-  personalIntroduction     String?                     @map("personal_introduction") @db.Text
-  updatedByPersonId        String                      @map("updated_by_person_id") @db.Char(36)
-  createdAt                DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
-  person                   Person                      @relation("MemberCapabilityPerson", fields: [personId], references: [id], onDelete: Restrict)
-  updatedByPerson          Person                      @relation("MemberCapabilityUpdater", fields: [updatedByPersonId], references: [id], onDelete: Restrict)
-  industries               MemberCapabilityIndustry[]
-  preferredDemandTypes     MemberPreferredDemandType[]
+  id                     String                      @id @default(uuid()) @db.Char(36)
+  personId               String                      @unique @map("person_id") @db.Char(36)
+  professionalDirection  String?                     @map("professional_direction") @db.VarChar(500)
+  coordinatableResources String?                     @map("coordinatable_resources") @db.Text
+  personalIntroduction   String?                     @map("personal_introduction") @db.Text
+  updatedByPersonId      String                      @map("updated_by_person_id") @db.Char(36)
+  createdAt              DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
+  person                 Person                      @relation("MemberCapabilityPerson", fields: [personId], references: [id], onDelete: Restrict)
+  updatedByPerson        Person                      @relation("MemberCapabilityUpdater", fields: [updatedByPersonId], references: [id], onDelete: Restrict)
+  industries             MemberCapabilityIndustry[]
+  preferredDemandTypes   MemberPreferredDemandType[]
 
   @@index([updatedByPersonId, updatedAt])
   @@map("member_capability_profiles")
 }
 
 model MemberIndustry {
-  id             String                      @id @default(uuid()) @db.Char(36)
-  name           String                      @unique @db.VarChar(100)
-  status         RecordStatus                @default(ACTIVE)
-  createdAt      DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  id             String                     @id @default(uuid()) @db.Char(36)
+  name           String                     @unique @db.VarChar(100)
+  status         RecordStatus               @default(ACTIVE)
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
   capabilityUses MemberCapabilityIndustry[]
 
   @@index([status, name])
@@ -597,11 +657,11 @@ model MemberIndustry {
 }
 
 model MemberCapabilityIndustry {
-  personId  String                  @map("person_id") @db.Char(36)
-  industryId String                 @map("industry_id") @db.Char(36)
-  createdAt DateTime                @default(now()) @map("created_at") @db.DateTime(3)
-  profile   MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
-  industry  MemberIndustry          @relation(fields: [industryId], references: [id], onDelete: Restrict)
+  personId   String                  @map("person_id") @db.Char(36)
+  industryId String                  @map("industry_id") @db.Char(36)
+  createdAt  DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  profile    MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
+  industry   MemberIndustry          @relation(fields: [industryId], references: [id], onDelete: Restrict)
 
   @@id([personId, industryId])
   @@index([industryId, personId])
@@ -609,10 +669,10 @@ model MemberCapabilityIndustry {
 }
 
 model MemberPreferredDemandType {
-  personId  String                  @map("person_id") @db.Char(36)
-  demandType MemberDemandType       @map("demand_type")
-  createdAt DateTime                @default(now()) @map("created_at") @db.DateTime(3)
-  profile   MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
+  personId   String                  @map("person_id") @db.Char(36)
+  demandType MemberDemandType        @map("demand_type")
+  createdAt  DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  profile    MemberCapabilityProfile @relation(fields: [personId], references: [personId], onDelete: Restrict)
 
   @@id([personId, demandType])
   @@index([demandType, personId])
@@ -676,19 +736,19 @@ model StateTransitionHistory {
 }
 
 model PresenceReport {
-  id                  String   @id @default(uuid()) @db.Char(36)
-  personId            String   @map("person_id") @db.Char(36)
-  arrivalAt           DateTime @map("arrival_at") @db.DateTime(3)
-  expectedDepartureAt DateTime @map("expected_departure_at") @db.DateTime(3)
-  origin              String?  @db.VarChar(200)
-  transportMode       String?  @map("transport_mode") @db.VarChar(100)
-  trainFlightNo       String?  @map("train_flight_no") @db.VarChar(100)
-  note                String?  @db.VarChar(1000)
+  id                  String    @id @default(uuid()) @db.Char(36)
+  personId            String    @map("person_id") @db.Char(36)
+  arrivalAt           DateTime  @map("arrival_at") @db.DateTime(3)
+  expectedDepartureAt DateTime  @map("expected_departure_at") @db.DateTime(3)
+  origin              String?   @db.VarChar(200)
+  transportMode       String?   @map("transport_mode") @db.VarChar(100)
+  trainFlightNo       String?   @map("train_flight_no") @db.VarChar(100)
+  note                String?   @db.VarChar(1000)
   canceledAt          DateTime? @map("canceled_at") @db.DateTime(3)
-  cancelReason        String?  @map("cancel_reason") @db.VarChar(500)
-  createdAt           DateTime @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.DateTime(3)
-  person              Person   @relation(fields: [personId], references: [id], onDelete: Restrict)
+  cancelReason        String?   @map("cancel_reason") @db.VarChar(500)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  person              Person    @relation(fields: [personId], references: [id], onDelete: Restrict)
 
   @@index([personId, canceledAt, arrivalAt, expectedDepartureAt], map: "presence_person_active_interval_idx")
   @@index([arrivalAt, expectedDepartureAt], map: "presence_current_interval_idx")
@@ -767,6 +827,7 @@ model Attachment {
   publicArea            AdministrativeArea?       @relation("PublicAttachmentArea", fields: [publicAreaId], references: [id], onDelete: Restrict)
   links                 AttachmentLink[]
   accessLogs            AttachmentAccessLog[]
+  talentAIExtractions   TalentAIExtraction[]
 
   @@index([uploadedByPersonId, isTemporary, uploadStatus])
   @@index([uploadStatus, scanStatus])
@@ -1251,4 +1312,184 @@ model DemandCommandIdempotency {
   @@unique([actorPersonId, action, keyHash])
   @@index([demandId, createdAt])
   @@map("demand_command_idempotency")
+}
+
+model Talent {
+  id                          String                       @id @default(uuid()) @db.Char(36)
+  name                        String                       @db.VarChar(80)
+  scopeType                   TalentScopeType              @map("scope_type")
+  organizationName            String                       @map("organization_name") @db.VarChar(200)
+  title                       String                       @db.VarChar(200)
+  professionalDirection       String                       @map("professional_direction") @db.VarChar(1000)
+  workEducationExperience     String?                      @map("work_education_experience") @db.Text
+  representativeAchievements  String?                      @map("representative_achievements") @db.Text
+  originalRecommenderPersonId String                       @map("original_recommender_person_id") @db.Char(36)
+  currentContactPersonId      String                       @map("current_contact_person_id") @db.Char(36)
+  status                      TalentStatus                 @default(ACTIVE)
+  mergedIntoId                String?                      @map("merged_into_id") @db.Char(36)
+  currentVersion              Int                          @default(1) @map("current_version") @db.UnsignedInt
+  sourceSystem                String                       @default("V2") @map("source_system") @db.VarChar(50)
+  sourceRecordId              String?                      @map("source_record_id") @db.VarChar(191)
+  createdByPersonId           String                       @map("created_by_person_id") @db.Char(36)
+  createdAt                   DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                   DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  originalRecommenderPerson   Person                       @relation("TalentOriginalRecommender", fields: [originalRecommenderPersonId], references: [id], onDelete: Restrict)
+  currentContactPerson        Person                       @relation("TalentCurrentContact", fields: [currentContactPersonId], references: [id], onDelete: Restrict)
+  createdByPerson             Person                       @relation("TalentCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  mergedInto                  Talent?                      @relation("TalentMerge", fields: [mergedIntoId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  mergedSources               Talent[]                     @relation("TalentMerge")
+  targetRequests              TalentChangeRequest[]        @relation("TalentRequestTarget")
+  approvedRequests            TalentChangeRequest[]        @relation("TalentRequestApproved")
+  versions                    TalentVersion[]
+  contactPersonHistory        TalentContactPersonHistory[]
+  townshipRounds              TalentTownshipRound[]
+
+  @@unique([sourceSystem, sourceRecordId])
+  @@index([status, scopeType, updatedAt])
+  @@index([name])
+  @@index([organizationName])
+  @@index([originalRecommenderPersonId])
+  @@index([currentContactPersonId])
+  @@index([mergedIntoId])
+  @@map("talents")
+}
+
+model TalentChangeRequest {
+  id                String                    @id @default(uuid()) @db.Char(36)
+  requestType       TalentChangeRequestType   @map("request_type")
+  status            TalentChangeRequestStatus @default(PENDING_REVIEW)
+  targetTalentId    String?                   @map("target_talent_id") @db.Char(36)
+  baseTalentVersion Int?                      @map("base_talent_version") @db.UnsignedInt
+  payloadSnapshot   Json                      @map("payload_snapshot")
+  submitterPersonId String                    @map("submitter_person_id") @db.Char(36)
+  reviewerPersonId  String?                   @map("reviewer_person_id") @db.Char(36)
+  reviewReason      String?                   @map("review_reason") @db.VarChar(500)
+  approvedTalentId  String?                   @map("approved_talent_id") @db.Char(36)
+  submittedAt       DateTime                  @default(now()) @map("submitted_at") @db.DateTime(3)
+  reviewedAt        DateTime?                 @map("reviewed_at") @db.DateTime(3)
+  createdAt         DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  targetTalent      Talent?                   @relation("TalentRequestTarget", fields: [targetTalentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvedTalent    Talent?                   @relation("TalentRequestApproved", fields: [approvedTalentId], references: [id], onDelete: Restrict)
+  submitterPerson   Person                    @relation("TalentRequestSubmitter", fields: [submitterPersonId], references: [id], onDelete: Restrict)
+  reviewerPerson    Person?                   @relation("TalentRequestReviewer", fields: [reviewerPersonId], references: [id], onDelete: Restrict)
+  aiExtractions     TalentAIExtraction[]
+
+  @@index([status, createdAt])
+  @@index([submitterPersonId, status])
+  @@index([targetTalentId])
+  @@index([approvedTalentId])
+  @@map("talent_change_requests")
+}
+
+model TalentVersion {
+  id                String                  @id @default(uuid()) @db.Char(36)
+  talentId          String                  @map("talent_id") @db.Char(36)
+  versionNo         Int                     @map("version_no") @db.UnsignedInt
+  snapshotJson      Json                    @map("snapshot_json")
+  changeType        TalentVersionChangeType @map("change_type")
+  reason            String?                 @db.VarChar(500)
+  changedByPersonId String                  @map("changed_by_person_id") @db.Char(36)
+  createdAt         DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  talent            Talent                  @relation(fields: [talentId], references: [id], onDelete: Restrict)
+  changedByPerson   Person                  @relation("TalentVersionChanger", fields: [changedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([talentId, versionNo])
+  @@index([changedByPersonId, createdAt])
+  @@map("talent_versions")
+}
+
+model TalentContactPersonHistory {
+  id                String    @id @default(uuid()) @db.Char(36)
+  talentId          String    @map("talent_id") @db.Char(36)
+  personId          String    @map("person_id") @db.Char(36)
+  effectiveAt       DateTime  @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime? @map("expired_at") @db.DateTime(3)
+  activeKey         Int?      @default(1) @map("active_key") @db.UnsignedTinyInt
+  changeReason      String?   @map("change_reason") @db.VarChar(500)
+  changedByPersonId String    @map("changed_by_person_id") @db.Char(36)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  talent            Talent    @relation(fields: [talentId], references: [id], onDelete: Restrict)
+  person            Person    @relation("TalentContactPerson", fields: [personId], references: [id], onDelete: Restrict)
+  changedByPerson   Person    @relation("TalentContactChanger", fields: [changedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([talentId, activeKey])
+  @@index([personId, effectiveAt, expiredAt], map: "talent_contact_history_person_period_idx")
+  @@index([changedByPersonId, createdAt], map: "talent_contact_history_changer_created_idx")
+  @@map("talent_contact_person_history")
+}
+
+model TalentTownshipRound {
+  id                     String                    @id @default(uuid()) @db.Char(36)
+  talentId               String                    @map("talent_id") @db.Char(36)
+  areaId                 String                    @map("area_id") @db.Char(36)
+  roundNo                Int                       @map("round_no") @db.UnsignedInt
+  status                 TalentTownshipRoundStatus @default(IN_PROGRESS)
+  activeKey              Int?                      @default(1) @map("active_key") @db.UnsignedTinyInt
+  startedByPersonId      String                    @map("started_by_person_id") @db.Char(36)
+  currentHandlerPersonId String                    @map("current_handler_person_id") @db.Char(36)
+  startedAt              DateTime                  @default(now()) @map("started_at") @db.DateTime(3)
+  completedAt            DateTime?                 @map("completed_at") @db.DateTime(3)
+  withdrawnAt            DateTime?                 @map("withdrawn_at") @db.DateTime(3)
+  resultSummary          String?                   @map("result_summary") @db.VarChar(2000)
+  withdrawReason         String?                   @map("withdraw_reason") @db.VarChar(500)
+  voidedAt               DateTime?                 @map("voided_at") @db.DateTime(3)
+  voidedByPersonId       String?                   @map("voided_by_person_id") @db.Char(36)
+  voidReason             String?                   @map("void_reason") @db.VarChar(500)
+  createdAt              DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  talent                 Talent                    @relation(fields: [talentId], references: [id], onDelete: Restrict)
+  area                   AdministrativeArea        @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  startedByPerson        Person                    @relation("TalentRoundStarter", fields: [startedByPersonId], references: [id], onDelete: Restrict)
+  currentHandlerPerson   Person                    @relation("TalentRoundHandler", fields: [currentHandlerPersonId], references: [id], onDelete: Restrict)
+  voidedByPerson         Person?                   @relation("TalentRoundVoider", fields: [voidedByPersonId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  progresses             TalentTownshipProgress[]
+
+  @@unique([talentId, areaId, roundNo])
+  @@unique([talentId, areaId, activeKey])
+  @@index([talentId, status, voidedAt])
+  @@index([areaId, status, voidedAt])
+  @@index([currentHandlerPersonId, status])
+  @@map("talent_township_rounds")
+}
+
+model TalentTownshipProgress {
+  id                String              @id @default(uuid()) @db.Char(36)
+  roundId           String              @map("round_id") @db.Char(36)
+  content           String              @db.VarChar(2000)
+  nextStep          String?             @map("next_step") @db.VarChar(1000)
+  createdByPersonId String              @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.DateTime(3)
+  round             TalentTownshipRound @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  createdByPerson   Person              @relation("TalentProgressCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([roundId, createdAt])
+  @@index([createdByPersonId, createdAt], map: "talent_progress_creator_created_idx")
+  @@map("talent_township_progresses")
+}
+
+model TalentAIExtraction {
+  id                  String                   @id @default(uuid()) @db.Char(36)
+  requestId           String                   @map("request_id") @db.Char(36)
+  attachmentId        String                   @map("attachment_id") @db.Char(36)
+  status              TalentAIExtractionStatus @default(PENDING)
+  candidateJson       Json?                    @map("candidate_json")
+  evidenceJson        Json?                    @map("evidence_json")
+  provider            String                   @db.VarChar(100)
+  model               String                   @db.VarChar(100)
+  promptVersion       String                   @map("prompt_version") @db.VarChar(100)
+  failureCode         String?                  @map("failure_code") @db.VarChar(100)
+  requestedByPersonId String                   @map("requested_by_person_id") @db.Char(36)
+  confirmedByPersonId String?                  @map("confirmed_by_person_id") @db.Char(36)
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  confirmedAt         DateTime?                @map("confirmed_at") @db.DateTime(3)
+  request             TalentChangeRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  attachment          Attachment               @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  requestedByPerson   Person                   @relation("TalentAIRequester", fields: [requestedByPersonId], references: [id], onDelete: Restrict)
+  confirmedByPerson   Person?                  @relation("TalentAIConfirmer", fields: [confirmedByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@index([attachmentId])
+  @@index([status, createdAt])
+  @@map("talent_ai_extractions")
 }
