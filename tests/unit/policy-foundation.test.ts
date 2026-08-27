@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveCapabilities } from "@/modules/permissions";
 import { FakePolicyExtractionAdapter, policyListQuerySchema, policyInterpretationSchema } from "@/modules/policy";
+import { PolicyRepository } from "@/modules/policy/repository/policy-repository";
 
 describe("M2-006 policy foundation", () => {
   it("grants governance only to admin roles", () => {
@@ -28,5 +30,19 @@ describe("M2-006 policy foundation", () => {
   it("keeps fake extraction provider-agnostic and candidate-only", async () => {
     const result = await new FakePolicyExtractionAdapter().extract({ policyId: "p", versionId: "v", attachmentIds: ["a"] });
     expect(result.provider).toBe("fake"); expect(result.extracted).toHaveProperty("targetAudience"); expect(result.evidence).toEqual(expect.objectContaining({ items: expect.any(Array) }));
+  });
+
+  it("retries only transaction write conflicts within a finite boundary", async () => {
+    const conflict = Object.assign(new Error("deadlock"), { code: "P2034" });
+    const transaction = vi.fn().mockRejectedValueOnce(conflict).mockResolvedValueOnce("ok");
+    const repository = new PolicyRepository({ $transaction: transaction } as unknown as PrismaClient);
+    await expect(repository.transaction(async () => "ok")).resolves.toBe("ok");
+    expect(transaction).toHaveBeenCalledTimes(2);
+
+    const domainError = Object.assign(new Error("conflict"), { code: "POLICY_STATE_CONFLICT" });
+    const noRetry = vi.fn().mockRejectedValue(domainError);
+    const strictRepository = new PolicyRepository({ $transaction: noRetry } as unknown as PrismaClient);
+    await expect(strictRepository.transaction(async () => "never")).rejects.toBe(domainError);
+    expect(noRetry).toHaveBeenCalledTimes(1);
   });
 });

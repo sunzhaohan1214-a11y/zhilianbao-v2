@@ -45,6 +45,7 @@ export async function seedAuthFixtures() {
   await prisma.policyTagRelation.deleteMany({ where: { policyId: { in: policyIds } } });
   await prisma.policyContentVersion.deleteMany({ where: { id: { in: policyVersionIds } } });
   await prisma.policy.deleteMany({ where: { id: { in: policyIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: policyAttachmentIds } } });
   await prisma.attachment.deleteMany({ where: { id: { in: policyAttachmentIds } } });
   const enterpriseWhere = { createdByPersonId: { in: users.map(({ personId }) => personId) } };
   await prisma.presenceReport.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });

@@ -3,11 +3,24 @@ import { getPrismaClient } from "@/lib/db/prisma";
 
 export type PolicyTransaction = Prisma.TransactionClient;
 
+const MAX_TRANSACTION_ATTEMPTS = 4;
+
+function isRetryableTransactionConflict(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2034";
+}
+
 export class PolicyRepository {
   constructor(private readonly prisma: PrismaClient = getPrismaClient()) {}
 
-  transaction<T>(operation: (tx: PolicyTransaction) => Promise<T>): Promise<T> {
-    return this.prisma.$transaction(operation);
+  async transaction<T>(operation: (tx: PolicyTransaction) => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(operation);
+      } catch (error) {
+        if (!isRetryableTransactionConflict(error) || attempt >= MAX_TRANSACTION_ATTEMPTS) throw error;
+        await new Promise((resolve) => setTimeout(resolve, attempt * 10 + Math.floor(Math.random() * 10)));
+      }
+    }
   }
 
   async lockPolicy(tx: PolicyTransaction, policyId: string) {
