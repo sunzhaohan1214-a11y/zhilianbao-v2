@@ -1,0 +1,13 @@
+import Link from "next/link";
+import { FormalDemandList } from "@/components/demand/formal-demand-list";
+import { formalDemandPageContext } from "@/lib/demand/formal-page-context";
+import { demandListQuerySchema } from "@/modules/demand/schemas";
+
+export default async function AdminDemandsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const params = await searchParams;
+  const { actor, service } = await formalDemandPageContext();
+  const query = demandListQuerySchema.parse({ status: typeof params.status === "string" ? params.status : undefined, type: typeof params.type === "string" ? params.type : undefined, areaId: typeof params.areaId === "string" ? params.areaId : undefined, keyword: typeof params.keyword === "string" ? params.keyword : undefined, page: typeof params.page === "string" ? params.page : undefined, pageSize: 20 });
+  const result = await service.list({ actor, query });
+  const options = actor.capabilities.has("demand.formal.create") ? await service.formOptions({ actor }) : { areas: [] };
+  return <section><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-medium text-blue-600">M1-003 Formal Demand</p><h1 className="mt-1 text-3xl font-semibold">正式需求</h1></div>{actor.capabilities.has("demand.formal.create") && <Link href="/admin/demands/new" className="rounded-xl bg-blue-600 px-4 py-2 text-white">管理员代录</Link>}</div><form className="mt-6 grid gap-3 rounded-2xl border bg-white p-4 md:grid-cols-5"><input name="keyword" defaultValue={query.keyword} placeholder="编号 / 企业 / 标题" className="rounded-xl border p-3"/><select name="status" defaultValue={query.status ?? ""} className="rounded-xl border p-3"><option value="">全部状态</option>{["DRAFT","PENDING_REVIEW","RETURNED","PENDING_CLAIM","IN_PROGRESS","PENDING_CLOSE_REVIEW","COMPLETED","CANCELED","MERGED"].map((status) => <option key={status}>{status}</option>)}</select><select name="type" defaultValue={query.type ?? ""} className="rounded-xl border p-3"><option value="">全部类型</option><option value="TECHNICAL">技术攻关</option><option value="TALENT">人才合作</option><option value="PROJECT">项目落地</option><option value="OTHER">其他需求</option></select><select name="areaId" defaultValue={query.areaId ?? ""} className="rounded-xl border p-3"><option value="">全部区域</option>{options.areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select><button className="rounded-xl bg-slate-900 text-white">查询</button></form><FormalDemandList result={result} admin/><p className="mt-3 text-sm text-slate-500">第 {result.page} 页，共 {result.total} 条</p></section>;
+}

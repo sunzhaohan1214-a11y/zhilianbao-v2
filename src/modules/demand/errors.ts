@@ -46,6 +46,54 @@ export function isDemandLeadError(error: unknown): error is DemandLeadError {
   return error instanceof DemandLeadError;
 }
 
+export const DEMAND_ERROR_CODES = [
+  "DEMAND_NOT_FOUND",
+  "DEMAND_STATE_CONFLICT",
+  "DEMAND_AREA_INVALID",
+  "DEMAND_ENTERPRISE_INVALID",
+  "DEMAND_CONTACT_INVALID",
+  "DEMAND_CURRENT_BATCH_INVALID",
+  "DEMAND_ATTACHMENT_INVALID",
+  "DEMAND_ATTACHMENT_NOT_PASSED",
+  "DEMAND_PROVENANCE_INVALID",
+  "DEMAND_IDEMPOTENCY_REQUIRED",
+  "DEMAND_IDEMPOTENCY_CONFLICT",
+] as const;
+
+export type DemandErrorCode = (typeof DEMAND_ERROR_CODES)[number];
+
+const DEMAND_STATUS_BY_CODE: Record<DemandErrorCode, number> = {
+  DEMAND_NOT_FOUND: 404,
+  DEMAND_STATE_CONFLICT: 409,
+  DEMAND_AREA_INVALID: 422,
+  DEMAND_ENTERPRISE_INVALID: 422,
+  DEMAND_CONTACT_INVALID: 422,
+  DEMAND_CURRENT_BATCH_INVALID: 422,
+  DEMAND_ATTACHMENT_INVALID: 422,
+  DEMAND_ATTACHMENT_NOT_PASSED: 422,
+  DEMAND_PROVENANCE_INVALID: 422,
+  DEMAND_IDEMPOTENCY_REQUIRED: 400,
+  DEMAND_IDEMPOTENCY_CONFLICT: 409,
+};
+
+export class DemandError extends Error {
+  readonly status: number;
+
+  constructor(
+    public readonly code: DemandErrorCode,
+    message: string,
+    public readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "DemandError";
+    this.status = DEMAND_STATUS_BY_CODE[code];
+  }
+}
+
+export function isDemandError(error: unknown): error is DemandError {
+  return error instanceof DemandError;
+}
+
 export function isPrismaUniqueConflict(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }

@@ -68,7 +68,10 @@ export async function seedAuthFixtures() {
     },
     select: { id: true },
   })).map(({ id }) => id);
+  await prisma.demand.updateMany({ where: { id: { in: e2eDemandIds } }, data: { status: "RETURNED" } });
   await prisma.attachmentLink.deleteMany({ where: { entityType: "DEMAND", entityId: { in: e2eDemandIds } } });
+  await prisma.demandCommandIdempotency.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandReview.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandContactSnapshot.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandProvenance.deleteMany({ where: { OR: [{ demandId: { in: e2eDemandIds } }, { demandLeadId: { in: e2eLeadIds } }] } });
   await prisma.demandLead.updateMany({ where: { id: { in: e2eLeadIds } }, data: { mergedIntoLeadId: null, convertedDemandId: null } });

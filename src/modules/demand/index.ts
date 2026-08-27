@@ -1,3 +1,4 @@
 export { DemandLeadService } from "./demand-lead-service";
-export { DemandLeadError, isDemandLeadError } from "./errors";
+export { FormalDemandService, isDeterministicDuplicateTitle } from "./formal-demand-service";
+export { DemandLeadError, isDemandLeadError, DemandError, isDemandError } from "./errors";
 export * from "./schemas";
