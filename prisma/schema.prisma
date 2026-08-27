@@ -142,6 +142,55 @@ enum EnterpriseVersionChangeType {
   COORDINATE
 }
 
+enum DemandLeadSourceType {
+  ENTERPRISE_PUBLIC
+  MEMBER_VISIT
+  OTHER
+}
+
+enum DemandLeadStatus {
+  PENDING_TOWNSHIP_VERIFY
+  PENDING_ENTERPRISE_LINK
+  NEED_MORE_INFO
+  MERGED
+  CLOSED
+  CONVERTED
+}
+
+enum DemandLeadSupplementKind {
+  INFO_ADDED
+  MORE_INFO_REQUESTED
+  CONVERSION_SNAPSHOT
+}
+
+enum DemandType {
+  TECHNICAL
+  TALENT
+  PROJECT
+  OTHER
+}
+
+enum DemandUrgency {
+  NORMAL
+  URGENT
+}
+
+enum DemandStatus {
+  DRAFT
+  PENDING_REVIEW
+  RETURNED
+  PENDING_CLAIM
+  IN_PROGRESS
+  PENDING_CLOSE_REVIEW
+  COMPLETED
+  CANCELED
+  MERGED
+}
+
+enum DemandProvenanceSourceType {
+  DEMAND_LEAD
+}
+
 model Person {
   id                            String                    @id @default(uuid()) @db.Char(36)
   name                          String                    @db.VarChar(80)
@@ -169,6 +218,10 @@ model Person {
   submittedEnterpriseRequests   EnterpriseChangeRequest[] @relation("EnterpriseRequestSubmitter")
   reviewedEnterpriseRequests    EnterpriseChangeRequest[] @relation("EnterpriseRequestReviewer")
   enterpriseVersions            EnterpriseVersion[]
+  sourcedDemandLeads            DemandLead[]              @relation("DemandLeadSourcePerson")
+  createdDemandLeads            DemandLead[]              @relation("DemandLeadCreator")
+  demandLeadSupplements         DemandLeadSupplement[]
+  createdDemands                Demand[]                  @relation("DemandCreator")
 
   @@index([personStatus])
   @@map("persons")
@@ -288,6 +341,9 @@ model AdministrativeArea {
   departmentRelations        DepartmentTownshipRelation[]
   enterprises                Enterprise[]
   proposedEnterpriseRequests EnterpriseChangeRequest[]
+  publicAttachments          Attachment[]                 @relation("PublicAttachmentArea")
+  demandLeads                DemandLead[]
+  demands                    Demand[]
 
   @@index([parentId])
   @@index([type, status, sortOrder])
@@ -390,6 +446,8 @@ model Batch {
   updatedAt              DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
   memberships            BatchMembership[]
   groupLeaderAssignments GroupLeaderAssignment[]
+  createdDemands         Demand[]                @relation("DemandCreationBatch")
+  followedDemands        Demand[]                @relation("DemandFollowBatch")
 
   @@index([status, isCurrent])
   @@index([year])
@@ -538,36 +596,40 @@ model JobTask {
 }
 
 model Attachment {
-  id                 String                    @id @default(uuid()) @db.Char(36)
-  originalFilename   String                    @map("original_filename") @db.VarChar(255)
-  extension          String                    @db.VarChar(16)
-  declaredMimeType   String                    @map("declared_mime_type") @db.VarChar(191)
-  detectedMimeType   String?                   @map("detected_mime_type") @db.VarChar(191)
-  detectedFileType   String?                   @map("detected_file_type") @db.VarChar(32)
-  expectedSizeBytes  BigInt                    @map("expected_size_bytes") @db.UnsignedBigInt
-  actualSizeBytes    BigInt?                   @map("actual_size_bytes") @db.UnsignedBigInt
-  sha256             String?                   @db.Char(64)
-  storageProvider    AttachmentStorageProvider @default(TENCENT_COS) @map("storage_provider")
-  bucket             String                    @db.VarChar(255)
-  region             String                    @db.VarChar(64)
-  stagingObjectKey   String?                   @map("staging_object_key") @db.VarChar(1024)
-  objectKey          String?                   @map("object_key") @db.VarChar(1024)
-  uploadStatus       AttachmentUploadStatus    @default(PENDING_UPLOAD) @map("upload_status")
-  scanStatus         AttachmentScanStatus      @default(PENDING) @map("scan_status")
-  scanReason         String?                   @map("scan_reason") @db.VarChar(255)
-  isTemporary        Boolean                   @default(true) @map("is_temporary")
-  permissionLevel    AttachmentPermissionLevel @default(PARENT_AUTHORIZED) @map("permission_level")
-  uploadedByPersonId String                    @map("uploaded_by_person_id") @db.Char(36)
-  uploadExpiresAt    DateTime?                 @map("upload_expires_at") @db.DateTime(3)
-  createdAt          DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt          DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
-  uploadedByPerson   Person                    @relation("AttachmentUploader", fields: [uploadedByPersonId], references: [id], onDelete: Restrict)
-  links              AttachmentLink[]
-  accessLogs         AttachmentAccessLog[]
+  id                    String                    @id @default(uuid()) @db.Char(36)
+  originalFilename      String                    @map("original_filename") @db.VarChar(255)
+  extension             String                    @db.VarChar(16)
+  declaredMimeType      String                    @map("declared_mime_type") @db.VarChar(191)
+  detectedMimeType      String?                   @map("detected_mime_type") @db.VarChar(191)
+  detectedFileType      String?                   @map("detected_file_type") @db.VarChar(32)
+  expectedSizeBytes     BigInt                    @map("expected_size_bytes") @db.UnsignedBigInt
+  actualSizeBytes       BigInt?                   @map("actual_size_bytes") @db.UnsignedBigInt
+  sha256                String?                   @db.Char(64)
+  storageProvider       AttachmentStorageProvider @default(TENCENT_COS) @map("storage_provider")
+  bucket                String                    @db.VarChar(255)
+  region                String                    @db.VarChar(64)
+  stagingObjectKey      String?                   @map("staging_object_key") @db.VarChar(1024)
+  objectKey             String?                   @map("object_key") @db.VarChar(1024)
+  uploadStatus          AttachmentUploadStatus    @default(PENDING_UPLOAD) @map("upload_status")
+  scanStatus            AttachmentScanStatus      @default(PENDING) @map("scan_status")
+  scanReason            String?                   @map("scan_reason") @db.VarChar(255)
+  isTemporary           Boolean                   @default(true) @map("is_temporary")
+  permissionLevel       AttachmentPermissionLevel @default(PARENT_AUTHORIZED) @map("permission_level")
+  uploadedByPersonId    String?                   @map("uploaded_by_person_id") @db.Char(36)
+  publicUploadTokenHash String?                   @unique @map("public_upload_token_hash") @db.Char(64)
+  publicAreaId          String?                   @map("public_area_id") @db.Char(36)
+  uploadExpiresAt       DateTime?                 @map("upload_expires_at") @db.DateTime(3)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  uploadedByPerson      Person?                   @relation("AttachmentUploader", fields: [uploadedByPersonId], references: [id], onDelete: Restrict)
+  publicArea            AdministrativeArea?       @relation("PublicAttachmentArea", fields: [publicAreaId], references: [id], onDelete: Restrict)
+  links                 AttachmentLink[]
+  accessLogs            AttachmentAccessLog[]
 
   @@index([uploadedByPersonId, isTemporary, uploadStatus])
   @@index([uploadStatus, scanStatus])
   @@index([uploadExpiresAt, isTemporary])
+  @@index([publicAreaId, isTemporary, uploadStatus])
   @@index([sha256])
   @@map("attachments")
 }
@@ -578,10 +640,10 @@ model AttachmentLink {
   entityType        String     @map("entity_type") @db.VarChar(100)
   entityId          String     @map("entity_id") @db.Char(36)
   relationType      String     @map("relation_type") @db.VarChar(100)
-  createdByPersonId String     @map("created_by_person_id") @db.Char(36)
+  createdByPersonId String?    @map("created_by_person_id") @db.Char(36)
   createdAt         DateTime   @default(now()) @map("created_at") @db.DateTime(3)
   attachment        Attachment @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
-  createdByPerson   Person     @relation("AttachmentLinkCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  createdByPerson   Person?    @relation("AttachmentLinkCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
 
   @@unique([attachmentId, entityType, entityId, relationType])
   @@index([entityType, entityId])
@@ -641,6 +703,8 @@ model Enterprise {
   approvedChangeRequests EnterpriseChangeRequest[] @relation("EnterpriseRequestApproved")
   createdByPerson        Person?                   @relation("EnterpriseCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
   coordinateUpdatedBy    Person?                   @relation("EnterpriseCoordinateUpdater", fields: [coordinateUpdatedById], references: [id], onDelete: Restrict)
+  demandLeads            DemandLead[]
+  demands                Demand[]
 
   @@index([status, responsibleAreaId])
   @@index([name])
@@ -673,20 +737,22 @@ model EnterpriseTagRelation {
 }
 
 model EnterpriseContact {
-  id                String                  @id @default(uuid()) @db.Char(36)
-  enterpriseId      String                  @map("enterprise_id") @db.Char(36)
-  name              String                  @db.VarChar(80)
-  positionTitle     String?                 @map("position_title") @db.VarChar(100)
-  phone             String                  @db.VarChar(30)
-  isPrimary         Boolean                 @default(false) @map("is_primary")
-  status            EnterpriseContactStatus @default(ACTIVE)
-  createdByPersonId String                  @map("created_by_person_id") @db.Char(36)
-  inactiveReason    String?                 @map("inactive_reason") @db.VarChar(500)
-  createdAt         DateTime                @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt         DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
-  enterprise        Enterprise              @relation("EnterpriseContacts", fields: [enterpriseId], references: [id], onDelete: Restrict)
-  primaryFor        Enterprise?             @relation("EnterprisePrimaryContact")
-  createdByPerson   Person                  @relation(fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  id                    String                  @id @default(uuid()) @db.Char(36)
+  enterpriseId          String                  @map("enterprise_id") @db.Char(36)
+  name                  String                  @db.VarChar(80)
+  positionTitle         String?                 @map("position_title") @db.VarChar(100)
+  phone                 String                  @db.VarChar(30)
+  isPrimary             Boolean                 @default(false) @map("is_primary")
+  status                EnterpriseContactStatus @default(ACTIVE)
+  createdByPersonId     String                  @map("created_by_person_id") @db.Char(36)
+  inactiveReason        String?                 @map("inactive_reason") @db.VarChar(500)
+  createdAt             DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
+  enterprise            Enterprise              @relation("EnterpriseContacts", fields: [enterpriseId], references: [id], onDelete: Restrict)
+  primaryFor            Enterprise?             @relation("EnterprisePrimaryContact")
+  createdByPerson       Person                  @relation(fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  demandLeadSupplements DemandLeadSupplement[]
+  selectedForDemands    Demand[]
 
   @@index([enterpriseId, status])
   @@index([phone])
@@ -736,4 +802,143 @@ model EnterpriseVersion {
   @@unique([enterpriseId, versionNo])
   @@index([changedByPersonId, createdAt])
   @@map("enterprise_versions")
+}
+
+model DemandLead {
+  id                       String                        @id @default(uuid()) @db.Char(36)
+  businessNo               String                        @unique @map("business_no") @db.VarChar(32)
+  sourceType               DemandLeadSourceType          @map("source_type")
+  responsibleAreaId        String                        @map("responsible_area_id") @db.Char(36)
+  enterpriseId             String?                       @map("enterprise_id") @db.Char(36)
+  rawEnterpriseName        String?                       @map("raw_enterprise_name") @db.VarChar(200)
+  rawContactName           String?                       @map("raw_contact_name") @db.VarChar(80)
+  rawContactPhone          String?                       @map("raw_contact_phone") @db.VarChar(30)
+  rawTitle                 String                        @map("raw_title") @db.VarChar(200)
+  rawContent               String                        @map("raw_content") @db.Text
+  sourcePersonId           String?                       @map("source_person_id") @db.Char(36)
+  sourceChannel            String?                       @map("source_channel") @db.VarChar(100)
+  sourceAt                 DateTime                      @map("source_at") @db.DateTime(3)
+  tripId                   String?                       @map("trip_id") @db.Char(36)
+  visitId                  String?                       @map("visit_id") @db.Char(36)
+  status                   DemandLeadStatus
+  convertedDemandId        String?                       @map("converted_demand_id") @db.Char(36)
+  mergedIntoLeadId         String?                       @map("merged_into_lead_id") @db.Char(36)
+  closeReason              String?                       @map("close_reason") @db.VarChar(500)
+  closedFromStatus         DemandLeadStatus?             @map("closed_from_status")
+  createdByPersonId        String?                       @map("created_by_person_id") @db.Char(36)
+  publicDuplicateWindowKey String?                       @unique @map("public_duplicate_window_key") @db.Char(64)
+  createdAt                DateTime                      @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                DateTime                      @updatedAt @map("updated_at") @db.DateTime(3)
+  responsibleArea          AdministrativeArea            @relation(fields: [responsibleAreaId], references: [id], onDelete: Restrict)
+  enterprise               Enterprise?                   @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  sourcePerson             Person?                       @relation("DemandLeadSourcePerson", fields: [sourcePersonId], references: [id], onDelete: Restrict)
+  createdByPerson          Person?                       @relation("DemandLeadCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  convertedDemand          Demand?                       @relation("ConvertedDemand", fields: [convertedDemandId], references: [id], onDelete: Restrict)
+  mergedIntoLead           DemandLead?                   @relation("DemandLeadMerge", fields: [mergedIntoLeadId], references: [id], onDelete: Restrict)
+  mergedSources            DemandLead[]                  @relation("DemandLeadMerge")
+  supplements              DemandLeadSupplement[]
+  provenances              DemandProvenance[]
+  publicIdempotency        DemandLeadPublicIdempotency[]
+
+  @@index([responsibleAreaId, status, createdAt])
+  @@index([enterpriseId, status])
+  @@index([sourcePersonId, sourceAt])
+  @@index([mergedIntoLeadId])
+  @@index([convertedDemandId])
+  @@map("demand_leads")
+}
+
+model DemandLeadSupplement {
+  id                  String                   @id @default(uuid()) @db.Char(36)
+  demandLeadId        String                   @map("demand_lead_id") @db.Char(36)
+  kind                DemandLeadSupplementKind
+  note                String?                  @db.VarChar(2000)
+  verifiedTitle       String?                  @map("verified_title") @db.VarChar(200)
+  verifiedDescription String?                  @map("verified_description") @db.Text
+  demandType          DemandType?              @map("demand_type")
+  urgency             DemandUrgency?
+  selectedContactId   String?                  @map("selected_contact_id") @db.Char(36)
+  createdByPersonId   String                   @map("created_by_person_id") @db.Char(36)
+  createdAt           DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  demandLead          DemandLead               @relation(fields: [demandLeadId], references: [id], onDelete: Restrict)
+  selectedContact     EnterpriseContact?       @relation(fields: [selectedContactId], references: [id], onDelete: Restrict)
+  createdByPerson     Person                   @relation(fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([demandLeadId, createdAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("demand_lead_supplements")
+}
+
+model DemandLeadPublicIdempotency {
+  id                 String     @id @default(uuid()) @db.Char(36)
+  idempotencyKeyHash String     @unique @map("idempotency_key_hash") @db.Char(64)
+  payloadHash        String     @map("payload_hash") @db.Char(64)
+  demandLeadId       String     @map("demand_lead_id") @db.Char(36)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  demandLead         DemandLead @relation(fields: [demandLeadId], references: [id], onDelete: Restrict)
+
+  @@index([demandLeadId, createdAt])
+  @@map("demand_lead_public_idempotency")
+}
+
+model Demand {
+  id                   String                 @id @default(uuid()) @db.Char(36)
+  businessNo           String                 @unique @map("business_no") @db.VarChar(32)
+  enterpriseId         String                 @map("enterprise_id") @db.Char(36)
+  responsibleAreaId    String                 @map("responsible_area_id") @db.Char(36)
+  selectedContactId    String                 @map("selected_contact_id") @db.Char(36)
+  title                String                 @db.VarChar(200)
+  originalDescription  String                 @map("original_description") @db.Text
+  demandType           DemandType             @map("demand_type")
+  urgency              DemandUrgency          @default(NORMAL)
+  status               DemandStatus           @default(DRAFT)
+  creationBatchId      String                 @map("creation_batch_id") @db.Char(36)
+  currentFollowBatchId String                 @map("current_follow_batch_id") @db.Char(36)
+  isCrossBatch         Boolean                @default(false) @map("is_cross_batch")
+  firstPublishedAt     DateTime?              @map("first_published_at") @db.DateTime(3)
+  internalNote         String?                @map("internal_note") @db.VarChar(2000)
+  createdByPersonId    String                 @map("created_by_person_id") @db.Char(36)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime               @updatedAt @map("updated_at") @db.DateTime(3)
+  enterprise           Enterprise             @relation(fields: [enterpriseId], references: [id], onDelete: Restrict)
+  responsibleArea      AdministrativeArea     @relation(fields: [responsibleAreaId], references: [id], onDelete: Restrict)
+  selectedContact      EnterpriseContact      @relation(fields: [selectedContactId], references: [id], onDelete: Restrict)
+  creationBatch        Batch                  @relation("DemandCreationBatch", fields: [creationBatchId], references: [id], onDelete: Restrict)
+  currentFollowBatch   Batch                  @relation("DemandFollowBatch", fields: [currentFollowBatchId], references: [id], onDelete: Restrict)
+  createdByPerson      Person                 @relation("DemandCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  convertedLeads       DemandLead[]           @relation("ConvertedDemand")
+  provenances          DemandProvenance[]
+  contactSnapshot      DemandContactSnapshot?
+
+  @@index([responsibleAreaId, status, createdAt])
+  @@index([enterpriseId, status])
+  @@index([creationBatchId, status])
+  @@map("demands")
+}
+
+model DemandProvenance {
+  id             String                     @id @default(uuid()) @db.Char(36)
+  demandId       String                     @map("demand_id") @db.Char(36)
+  sourceType     DemandProvenanceSourceType @map("source_type")
+  demandLeadId   String?                    @unique @map("demand_lead_id") @db.Char(36)
+  sourceSnapshot Json                       @map("source_snapshot")
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
+  demand         Demand                     @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  demandLead     DemandLead?                @relation(fields: [demandLeadId], references: [id], onDelete: Restrict)
+
+  @@index([demandId, createdAt])
+  @@map("demand_provenances")
+}
+
+model DemandContactSnapshot {
+  id              String   @id @default(uuid()) @db.Char(36)
+  demandId        String   @unique @map("demand_id") @db.Char(36)
+  enterpriseName  String   @map("enterprise_name") @db.VarChar(200)
+  contactName     String   @map("contact_name") @db.VarChar(80)
+  contactPosition String?  @map("contact_position") @db.VarChar(100)
+  contactPhone    String   @map("contact_phone") @db.VarChar(30)
+  snapshotAt      DateTime @default(now()) @map("snapshot_at") @db.DateTime(3)
+  demand          Demand   @relation(fields: [demandId], references: [id], onDelete: Restrict)
+
+  @@map("demand_contact_snapshots")
 }

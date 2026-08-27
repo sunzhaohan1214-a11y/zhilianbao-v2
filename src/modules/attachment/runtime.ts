@@ -9,6 +9,7 @@ import { FakeCleanScanner, UnavailableFileScanAdapter } from "./scan/file-scan-a
 import { CosStorageAdapter } from "./storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "./storage/in-memory-storage-adapter";
 import type { StorageAdapter } from "./storage/storage-adapter";
+import { registerDemandAttachmentAuthorizers } from "@/modules/demand/attachment-authorization";
 
 type AttachmentRuntime = {
   storage: StorageAdapter;
@@ -42,6 +43,7 @@ function createRuntime(): AttachmentRuntime {
       });
   const repository = new AttachmentRepository();
   const parentAuthorizers = new AttachmentParentAuthorizerRegistry();
+  registerDemandAttachmentAuthorizers(parentAuthorizers);
   const scanner = isTest ? new FakeCleanScanner() : new UnavailableFileScanAdapter();
   return {
     storage,

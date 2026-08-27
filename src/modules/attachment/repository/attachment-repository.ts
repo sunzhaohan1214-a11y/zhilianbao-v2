@@ -19,7 +19,9 @@ export class AttachmentRepository {
     bucket: string;
     region: string;
     stagingObjectKey: string;
-    uploadedByPersonId: string;
+    uploadedByPersonId?: string;
+    publicUploadTokenHash?: string;
+    publicAreaId?: string;
     uploadExpiresAt: Date;
     permissionLevel: AttachmentPermissionLevel;
   }) {
@@ -32,7 +34,7 @@ export class AttachmentRepository {
 
   async markUploaded(input: {
     id: string;
-    actorPersonId: string;
+    actorPersonId?: string;
     finalObjectKey: string;
     actualSizeBytes: bigint;
     requestId?: string;
@@ -181,6 +183,34 @@ export class AttachmentRepository {
     });
   }
 
+  async abortExpiredTemporary(id: string): Promise<AttachmentWithLinks | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM attachments WHERE id = ${id} FOR UPDATE
+      `;
+      if (rows.length !== 1) return null;
+      const attachment = await tx.attachment.findUnique({ where: { id }, include: { links: true } });
+      if (!attachment || !attachment.isTemporary || attachment.links.length > 0) return attachment;
+      if (attachment.uploadStatus !== "ABORTED") {
+        await tx.attachment.update({
+          where: { id },
+          data: { uploadStatus: "ABORTED", scanStatus: "FAILED", scanReason: "EXPIRED_TEMPORARY_ATTACHMENT" },
+        });
+        await tx.stateTransitionHistory.create({
+          data: {
+            entityType: "ATTACHMENT",
+            entityId: id,
+            fromState: attachment.uploadStatus,
+            toState: "ABORTED",
+            actionCode: "ATTACHMENT_EXPIRED_CLEANUP",
+            requestId: "attachment-cleanup",
+          },
+        });
+      }
+      return tx.attachment.findUnique({ where: { id }, include: { links: true } });
+    });
+  }
+
   async linkAttachment(input: {
     attachmentId: string;
     entityType: string;
@@ -220,10 +250,7 @@ export class AttachmentRepository {
       where: {
         isTemporary: true,
         uploadExpiresAt: { lt: now },
-        OR: [
-          { uploadStatus: { in: ["PENDING_UPLOAD", "FAILED"] } },
-          { uploadStatus: "UPLOADED", scanStatus: { in: ["REJECTED", "FAILED"] } },
-        ],
+        uploadStatus: { in: ["PENDING_UPLOAD", "UPLOADED", "FAILED"] },
         links: { none: {} },
       },
       orderBy: { uploadExpiresAt: "asc" },

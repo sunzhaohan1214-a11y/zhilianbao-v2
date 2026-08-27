@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { AttachmentAccessAction, AttachmentPermissionLevel } from "@/generated/prisma/client";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { authorizeActor } from "@/modules/permissions/authorization";
@@ -73,9 +73,57 @@ export class AttachmentService {
     }
   }
 
+  async createPublicUploadIntent(input: {
+    filename: string;
+    declaredMimeType: string;
+    expectedSizeBytes: number;
+    responsibleAreaId: string;
+  }) {
+    const file = validateIntentFile(input);
+    const attachmentId = randomUUID();
+    const uploadToken = randomBytes(32).toString("base64url");
+    const publicUploadTokenHash = createHash("sha256").update(uploadToken).digest("hex");
+    const stagingObjectKey = createStagingObjectKey(attachmentId);
+    const uploadExpiresAt = new Date(Date.now() + this.config.uploadTtlSeconds * 1000);
+    await this.repository.createPending({
+      id: attachmentId,
+      originalFilename: file.originalFilename,
+      extension: file.extension,
+      declaredMimeType: file.declaredMimeType,
+      expectedSizeBytes: BigInt(file.expectedSizeBytes),
+      bucket: this.storage.bucket,
+      region: this.storage.region,
+      stagingObjectKey,
+      publicUploadTokenHash,
+      publicAreaId: input.responsibleAreaId,
+      uploadExpiresAt,
+      permissionLevel: "PARENT_AUTHORIZED",
+    });
+    try {
+      const upload = await this.storage.createUploadAuthorization({
+        objectKey: stagingObjectKey,
+        expiresInSeconds: this.config.uploadTtlSeconds,
+      });
+      return {
+        attachmentId,
+        uploadToken,
+        upload,
+        bucket: this.storage.bucket,
+        region: this.storage.region,
+        stagingObjectKey,
+        expiresAt: uploadExpiresAt.toISOString(),
+        maxSize: MAX_ATTACHMENT_SIZE_BYTES,
+      };
+    } catch (error) {
+      await this.repository.markUploadFailed(attachmentId, "UPLOAD_AUTHORIZATION_FAILED");
+      throw error;
+    }
+  }
+
   async complete(input: { actor: PermissionActor; attachmentId: string; context?: AuthRequestContext }) {
     await authorizeActor({ actor: input.actor, action: "attachment.temporary_self_access" });
     const attachment = await this.requireAttachment(input.attachmentId);
+    if (!attachment.uploadedByPersonId) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开临时附件不能通过内部接口操作");
     await authorizeActor({
       actor: input.actor,
       action: "attachment.temporary_self_access",
@@ -135,6 +183,61 @@ export class AttachmentService {
     return attachmentSummary(updated);
   }
 
+  async completePublic(input: { attachmentId: string; uploadToken: string; context?: AuthRequestContext }) {
+    const attachment = await this.requireAttachment(input.attachmentId);
+    const actualHash = createHash("sha256").update(input.uploadToken).digest();
+    const expectedHash = attachment.publicUploadTokenHash
+      ? Buffer.from(attachment.publicUploadTokenHash, "hex")
+      : Buffer.alloc(0);
+    if (
+      attachment.uploadedByPersonId !== null
+      || expectedHash.length !== actualHash.length
+      || !timingSafeEqual(expectedHash, actualHash)
+    ) {
+      throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开附件凭证无效");
+    }
+    if (attachment.uploadStatus === "UPLOADED") return attachmentSummary(attachment);
+    if (attachment.uploadStatus !== "PENDING_UPLOAD" || !attachment.stagingObjectKey) {
+      throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "附件当前状态不能确认上传");
+    }
+    const finalObjectKey = finalObjectKeyFromStaging(attachment.id, attachment.createdAt, attachment.stagingObjectKey);
+    const [stagingHead, finalHead] = await Promise.all([
+      this.storage.headObject(attachment.stagingObjectKey),
+      this.storage.headObject(finalObjectKey),
+    ]);
+    const actualHead = finalHead.exists ? finalHead : stagingHead;
+    if (!actualHead.exists) throw new AttachmentError("ATTACHMENT_VALIDATION_FAILED", "尚未找到已上传的文件");
+    if (actualHead.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES || actualHead.sizeBytes !== Number(attachment.expectedSizeBytes)) {
+      await this.failInvalidUpload({
+        attachmentId: attachment.id,
+        stagingObjectKey: attachment.stagingObjectKey,
+        finalObjectKey,
+        stagingExists: stagingHead.exists,
+        finalExists: finalHead.exists,
+        reason: actualHead.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES ? "ACTUAL_SIZE_EXCEEDS_LIMIT" : "ACTUAL_SIZE_MISMATCH",
+      });
+      throw new AttachmentError(
+        actualHead.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES ? "ATTACHMENT_TOO_LARGE" : "ATTACHMENT_VALIDATION_FAILED",
+        actualHead.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES ? "单个附件不能超过 50MB" : "文件实际大小与上传申请不一致",
+      );
+    }
+    const promoted = await this.storage.promoteObject(attachment.stagingObjectKey, finalObjectKey);
+    if (!promoted.exists || promoted.sizeBytes !== actualHead.sizeBytes) {
+      throw new AttachmentError("ATTACHMENT_STORAGE_UNAVAILABLE", "附件固化校验失败");
+    }
+    const updated = await this.repository.markUploaded({
+      id: attachment.id,
+      finalObjectKey,
+      actualSizeBytes: BigInt(promoted.sizeBytes),
+      requestId: input.context?.requestId,
+    });
+    if (updated.uploadStatus !== "UPLOADED") {
+      await this.storage.deleteObject(finalObjectKey);
+      throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "附件状态已变化，不能确认上传");
+    }
+    return attachmentSummary(updated);
+  }
+
   async access(input: {
     actor: PermissionActor;
     attachmentId: string;
@@ -144,6 +247,7 @@ export class AttachmentService {
     await authorizeActor({ actor: input.actor, action: "attachment.temporary_self_access" });
     const attachment = await this.requireAttachment(input.attachmentId);
     if (attachment.isTemporary) {
+      if (!attachment.uploadedByPersonId) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开临时附件不能通过内部接口访问");
       await authorizeActor({
         actor: input.actor,
         action: "attachment.temporary_self_access",
@@ -179,6 +283,7 @@ export class AttachmentService {
 
   async abort(input: { actor: PermissionActor; attachmentId: string; context?: AuthRequestContext }) {
     const attachment = await this.requireAttachment(input.attachmentId);
+    if (!attachment.uploadedByPersonId) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开临时附件不能通过内部接口操作");
     await authorizeActor({
       actor: input.actor,
       action: "attachment.abort_self",
