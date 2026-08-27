@@ -434,4 +434,23 @@ V2 TEST 首次连接真实 COS 前必须检查：bucket 访问控制为 private�
 
 扫描器未配置、超时或失败时必须 fail closed，`scanStatus` 不得自动变为 `PASSED`。M0-005 只创建 `ATTACHMENT_SCAN` JobTask 并提供单任务扫描与过期清理服务；通用 Worker loop、claim scheduler 与 cron 从 M0-006 开始。
 
+## 24. M0 Worker / Outbox 运行
+
+Web Service 与 Worker Service 使用同一镜像、不同启动命令：
+
+```bash
+npm run start:web
+npm run start:worker
+```
+
+Worker 配置见 `.env.example`。必须保持 `WORKER_HEARTBEAT_SECONDS` 明显小于 `WORKER_JOB_LOCK_TIMEOUT_SECONDS`。滚动发布发送 `SIGTERM` 后，Worker 停止领取新任务并在 graceful timeout 内等待当前任务；超时退出的任务由 stale lease recovery 接管。
+
+运维单轮检查使用：
+
+```bash
+WORKER_RUN_ONCE=true npm run start:worker
+```
+
+单轮模式执行 stale recovery、有限批次 Outbox consume 和当前可领取 Job 后退出。Outbox handler 只允许短事务内 DB side effect 或幂等转 Job，外部网络调用必须交给 Job handler。监控至少区分 WAITING backlog、stale RUNNING、FAILED Job、未发布 Outbox 和 `failed_at` 毒消息。
+
 **OPERATIONS.md v1.0 END**
