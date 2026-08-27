@@ -6,6 +6,8 @@ import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { MapError } from "./errors";
 import { parseAndValidateGeoJson } from "./geojson";
+import { assertActiveAreaForBoundaryActivation, assertActiveDispatchOrganization } from "./governance-rules";
+import { matchesMemberMapFilters, selectMemberMapMembership } from "./member-map-rules";
 import { boundaryActivateSchema, boundaryCreateSchema, coordinateSchema, memberMapQuerySchema } from "./schemas";
 import { getMapRuntimeConfig } from "./runtime-config";
 import { isEnterpriseResponsibleAreaType, validateCoordinatePair } from "./validators";
@@ -52,8 +54,8 @@ export class MapService {
     return this.prisma.$transaction(async (tx) => {
       const target = await tx.mapBoundaryVersion.findUnique({ where: { id: input.boundaryId }, select: boundarySelect });
       if (!target) throw new MapError("MAP_BOUNDARY_NOT_FOUND", "边界版本不存在", 404);
-      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM administrative_areas WHERE id = ${target.areaId} FOR UPDATE`;
-      if (locked.length !== 1) throw new MapError("MAP_AREA_NOT_FOUND", "行政区域不存在", 404);
+      const locked = await tx.$queryRaw<Array<{ id: string; status: string }>>`SELECT id, status FROM administrative_areas WHERE id = ${target.areaId} FOR UPDATE`;
+      assertActiveAreaForBoundaryActivation(locked[0]);
       const current = await tx.mapBoundaryVersion.findMany({ where: { areaId: target.areaId, isCurrent: true }, select: { id: true, versionNo: true } });
       await tx.mapBoundaryVersion.updateMany({ where: { areaId: target.areaId, isCurrent: true }, data: { isCurrent: false } });
       await tx.mapBoundaryVersion.update({ where: { id: target.id }, data: { isCurrent: true } });
@@ -90,7 +92,10 @@ export class MapService {
   async memberMap(input: Input & { query: unknown }) {
     await authorizeActor({ actor: input.actor, action: "member.view", resource: { resourceType: "member-map", requiredScope: "GLOBAL_PUBLISHED" } });
     const query = memberMapQuerySchema.parse(input.query);
-    const batches = await this.prisma.batch.findMany({ where: { isCurrent: true, status: "ACTIVE" }, select: { id: true } });
+    const [batches, dispatchOrganizations] = await Promise.all([
+      this.prisma.batch.findMany({ where: { isCurrent: true, status: "ACTIVE" }, select: { id: true } }),
+      this.prisma.organization.findMany({ where: { status: "ACTIVE", type: "DISPATCH_UNIT" }, select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }] }),
+    ]);
     if (batches.length > 1) throw new MapError("MAP_MEMBER_BATCH_CONFLICT", "当前活动批次配置不唯一", 409);
     const currentBatchId = batches[0]?.id ?? null; const now = new Date();
     const people = await this.prisma.person.findMany({ where: { personStatus: "ACTIVE", OR: [{ batchMemberships: { some: {} } }, { roleAssignments: { some: { roleCode: { in: ["MEMBER_CURRENT", "MEMBER_ALUMNI_PLATFORM"] } } } }] }, include: { account: { select: { id: true } }, roleAssignments: true, memberCapabilityProfile: { select: { professionalDirection: true } }, batchMemberships: { include: { dispatchOrganization: { select: { id: true, name: true, type: true, address: true, latitude: true, longitude: true } }, batch: { select: { id: true, name: true, isCurrent: true } } }, orderBy: { startDate: "desc" } } }, orderBy: [{ name: "asc" }, { id: "asc" }] });
@@ -99,26 +104,27 @@ export class MapService {
     for (const person of people) {
       const kind = classifyMember({ memberships: person.batchMemberships, roles: person.roleAssignments, currentBatchId, hasAccount: person.account !== null, now });
       if (kind !== query.kind) continue;
-      const membership = kind === "current" ? person.batchMemberships.find((item) => item.batchId === currentBatchId && item.status === "ACTIVE" && item.startDate <= now && (!item.endDate || item.endDate > now)) : person.batchMemberships.find((item) => item.batchId !== currentBatchId || item.status !== "ACTIVE" || !!item.endDate && item.endDate <= now);
-      const organization = membership?.dispatchOrganization;
-      if (!organization || organization.type !== "DISPATCH_UNIT") { unlocatedCount += 1; continue; }
-      if (query.dispatchOrganizationId && organization.id !== query.dispatchOrganizationId) continue;
-      if (query.keyword && !`${person.name} ${organization.name} ${person.memberCapabilityProfile?.professionalDirection ?? ""}`.toLowerCase().includes(query.keyword.toLowerCase())) continue;
+      const membership = selectMemberMapMembership(kind, person.batchMemberships, currentBatchId, now);
+      const candidateOrganization = membership?.dispatchOrganization ?? null;
+      const organization = candidateOrganization?.type === "DISPATCH_UNIT" ? candidateOrganization : null;
+      const professionalDirection = person.memberCapabilityProfile?.professionalDirection ?? null;
+      if (!matchesMemberMapFilters({ personName: person.name, organization, professionalDirection, keyword: query.keyword, dispatchOrganizationId: query.dispatchOrganizationId })) continue;
+      if (!organization) { unlocatedCount += 1; continue; }
       const hasValidCoordinate = organization.latitude !== null && organization.longitude !== null && validateCoordinatePair(Number(organization.latitude), Number(organization.longitude));
       if (!hasValidCoordinate) unlocatedCount += 1;
       const group = groups.get(organization.id) ?? { organization: { id: organization.id, name: organization.name, address: organization.address, latitude: organization.latitude?.toString() ?? null, longitude: organization.longitude?.toString() ?? null, hasValidCoordinate }, members: [] };
-      group.members.push({ id: person.id, name: person.name, kind, professionalDirection: person.memberCapabilityProfile?.professionalDirection ?? null }); groups.set(organization.id, group);
+      group.members.push({ id: person.id, name: person.name, kind, professionalDirection }); groups.set(organization.id, group);
     }
-    return { kind: query.kind, points: [...groups.values()].map((group) => ({ ...group, count: group.members.length })), unlocatedCount, runtime: getMapRuntimeConfig() };
+    return { kind: query.kind, dispatchOrganizations, points: [...groups.values()].map((group) => ({ ...group, count: group.members.length })), unlocatedCount, runtime: getMapRuntimeConfig() };
   }
 
   async updateOrganizationCoordinate(input: Input & { organizationId: string; coordinate: unknown }) {
     await authorizeActor({ actor: input.actor, action: "member.map.manage", resource: { resourceType: "organization-coordinate", requiredScope: "GLOBAL_OPERATIONAL" } });
     const coordinate = coordinateSchema.parse(input.coordinate);
     return this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<Array<{ id: string; type: string; latitude: Prisma.Decimal | null; longitude: Prisma.Decimal | null }>>`SELECT id, type, latitude, longitude FROM organizations WHERE id = ${input.organizationId} FOR UPDATE`;
-      const before = locked[0]; if (!before) throw new MapError("MAP_ORGANIZATION_NOT_FOUND", "派出单位不存在", 404);
-      if (before.type !== "DISPATCH_UNIT") throw new MapError("MAP_ORGANIZATION_TYPE_INVALID", "仅可治理派出单位坐标", 422);
+      const locked = await tx.$queryRaw<Array<{ id: string; type: string; status: string; latitude: Prisma.Decimal | null; longitude: Prisma.Decimal | null }>>`SELECT id, type, status, latitude, longitude FROM organizations WHERE id = ${input.organizationId} FOR UPDATE`;
+      const before = locked[0];
+      assertActiveDispatchOrganization(before);
       const updated = await tx.organization.update({ where: { id: input.organizationId }, data: { latitude: coordinate.latitude, longitude: coordinate.longitude }, select: { id: true, name: true, latitude: true, longitude: true } });
       await writeFoundationAudit(tx, { ...input, actionCode: "ORGANIZATION_COORDINATE_UPDATED", entityType: "ORGANIZATION", entityId: updated.id, reason: coordinate.reason, before: { latitude: before.latitude?.toString() ?? null, longitude: before.longitude?.toString() ?? null }, after: { latitude: updated.latitude?.toString() ?? null, longitude: updated.longitude?.toString() ?? null } });
       return { ...updated, latitude: updated.latitude?.toString() ?? null, longitude: updated.longitude?.toString() ?? null };

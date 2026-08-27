@@ -3,6 +3,11 @@ export type BoundaryShape = { id: string; geoJson: unknown };
 export type RenderMapInput = { container: HTMLElement; center?: { latitude: number; longitude: number }; points: MapPoint[]; boundaries: BoundaryShape[] };
 export interface MapRenderer { render(input: RenderMapInput): Promise<void>; destroy(): void }
 
+export function resolveMapCenter(input: Pick<RenderMapInput, "center" | "points">) {
+  const first = input.points[0];
+  return input.center ?? (first ? { latitude: first.latitude, longitude: first.longitude } : null);
+}
+
 type TMapApi = {
   LatLng: new (latitude: number, longitude: number) => unknown;
   Map: new (container: HTMLElement, options: Record<string, unknown>) => { destroy?: () => void; fitBounds?: (bounds: unknown) => void };
@@ -46,8 +51,9 @@ export class TencentMapRenderer implements MapRenderer {
   private map: { destroy?: () => void } | null = null; private layers: Array<{ setMap?: (map: null) => void }> = [];
   constructor(private readonly key: string) {}
   async render(input: RenderMapInput) {
+    const center = resolveMapCenter(input);
+    if (!center) throw new Error("Map center unavailable");
     const TMap = await loadTencentMap(this.key); this.destroy();
-    const first = input.points[0]; const center = input.center ?? (first ? { latitude: first.latitude, longitude: first.longitude } : { latitude: 33.24, longitude: 119.36 });
     this.map = new TMap.Map(input.container, { center: new TMap.LatLng(center.latitude, center.longitude), zoom: input.boundaries.length ? 10 : 5, viewMode: "2D" });
     if (input.boundaries.length) this.layers.push(new TMap.MultiPolygon({ map: this.map, styles: { boundary: { color: "rgba(22,119,255,0.14)", showBorder: true, borderColor: "#1677ff", borderWidth: 2 } }, geometries: input.boundaries.flatMap((shape) => polygonPaths(TMap, shape)) }));
     if (input.points.length) {
