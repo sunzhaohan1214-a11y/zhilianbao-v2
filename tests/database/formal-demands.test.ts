@@ -20,11 +20,14 @@ let contactId: string;
 let admin: PermissionActor;
 let admin2: PermissionActor;
 let township: PermissionActor;
+let township2: PermissionActor;
 let otherTownship: PermissionActor;
+let multiRole: PermissionActor;
 let member: PermissionActor;
 
-async function actorFixture(role: RoleCode, townshipAreaIds: string[] = []): Promise<PermissionActor> {
-  const person = await prisma.person.create({ data: { name: `M1-003 ${role} ${randomUUID()}` } });
+async function actorFixture(roleInput: RoleCode | RoleCode[], townshipAreaIds: string[] = []): Promise<PermissionActor> {
+  const roles = Array.isArray(roleInput) ? roleInput : [roleInput];
+  const person = await prisma.person.create({ data: { name: `M1-003 ${roles.join("+")} ${randomUUID()}` } });
   const account = await prisma.account.create({ data: {
     personId: person.id,
     phone: `1${Math.floor(10_000_000_00 + Math.random() * 89_999_999_99)}`,
@@ -32,7 +35,6 @@ async function actorFixture(role: RoleCode, townshipAreaIds: string[] = []): Pro
     status: "NORMAL",
     confidentialityConfirmedAt: new Date(),
   } });
-  const roles = [role];
   return {
     personId: person.id,
     accountId: account.id,
@@ -45,9 +47,9 @@ async function actorFixture(role: RoleCode, townshipAreaIds: string[] = []): Pro
     townshipAreaIds,
     departmentAreaIds: [],
     hasGlobalPublished: true,
-    hasGlobalOperational: role === "ADMIN" || role === "SUPER_ADMIN",
-    hasSystem: role === "SUPER_ADMIN",
-    currentBatchMember: role === "MEMBER_CURRENT",
+    hasGlobalOperational: roles.includes("ADMIN") || roles.includes("SUPER_ADMIN"),
+    hasSystem: roles.includes("SUPER_ADMIN"),
+    currentBatchMember: roles.includes("MEMBER_CURRENT"),
     currentBatchId,
     configurationIssues: [],
   };
@@ -69,7 +71,10 @@ function draftInput(overrides: Record<string, unknown> = {}) {
 }
 
 async function createDraft(actor: PermissionActor, overrides: Record<string, unknown> = {}) {
-  return service.create({ actor, demand: draftInput(overrides) });
+  const sourceType = actor.effectiveRoles.some((role) => role === "ADMIN" || role === "SUPER_ADMIN")
+    ? "ADMIN_DIRECT"
+    : "TOWNSHIP_DIRECT";
+  return service.create({ actor, demand: draftInput({ sourceType, ...overrides }) });
 }
 
 async function submit(demandId: string, actor = township, key = `submit-${randomUUID()}`) {
@@ -120,9 +125,10 @@ beforeAll(async () => {
   areaId = area.id;
   otherAreaId = otherArea.id;
   currentBatchId = batch.id;
-  [admin, admin2, township, otherTownship, member] = await Promise.all([
+  [admin, admin2, township, township2, otherTownship, multiRole, member] = await Promise.all([
     actorFixture("ADMIN"), actorFixture("ADMIN"), actorFixture("TOWNSHIP_STAFF", [areaId]),
-    actorFixture("TOWNSHIP_STAFF", [otherAreaId]), actorFixture("MEMBER_CURRENT"),
+    actorFixture("TOWNSHIP_STAFF", [areaId]), actorFixture("TOWNSHIP_STAFF", [otherAreaId]),
+    actorFixture(["ADMIN", "TOWNSHIP_STAFF"], [areaId]), actorFixture("MEMBER_CURRENT"),
   ]);
   const enterprise = await prisma.enterprise.create({ data: {
     name: `M1-003正式企业-${randomUUID()}`,
@@ -161,6 +167,32 @@ describe("M1-003 real MySQL formal demand workflow", () => {
     await expect(prisma.demandProvenance.update({ where: { id: townshipDraft.provenances[0].id }, data: { sourceType: "ADMIN_DIRECT" } })).rejects.toThrow();
   });
 
+  it("unions ADMIN and TOWNSHIP source paths while rejecting forged direct sources", async () => {
+    await expect(createDraft(township, { sourceType: "ADMIN_DIRECT" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    await expect(createDraft(admin, { sourceType: "TOWNSHIP_DIRECT" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    await expect(service.formOptions({ actor: township, sourceType: "ADMIN_DIRECT" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    await expect(service.formOptions({ actor: admin, sourceType: "TOWNSHIP_DIRECT" }))
+      .rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
+    expect((await service.formOptions({ actor: multiRole, sourceType: "TOWNSHIP_DIRECT" })).areas.map(({ id }) => id))
+      .toEqual([areaId]);
+    expect((await service.formOptions({ actor: multiRole, sourceType: "ADMIN_DIRECT" })).areas.map(({ id }) => id))
+      .toEqual(expect.arrayContaining([areaId, otherAreaId]));
+
+    const townshipPath = await createDraft(multiRole, { sourceType: "TOWNSHIP_DIRECT" });
+    const adminPath = await createDraft(multiRole, { sourceType: "ADMIN_DIRECT" });
+    expect(townshipPath.provenances).toEqual([expect.objectContaining({ sourceType: "TOWNSHIP_DIRECT" })]);
+    expect(adminPath.provenances).toEqual([expect.objectContaining({ sourceType: "ADMIN_DIRECT" })]);
+    await expect(service.updateDraft({ actor: multiRole, demandId: townshipPath.id, changes: { title: "多角色镇区路径编辑" } }))
+      .resolves.toMatchObject({ title: "多角色镇区路径编辑" });
+    await expect(service.updateDraft({ actor: multiRole, demandId: adminPath.id, changes: { title: "多角色管理员路径编辑" } }))
+      .resolves.toMatchObject({ title: "多角色管理员路径编辑" });
+    await expect(submit(townshipPath.id, multiRole)).resolves.toMatchObject({ status: "PENDING_REVIEW" });
+    await expect(submit(adminPath.id, multiRole)).resolves.toMatchObject({ status: "PENDING_REVIEW" });
+  });
+
   it("implements true submit idempotency and one transition under concurrent replay", async () => {
     const draft = await createDraft(township);
     const key = `same-${randomUUID()}`;
@@ -170,6 +202,27 @@ describe("M1-003 real MySQL formal demand workflow", () => {
     expect(await prisma.demandCommandIdempotency.count({ where: { demandId: draft.id } })).toBe(1);
     const other = await createDraft(township);
     await expect(submit(other.id, township, key)).rejects.toMatchObject({ code: "DEMAND_IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("returns one stable 409 and fully rolls back the losing demand for a concurrent cross-demand key", async () => {
+    const [first, second] = await Promise.all([createDraft(township), createDraft(township)]);
+    const key = `cross-demand-${randomUUID()}`;
+    const settled = await Promise.allSettled([
+      submit(first.id, township, key),
+      submit(second.id, township, key),
+    ]);
+    expect(settled.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    const rejected = settled.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(rejected?.reason).toMatchObject({ code: "DEMAND_IDEMPOTENCY_CONFLICT", status: 409 });
+    const loserId = settled[0].status === "rejected" ? first.id : second.id;
+    expect(await prisma.demand.findUniqueOrThrow({ where: { id: loserId } })).toMatchObject({ status: "DRAFT" });
+    expect(await prisma.demandCommandIdempotency.count({ where: { demandId: { in: [first.id, second.id] } } })).toBe(1);
+    expect(await prisma.stateTransitionHistory.count({ where: {
+      entityType: "DEMAND", entityId: loserId, actionCode: "DEMAND_SUBMITTED_FOR_REVIEW",
+    } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: {
+      entityType: "DEMAND", entityId: loserId, actionCode: "DEMAND_SUBMITTED_FOR_REVIEW",
+    } })).toBe(0);
   });
 
   it("serializes double review and approve-vs-return without drifting firstPublishedAt", async () => {
@@ -243,6 +296,39 @@ describe("M1-003 real MySQL formal demand workflow", () => {
     await expect(service.review({ actor: admin, demandId: draft.id, review: { decision: "APPROVE" } })).resolves.toMatchObject({ status: "PENDING_CLAIM" });
     const link = await prisma.attachmentLink.findFirstOrThrow({ where: { attachmentId: scanning.id, entityType: "DEMAND", entityId: draft.id } });
     await expect(prisma.attachmentLink.delete({ where: { id: link.id } })).rejects.toThrow();
+  });
+
+  it("lets same-township staff continue a draft and remove the prior uploader formal attachment only", async () => {
+    const removable = await attachment("PASSED", township.personId);
+    const sourceReference = await attachment("PASSED", township.personId);
+    const draft = await createDraft(township, { attachmentIds: [removable.id] });
+    await prisma.attachmentLink.create({ data: {
+      attachmentId: sourceReference.id,
+      entityType: "DEMAND",
+      entityId: draft.id,
+      relationType: "SOURCE_REFERENCE",
+      createdByPersonId: township.personId,
+    } });
+    await prisma.attachment.update({ where: { id: sourceReference.id }, data: { isTemporary: false } });
+    await submit(draft.id, township);
+    await service.review({ actor: admin, demandId: draft.id, review: { decision: "RETURN", reason: "交由同镇区同事接续" } });
+
+    await expect(service.updateDraft({
+      actor: township2,
+      demandId: draft.id,
+      changes: { attachmentIds: [] },
+    })).resolves.toMatchObject({ status: "RETURNED" });
+    expect(await prisma.attachmentLink.count({ where: {
+      attachmentId: removable.id, entityType: "DEMAND", entityId: draft.id, relationType: "FORMAL_ATTACHMENT",
+    } })).toBe(0);
+    expect(await prisma.attachment.findUniqueOrThrow({ where: { id: removable.id } })).toMatchObject({
+      uploadedByPersonId: township.personId,
+      isTemporary: true,
+    });
+    const sourceLink = await prisma.attachmentLink.findFirstOrThrow({ where: {
+      attachmentId: sourceReference.id, entityType: "DEMAND", entityId: draft.id, relationType: "SOURCE_REFERENCE",
+    } });
+    await expect(prisma.attachmentLink.delete({ where: { id: sourceLink.id } })).rejects.toThrow();
   });
 
   it("keeps deterministic duplicate candidates and no consumerless lifecycle outbox", async () => {

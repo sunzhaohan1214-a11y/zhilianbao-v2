@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 import { uploadFormalAttachments } from "./formal-attachment-upload";
+import type { DirectDemandSourceType } from "@/modules/demand";
 
 type Area = { id: string; name: string };
 type EnterpriseOption = { id: string; name: string; responsibleArea: Area };
@@ -10,7 +11,7 @@ type EnterpriseDetail = EnterpriseOption & {
   contacts: { id: string; name: string; positionTitle: string | null; phone: string; status: string }[];
 };
 
-export function FormalDemandCreateForm({ areas, admin }: { areas: Area[]; admin: boolean }) {
+export function FormalDemandCreateForm({ areas, sourceType }: { areas: Area[]; sourceType: DirectDemandSourceType }) {
   const router = useRouter();
   const searchVersion = useRef(0);
   const [options, setOptions] = useState<EnterpriseOption[]>([]);
@@ -50,6 +51,7 @@ export function FormalDemandCreateForm({ areas, admin }: { areas: Area[]; admin:
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          sourceType,
           enterpriseId: enterprise.id,
           selectedContactId: form.get("selectedContactId"),
           title: form.get("title"),
@@ -63,7 +65,7 @@ export function FormalDemandCreateForm({ areas, admin }: { areas: Area[]; admin:
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error?.message ?? "创建正式需求草稿失败");
-      router.push(`${admin ? "/admin" : ""}/demands/${payload.data.id}`);
+      router.push(`${sourceType === "ADMIN_DIRECT" ? "/admin" : ""}/demands/${payload.data.id}`);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "创建失败");

@@ -284,4 +284,8 @@ export class FormalDemandRepository {
     if (rows.length === 0) return null;
     return tx.demandCommandIdempotency.findUniqueOrThrow({ where: { id: rows[0].id } });
   }
+
+  findIdempotency(input: { actorPersonId: string; action: string; keyHash: string }) {
+    return this.prisma.demandCommandIdempotency.findFirst({ where: input });
+  }
 }

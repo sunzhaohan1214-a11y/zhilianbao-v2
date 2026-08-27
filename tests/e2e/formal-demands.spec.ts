@@ -34,8 +34,9 @@ async function post(page: Page, path: string, body: unknown, headers: Record<str
   }, { path, body, headers });
 }
 
-function demandPayload(title: string, attachmentIds: string[] = []) {
+function demandPayload(title: string, attachmentIds: string[] = [], sourceType: "TOWNSHIP_DIRECT" | "ADMIN_DIRECT" = "TOWNSHIP_DIRECT") {
   return {
+    sourceType,
     enterpriseId: enterpriseE2e.enterpriseId,
     selectedContactId: enterpriseE2e.contactId,
     title,
@@ -53,9 +54,11 @@ test.beforeEach(async () => { await seedAuthFixtures(); });
 test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve every M1-003 boundary", async ({ browser }) => {
   const prisma = getPrismaClient();
   const suffix = randomUUID().slice(0, 8);
-  const attachmentName = `formal-e2e-${suffix}.pdf`;
-  const passedAttachment = await prisma.attachment.create({ data: {
-    originalFilename: attachmentName,
+  const removableName = `formal-e2e-remove-${suffix}.pdf`;
+  const retainedName = `formal-e2e-retain-${suffix}.pdf`;
+  const sourceName = `formal-e2e-source-${suffix}.pdf`;
+  const createAttachment = (originalFilename: string) => prisma.attachment.create({ data: {
+    originalFilename,
     extension: "pdf",
     declaredMimeType: "application/pdf",
     expectedSizeBytes: BigInt(18),
@@ -63,21 +66,38 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
     bucket: "test-private-bucket",
     region: "ap-test",
     objectKey: `formal-e2e/${randomUUID()}.pdf`,
-    uploadStatus: "UPLOADED",
-    scanStatus: "PASSED",
+    uploadStatus: "UPLOADED" as const,
+    scanStatus: "PASSED" as const,
     isTemporary: true,
-    uploadedByPersonId: e2eUsers.township.personId,
+    uploadedByPersonId: e2eUsers.admin.personId,
   } });
+  const [removableAttachment, retainedAttachment, sourceAttachment] = await Promise.all([
+    createAttachment(removableName), createAttachment(retainedName), createAttachment(sourceName),
+  ]);
 
-  let authenticated = await login(browser, e2eUsers.township);
+  let authenticated = await login(browser, e2eUsers.admin);
   let page = authenticated.page;
-  const created = await post(page, "/api/v2/demands", demandPayload(`E2E 镇区正式需求 ${suffix}`, [passedAttachment.id]));
+  await page.goto("/demands/new");
+  await expect(page.getByRole("heading", { name: "新建草稿" })).toBeVisible();
+  const created = await post(page, "/api/v2/demands", demandPayload(
+    `E2E 镇区正式需求 ${suffix}`,
+    [removableAttachment.id, retainedAttachment.id],
+    "TOWNSHIP_DIRECT",
+  ));
   expect(created.status).toBe(201);
   const demandId = created.payload.data.id as string;
   const unpublished = await post(page, "/api/v2/demands", demandPayload(`E2E 发布前不可见 ${suffix}`));
   expect(unpublished.status).toBe(201);
   const unpublishedId = unpublished.payload.data.id as string;
   expect(created.payload.data.provenances).toEqual([expect.objectContaining({ sourceType: "TOWNSHIP_DIRECT" })]);
+  await prisma.attachmentLink.create({ data: {
+    attachmentId: sourceAttachment.id,
+    entityType: "DEMAND",
+    entityId: demandId,
+    relationType: "SOURCE_REFERENCE",
+    createdByPersonId: e2eUsers.admin.personId,
+  } });
+  await prisma.attachment.update({ where: { id: sourceAttachment.id }, data: { isTemporary: false } });
 
   await page.goto(`/demands/${demandId}`);
   await page.getByLabel("标题", { exact: true }).fill(`E2E 已修改核心标题 ${suffix}`);
@@ -85,6 +105,7 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await page.getByRole("button", { name: "提交审核" }).click();
   await expect(page.getByText("待审核", { exact: true })).toBeVisible();
+  expect((await post(page, `/api/v2/demands/${demandId}/update-draft`, { attachmentIds: [] })).status).toBe(409);
 
   await authenticated.context.close();
   authenticated = await login(browser, e2eUsers.admin);
@@ -126,9 +147,21 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   await page.goto(`/demands/${demandId}`);
   await expect(page.getByText("请补充量化目标和实施边界").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "编辑草稿" })).toBeVisible();
+  await page.getByRole("checkbox", { name: removableName }).uncheck();
   await page.locator('textarea[name="originalDescription"]').fill("E2E 退回后补充量化目标，但仍由原录入方修改核心字段。");
   await page.getByRole("button", { name: "保存草稿修改" }).click();
   await expect(page.getByRole("status")).toHaveText("操作已完成。");
+  expect(await prisma.attachmentLink.count({ where: {
+    attachmentId: removableAttachment.id, entityType: "DEMAND", entityId: demandId, relationType: "FORMAL_ATTACHMENT",
+  } })).toBe(0);
+  expect(await prisma.attachment.findUniqueOrThrow({ where: { id: removableAttachment.id } })).toMatchObject({
+    uploadedByPersonId: e2eUsers.admin.personId,
+    isTemporary: true,
+  });
+  expect(await prisma.attachmentLink.count({ where: {
+    attachmentId: sourceAttachment.id, entityType: "DEMAND", entityId: demandId, relationType: "SOURCE_REFERENCE",
+  } })).toBe(1);
+  expect((await post(page, "/api/v2/demands", demandPayload(`E2E 越权来源 ${suffix}`, [], "ADMIN_DIRECT"))).status).toBe(403);
   await page.getByRole("button", { name: "提交审核" }).click();
   await expect(page.getByText("待审核", { exact: true })).toBeVisible();
 
@@ -141,7 +174,9 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   await page.getByRole("button", { name: "审核通过并立即发布" }).click();
   await expect(page.getByText("待对接", { exact: true })).toBeVisible();
 
-  const adminDraft = await post(page, "/api/v2/demands", demandPayload(`E2E 管理员代录 ${suffix}`));
+  await page.goto("/admin/demands/new");
+  await expect(page.getByRole("heading", { name: "管理员代录正式需求" })).toBeVisible();
+  const adminDraft = await post(page, "/api/v2/demands", demandPayload(`E2E 管理员代录 ${suffix}`, [], "ADMIN_DIRECT"));
   expect(adminDraft.status).toBe(201);
   expect(adminDraft.payload.data.provenances).toEqual([expect.objectContaining({ sourceType: "ADMIN_DIRECT" })]);
   const adminDraftId = adminDraft.payload.data.id as string;
@@ -162,7 +197,9 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   await page.goto("/demands");
   await page.getByRole("link", { name: new RegExp(`E2E 已修改核心标题 ${suffix}`) }).click();
   await expect(page.getByText("13800003001")).toBeVisible();
-  await expect(page.getByText(attachmentName)).toBeVisible();
+  await expect(page.getByText(retainedName)).toBeVisible();
+  await expect(page.getByText(sourceName)).toBeVisible();
+  await expect(page.getByText(removableName)).toHaveCount(0);
   await expect(page.getByText(/认领|协作|进展录入|办理进度/)).toHaveCount(0);
 
   await authenticated.context.close();

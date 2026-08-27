@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Demand, DemandStatus, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
+import { PermissionError } from "@/modules/permissions/permission-errors";
 import type { PermissionActor } from "@/modules/permissions/types";
 import {
   DEMAND_ENTITY,
@@ -9,7 +10,13 @@ import {
   FORMAL_ATTACHMENT_RELATION,
 } from "./constants";
 import { writeDemandAudit, writeDemandTransition, type DemandMutationContext } from "./audit";
-import { DemandError } from "./errors";
+import {
+  canCreateFormalDemandFromSource,
+  canSubmitFormalDemandReview,
+  formalDemandDraftEditSource,
+  type DirectDemandSourceType,
+} from "./formal-demand-access";
+import { DemandError, isDemandCommandIdempotencyUniqueConflict } from "./errors";
 import { FormalDemandRepository, type FormalDemandTransaction } from "./repository/formal-demand-repository";
 import {
   createFormalDemandSchema,
@@ -93,10 +100,24 @@ export function isDeterministicDuplicateTitle(source: string, candidate: string)
 export class FormalDemandService {
   constructor(private readonly repository = new FormalDemandRepository()) {}
 
-  async formOptions(input: ServiceInput) {
+  async formOptions(input: ServiceInput & { sourceType: DirectDemandSourceType }) {
     await authorizeActor({ actor: input.actor, action: "demand.formal.create" });
+    if (input.sourceType === "ADMIN_DIRECT") {
+      if (!isAdministrator(input.actor)) {
+        throw new PermissionError("FORBIDDEN_SCOPE", "管理员代录入口仅限 ADMIN / SUPER_ADMIN");
+      }
+      await authorizeActor({
+        actor: input.actor,
+        action: "demand.formal.create",
+        resource: { resourceType: "demand", requiredScope: "GLOBAL_OPERATIONAL" },
+      });
+    } else if (!input.actor.effectiveRoles.includes("TOWNSHIP_STAFF")) {
+      throw new PermissionError("FORBIDDEN_SCOPE", "镇区录入入口仅限当前有效镇区工作人员");
+    }
     return {
-      areas: await this.repository.listAreas(input.actor.hasGlobalOperational ? undefined : input.actor.townshipAreaIds),
+      areas: await this.repository.listAreas(
+        input.sourceType === "ADMIN_DIRECT" ? undefined : input.actor.townshipAreaIds,
+      ),
     };
   }
 
@@ -182,10 +203,6 @@ export class FormalDemandService {
     const desiredSet = new Set(desiredIds);
     for (const link of currentLinks) {
       if (desiredSet.has(link.attachmentId)) continue;
-      const attachment = await tx.attachment.findUniqueOrThrow({ where: { id: link.attachmentId } });
-      if (attachment.uploadedByPersonId !== input.actorPersonId) {
-        throw new DemandError("DEMAND_ATTACHMENT_INVALID", "只能移除当前操作人上传的正式草稿附件");
-      }
       await tx.attachmentLink.delete({ where: { id: link.id } });
       const remainingLinks = await tx.attachmentLink.count({ where: { attachmentId: link.attachmentId } });
       if (remainingLinks === 0) {
@@ -232,38 +249,24 @@ export class FormalDemandService {
     }
   }
 
-  private assertTownshipScope(actor: PermissionActor, areaId: string): void {
-    if (!actor.townshipAreaIds.includes(areaId)) {
-      throw new DemandError("DEMAND_NOT_FOUND", "需求不存在或当前账号无权查看");
-    }
-  }
-
   private assertDraftEditor(
     actor: PermissionActor,
     demand: Pick<Demand, "createdByPersonId" | "responsibleAreaId">,
-    sourceTypes: readonly string[],
+    sourceTypes: Parameters<typeof formalDemandDraftEditSource>[2],
   ): void {
-    if (isAdministrator(actor)) {
-      if (!sourceTypes.includes("ADMIN_DIRECT") || demand.createdByPersonId !== actor.personId) {
-        throw new DemandError("DEMAND_NOT_FOUND", "管理员只能编辑本人代录的 ADMIN_DIRECT 草稿");
-      }
-      return;
+    if (!formalDemandDraftEditSource(actor, demand, sourceTypes)) {
+      throw new DemandError("DEMAND_NOT_FOUND", "需求不存在或当前账号无权编辑");
     }
-    this.assertTownshipScope(actor, demand.responsibleAreaId);
   }
 
   private assertSubmitter(
     actor: PermissionActor,
     demand: Pick<Demand, "responsibleAreaId">,
-    sourceTypes: readonly string[],
+    sourceTypes: Parameters<typeof canSubmitFormalDemandReview>[2],
   ): void {
-    if (isAdministrator(actor)) {
-      if (!sourceTypes.includes("ADMIN_DIRECT")) {
-        throw new DemandError("DEMAND_NOT_FOUND", "镇区来源需求应由负责镇区提交审核");
-      }
-      return;
+    if (!canSubmitFormalDemandReview(actor, demand, sourceTypes)) {
+      throw new DemandError("DEMAND_NOT_FOUND", "需求不存在或当前账号无权提交审核");
     }
-    this.assertTownshipScope(actor, demand.responsibleAreaId);
   }
 
   private async requireVisible(actor: PermissionActor, demand: Pick<Demand, "status" | "responsibleAreaId">): Promise<void> {
@@ -285,13 +288,16 @@ export class FormalDemandService {
 
   async create(input: ServiceInput & { demand: unknown }) {
     const command = createFormalDemandSchema.parse(input.demand);
-    const adminDirect = isAdministrator(input.actor);
+    await authorizeActor({ actor: input.actor, action: "demand.formal.create" });
+    if (!canCreateFormalDemandFromSource(input.actor, command.sourceType, command.responsibleAreaId)) {
+      throw new PermissionError("FORBIDDEN_SCOPE", "当前账号不能使用所选正式需求创建入口");
+    }
     await authorizeActor({
       actor: input.actor,
       action: "demand.formal.create",
       resource: {
         resourceType: "demand",
-        requiredScope: adminDirect ? "GLOBAL_OPERATIONAL" : "TOWNSHIP",
+        requiredScope: command.sourceType === "ADMIN_DIRECT" ? "GLOBAL_OPERATIONAL" : "TOWNSHIP",
         areaId: command.responsibleAreaId,
       },
     });
@@ -324,9 +330,9 @@ export class FormalDemandService {
       } });
       await tx.demandProvenance.create({ data: {
         demandId: demand.id,
-        sourceType: adminDirect ? "ADMIN_DIRECT" : "TOWNSHIP_DIRECT",
+        sourceType: command.sourceType,
         sourceSnapshot: {
-          sourceType: adminDirect ? "ADMIN_DIRECT" : "TOWNSHIP_DIRECT",
+          sourceType: command.sourceType,
           actorPersonId: input.actor.personId,
           enterpriseId: enterprise.id,
           responsibleAreaId: command.responsibleAreaId,
@@ -345,7 +351,7 @@ export class FormalDemandService {
         entityId: demand.id,
         toState: "DRAFT",
         actionCode: "DEMAND_DIRECT_DRAFT_CREATED",
-        metadata: { businessNo, sourceType: adminDirect ? "ADMIN_DIRECT" : "TOWNSHIP_DIRECT" },
+        metadata: { businessNo, sourceType: command.sourceType },
         context: input.context,
       });
       await writeDemandAudit(tx, {
@@ -396,7 +402,7 @@ export class FormalDemandService {
           ? current.internalNote
           : changes.internalNote === "" || changes.internalNote === null ? null : changes.internalNote,
       };
-      if (!isAdministrator(input.actor)) this.assertTownshipScope(input.actor, next.responsibleAreaId);
+      this.assertDraftEditor(input.actor, { ...next, createdByPersonId: current.createdByPersonId }, sourceTypes);
       await this.requireArea(tx, next.responsibleAreaId);
       const { enterprise, contact } = await this.lockAndValidateEnterpriseContact(
         tx,
@@ -446,73 +452,87 @@ export class FormalDemandService {
     await authorizeActor({ actor: input.actor, action: "demand.submit_review" });
     const keyHash = sha256(idempotencyKey.data);
     const payloadHash = sha256(JSON.stringify({ demandId: input.demandId }));
-    return this.repository.transaction(async (tx) => {
-      try {
-        await this.repository.lockDemand(tx, input.demandId);
-      } catch (error) {
-        if ((error as Error).message === "DEMAND_LOCK_TARGET_NOT_FOUND") {
-          throw new DemandError("DEMAND_NOT_FOUND", "需求不存在或当前账号无权查看");
+    try {
+      return await this.repository.transaction(async (tx) => {
+        try {
+          await this.repository.lockDemand(tx, input.demandId);
+        } catch (error) {
+          if ((error as Error).message === "DEMAND_LOCK_TARGET_NOT_FOUND") {
+            throw new DemandError("DEMAND_NOT_FOUND", "需求不存在或当前账号无权查看");
+          }
+          throw error;
         }
-        throw error;
-      }
-      const replay = await this.repository.findIdempotencyForUpdate(tx, {
+        const replay = await this.repository.findIdempotencyForUpdate(tx, {
+          actorPersonId: input.actor.personId,
+          action: SUBMIT_ACTION,
+          keyHash,
+        });
+        if (replay) {
+          if (replay.demandId !== input.demandId || replay.payloadHash !== payloadHash) {
+            throw new DemandError("DEMAND_IDEMPOTENCY_CONFLICT", "同一 Idempotency-Key 不能用于不同提交内容");
+          }
+          return jsonCommandResult(replay.responseJson);
+        }
+        const demand = await tx.demand.findUniqueOrThrow({
+          where: { id: input.demandId },
+          include: { provenances: { select: { sourceType: true } } },
+        });
+        if (demand.status !== "DRAFT" && demand.status !== "RETURNED") {
+          throw new DemandError("DEMAND_STATE_CONFLICT", "只有 DRAFT / RETURNED 需求可以提交审核");
+        }
+        this.assertSubmitter(input.actor, demand, demand.provenances.map(({ sourceType }) => sourceType));
+        await this.requireArea(tx, demand.responsibleAreaId);
+        await this.lockAndValidateEnterpriseContact(tx, demand.enterpriseId, demand.selectedContactId);
+        await this.validateAttachments(tx, demand.id, false);
+        const submittedAt = new Date();
+        const updated = await tx.demand.update({ where: { id: demand.id }, data: {
+          status: "PENDING_REVIEW",
+          submittedAt,
+          reviewedAt: null,
+          reviewedByPersonId: null,
+        } });
+        await writeDemandTransition(tx, {
+          actor: input.actor,
+          entityType: DEMAND_ENTITY,
+          entityId: demand.id,
+          fromState: demand.status,
+          toState: "PENDING_REVIEW",
+          actionCode: "DEMAND_SUBMITTED_FOR_REVIEW",
+          context: input.context,
+        });
+        await writeDemandAudit(tx, {
+          actor: input.actor,
+          actionCode: "DEMAND_SUBMITTED_FOR_REVIEW",
+          entityType: DEMAND_ENTITY,
+          entityId: demand.id,
+          before: snapshotDemand(demand),
+          after: snapshotDemand(updated),
+          context: input.context,
+        });
+        const result = commandResult(updated);
+        await tx.demandCommandIdempotency.create({ data: {
+          actorPersonId: input.actor.personId,
+          action: SUBMIT_ACTION,
+          keyHash,
+          payloadHash,
+          demandId: demand.id,
+          responseJson: result,
+        } });
+        return result;
+      });
+    } catch (error) {
+      if (!isDemandCommandIdempotencyUniqueConflict(error)) throw error;
+      const replay = await this.repository.findIdempotency({
         actorPersonId: input.actor.personId,
         action: SUBMIT_ACTION,
         keyHash,
       });
-      if (replay) {
-        if (replay.payloadHash !== payloadHash) {
-          throw new DemandError("DEMAND_IDEMPOTENCY_CONFLICT", "同一 Idempotency-Key 不能用于不同提交内容");
-        }
-        return jsonCommandResult(replay.responseJson);
+      if (!replay) throw error;
+      if (replay.demandId !== input.demandId || replay.payloadHash !== payloadHash) {
+        throw new DemandError("DEMAND_IDEMPOTENCY_CONFLICT", "同一 Idempotency-Key 不能用于不同提交内容");
       }
-      const demand = await tx.demand.findUniqueOrThrow({
-        where: { id: input.demandId },
-        include: { provenances: { select: { sourceType: true } } },
-      });
-      if (demand.status !== "DRAFT" && demand.status !== "RETURNED") {
-        throw new DemandError("DEMAND_STATE_CONFLICT", "只有 DRAFT / RETURNED 需求可以提交审核");
-      }
-      this.assertSubmitter(input.actor, demand, demand.provenances.map(({ sourceType }) => sourceType));
-      await this.requireArea(tx, demand.responsibleAreaId);
-      await this.lockAndValidateEnterpriseContact(tx, demand.enterpriseId, demand.selectedContactId);
-      await this.validateAttachments(tx, demand.id, false);
-      const submittedAt = new Date();
-      const updated = await tx.demand.update({ where: { id: demand.id }, data: {
-        status: "PENDING_REVIEW",
-        submittedAt,
-        reviewedAt: null,
-        reviewedByPersonId: null,
-      } });
-      await writeDemandTransition(tx, {
-        actor: input.actor,
-        entityType: DEMAND_ENTITY,
-        entityId: demand.id,
-        fromState: demand.status,
-        toState: "PENDING_REVIEW",
-        actionCode: "DEMAND_SUBMITTED_FOR_REVIEW",
-        context: input.context,
-      });
-      await writeDemandAudit(tx, {
-        actor: input.actor,
-        actionCode: "DEMAND_SUBMITTED_FOR_REVIEW",
-        entityType: DEMAND_ENTITY,
-        entityId: demand.id,
-        before: snapshotDemand(demand),
-        after: snapshotDemand(updated),
-        context: input.context,
-      });
-      const result = commandResult(updated);
-      await tx.demandCommandIdempotency.create({ data: {
-        actorPersonId: input.actor.personId,
-        action: SUBMIT_ACTION,
-        keyHash,
-        payloadHash,
-        demandId: demand.id,
-        responseJson: result,
-      } });
-      return result;
-    });
+      return jsonCommandResult(replay.responseJson);
+    }
   }
 
   async review(input: ServiceInput & { demandId: string; review: unknown }) {

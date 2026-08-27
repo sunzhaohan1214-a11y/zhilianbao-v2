@@ -4,6 +4,12 @@ import {
   DEMAND_PRE_PUBLISH_STATUSES,
   DEMAND_PUBLISHED_STATUSES,
 } from "@/modules/demand/constants";
+import {
+  canCreateFormalDemandFromSource,
+  canSubmitFormalDemandReview,
+  formalDemandDraftEditSource,
+} from "@/modules/demand/formal-demand-access";
+import { isDemandCommandIdempotencyUniqueConflict } from "@/modules/demand/errors";
 import { isDeterministicDuplicateTitle } from "@/modules/demand/formal-demand-service";
 import {
   createFormalDemandSchema,
@@ -14,16 +20,16 @@ import {
 import { OUTBOX_EVENT_TYPES } from "@/modules/outbox/outbox-types";
 import { authorizeActor, resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 
-function actor(roles: RoleCode[], townshipAreaIds: string[] = []): PermissionActor {
+function actor(roles: RoleCode[], townshipAreaIds: string[] = [], personId = "person"): PermissionActor {
   return {
-    personId: "person",
+    personId,
     accountId: "account",
     accountStatus: "NORMAL",
     permissionVersion: BigInt(1),
     effectiveRoles: roles,
     capabilities: resolveCapabilities(roles, new Set()),
     specialPermissions: new Set(),
-    selfPersonId: "person",
+    selfPersonId: personId,
     townshipAreaIds,
     departmentAreaIds: [],
     hasGlobalPublished: true,
@@ -44,6 +50,7 @@ describe("M1-003 Formal Demand contracts", () => {
 
   it("keeps direct draft fields strict and does not accept client-controlled state", () => {
     const valid = {
+      sourceType: "TOWNSHIP_DIRECT",
       enterpriseId: crypto.randomUUID(),
       selectedContactId: crypto.randomUUID(),
       title: "人工填写的技术需求",
@@ -53,8 +60,42 @@ describe("M1-003 Formal Demand contracts", () => {
       attachmentIds: [],
     };
     expect(createFormalDemandSchema.parse(valid)).toMatchObject({ urgency: "NORMAL" });
+    expect(createFormalDemandSchema.safeParse({ ...valid, sourceType: undefined }).success).toBe(false);
+    expect(createFormalDemandSchema.safeParse({ ...valid, sourceType: "DEMAND_LEAD" }).success).toBe(false);
     expect(createFormalDemandSchema.safeParse({ ...valid, status: "PENDING_CLAIM" }).success).toBe(false);
     expect(createFormalDemandSchema.safeParse({ ...valid, title: "<b>AI 标题</b>" }).success).toBe(false);
+  });
+
+  it("unions multi-role source paths without allowing forged direct sources", () => {
+    const township = actor(["TOWNSHIP_STAFF"], ["area-a"], "township");
+    const admin = actor(["ADMIN"], [], "admin");
+    const multi = actor(["ADMIN", "TOWNSHIP_STAFF"], ["area-a"], "multi");
+    expect(canCreateFormalDemandFromSource(township, "TOWNSHIP_DIRECT", "area-a")).toBe(true);
+    expect(canCreateFormalDemandFromSource(township, "ADMIN_DIRECT", "area-a")).toBe(false);
+    expect(canCreateFormalDemandFromSource(admin, "TOWNSHIP_DIRECT", "area-a")).toBe(false);
+    expect(canCreateFormalDemandFromSource(multi, "TOWNSHIP_DIRECT", "area-a")).toBe(true);
+    expect(canCreateFormalDemandFromSource(multi, "ADMIN_DIRECT", "area-a")).toBe(true);
+
+    expect(formalDemandDraftEditSource(multi, {
+      createdByPersonId: "someone-else", responsibleAreaId: "area-a",
+    }, ["TOWNSHIP_DIRECT"])).toBe("TOWNSHIP_DIRECT");
+    expect(formalDemandDraftEditSource(multi, {
+      createdByPersonId: "multi", responsibleAreaId: "area-b",
+    }, ["ADMIN_DIRECT"])).toBe("ADMIN_DIRECT");
+    expect(canSubmitFormalDemandReview(multi, { responsibleAreaId: "area-a" }, ["TOWNSHIP_DIRECT"])).toBe(true);
+    expect(canSubmitFormalDemandReview(multi, { responsibleAreaId: "area-b" }, ["ADMIN_DIRECT"])).toBe(true);
+  });
+
+  it("recognizes only the demand command idempotency unique constraint", () => {
+    expect(isDemandCommandIdempotencyUniqueConflict({
+      code: "P2002",
+      meta: { target: ["actor_person_id", "action", "key_hash"] },
+    })).toBe(true);
+    expect(isDemandCommandIdempotencyUniqueConflict({
+      code: "P2002",
+      meta: { target: ["business_no"] },
+    })).toBe(false);
+    expect(isDemandCommandIdempotencyUniqueConflict(new Error("not a Prisma conflict"))).toBe(false);
   });
 
   it("allows draft core edits but keeps review limited to auxiliary fields", () => {

@@ -143,8 +143,10 @@ export const idempotencyKeySchema = trimmed(128, 8).regex(/^[A-Za-z0-9._:-]+$/);
 
 const demandType = z.enum(["TECHNICAL", "TALENT", "PROJECT", "OTHER"]);
 const demandUrgency = z.enum(["NORMAL", "URGENT"]);
+export const directDemandSourceTypeSchema = z.enum(["TOWNSHIP_DIRECT", "ADMIN_DIRECT"]);
 
 export const createFormalDemandSchema = z.object({
+  sourceType: directDemandSourceTypeSchema,
   enterpriseId: z.uuid(),
   selectedContactId: z.uuid(),
   title: plainText(200),
