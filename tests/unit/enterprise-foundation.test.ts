@@ -8,6 +8,7 @@ import {
   enterpriseListQuerySchema,
   mergeEnterpriseSchema,
 } from "@/modules/enterprise/schemas";
+import { ENTERPRISE_RESPONSIBLE_AREA_TYPES } from "@/modules/enterprise/constants";
 
 function actor(roles: RoleCode[], townshipAreaIds: string[] = []): PermissionActor {
   const capabilities = resolveCapabilities(roles, new Set());
@@ -18,6 +19,14 @@ function actor(roles: RoleCode[], townshipAreaIds: string[] = []): PermissionAct
 }
 
 describe("M1-001 enterprise input boundary", () => {
+  it("defines only township and park-like enterprise responsible areas", () => {
+    expect(ENTERPRISE_RESPONSIBLE_AREA_TYPES).toEqual([
+      "TOWNSHIP", "PARK", "HIGH_TECH_ZONE", "DEVELOPMENT_ZONE",
+    ]);
+    expect(ENTERPRISE_RESPONSIBLE_AREA_TYPES).not.toContain("COUNTY");
+    expect(ENTERPRISE_RESPONSIBLE_AREA_TYPES).not.toContain("OTHER_AREA");
+  });
+
   it("rejects mass assignment and invalid phone, but normalizes list queries", () => {
     const valid = { name: "测试企业", responsibleAreaId: crypto.randomUUID(), address: "宝应县", mainProducts: "装备制造", tagIds: [] };
     expect(enterpriseCoreSchema.safeParse({ ...valid, status: "MERGED" }).success).toBe(false);

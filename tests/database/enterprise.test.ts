@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { RoleCode } from "@/generated/prisma/client";
+import type { AdministrativeAreaType, RoleCode } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
-import { EnterpriseService } from "@/modules/enterprise";
+import { EnterpriseRepository, EnterpriseService, type EnterpriseTransaction } from "@/modules/enterprise";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 
 const prisma = getPrismaClient(); const service = new EnterpriseService();
 const personIds: string[] = []; const accountIds: string[] = []; const areaIds: string[] = [];
-let admin: PermissionActor; let member: PermissionActor; let township: PermissionActor; let areaA: string; let areaB: string;
+let admin: PermissionActor; let member: PermissionActor; let township: PermissionActor; let minister: PermissionActor; let department: PermissionActor;
+let areaA: string; let areaB: string; let parkArea: string; let highTechArea: string; let developmentArea: string;
+let countyArea: string; let otherArea: string; let inactiveParkArea: string;
 
 async function fixture(role: RoleCode, townships: string[] = []) {
   const person = await prisma.person.create({ data: { name: `M1-001 ${role} ${randomUUID()}` } }); personIds.push(person.id);
@@ -20,9 +22,44 @@ async function fixture(role: RoleCode, townships: string[] = []) {
 }
 function core(areaId: string, suffix = randomUUID()) { return { name: `M1企业-${suffix}`, responsibleAreaId: areaId, address: "江苏省宝应县测试路1号", creditCode: `91321023${suffix.replaceAll("-", "").slice(0, 10).toUpperCase()}`, mainProducts: "高端装备与技术服务", tagIds: [] }; }
 
+async function areaFixture(type: AdministrativeAreaType, status: "ACTIVE" | "INACTIVE" = "ACTIVE") {
+  const area = await prisma.administrativeArea.create({ data: { name: `M1 ${type} ${randomUUID()}`, type, status } });
+  areaIds.push(area.id);
+  return area.id;
+}
+
+class MergeGateRepository extends EnterpriseRepository {
+  private resolveMergeLocked!: () => void;
+  private resolveUpdateLockAttempted!: () => void;
+  private resolveMergeRelease!: () => void;
+  readonly mergeLocked = new Promise<void>((resolve) => { this.resolveMergeLocked = resolve; });
+  readonly updateLockAttempted = new Promise<void>((resolve) => { this.resolveUpdateLockAttempted = resolve; });
+  private readonly mergeRelease = new Promise<void>((resolve) => { this.resolveMergeRelease = resolve; });
+
+  override async lockEnterprises(tx: EnterpriseTransaction, enterpriseIds: readonly string[]): Promise<void> {
+    for (const id of [...new Set(enterpriseIds)].sort()) {
+      await EnterpriseRepository.prototype.lockEnterprise.call(this, tx, id);
+    }
+    this.resolveMergeLocked();
+    await this.mergeRelease;
+  }
+
+  override async lockEnterprise(tx: EnterpriseTransaction, enterpriseId: string): Promise<void> {
+    this.resolveUpdateLockAttempted();
+    await super.lockEnterprise(tx, enterpriseId);
+  }
+
+  releaseMerge() { this.resolveMergeRelease(); }
+}
+
 beforeAll(async () => {
-  const [a, b] = await Promise.all([prisma.administrativeArea.create({ data: { name: `M1 A ${randomUUID()}`, type: "TOWNSHIP" } }), prisma.administrativeArea.create({ data: { name: `M1 B ${randomUUID()}`, type: "TOWNSHIP" } })]);
-  areaA = a.id; areaB = b.id; areaIds.push(a.id, b.id); admin = await fixture("ADMIN"); member = await fixture("MEMBER_CURRENT"); township = await fixture("TOWNSHIP_STAFF", [areaA]);
+  [areaA, areaB, parkArea, highTechArea, developmentArea, countyArea, otherArea, inactiveParkArea] = await Promise.all([
+    areaFixture("TOWNSHIP"), areaFixture("TOWNSHIP"), areaFixture("PARK"), areaFixture("HIGH_TECH_ZONE"),
+    areaFixture("DEVELOPMENT_ZONE"), areaFixture("COUNTY"), areaFixture("OTHER_AREA"), areaFixture("PARK", "INACTIVE"),
+  ]);
+  [admin, member, township, minister, department] = await Promise.all([
+    fixture("ADMIN"), fixture("MEMBER_CURRENT"), fixture("TOWNSHIP_STAFF", [areaA]), fixture("MINISTER"), fixture("DEPARTMENT_STAFF"),
+  ]);
 });
 afterAll(async () => {
   const enterpriseWhere = { createdByPersonId: { in: personIds } };
@@ -39,6 +76,40 @@ afterAll(async () => {
 });
 
 describe("M1-001 real MySQL enterprise lifecycle", () => {
+  it("accepts only active township and park-like responsible areas", async () => {
+    for (const areaId of [areaA, parkArea, highTechArea, developmentArea]) {
+      await expect(service.createFormal({ actor: admin, enterprise: core(areaId) })).resolves.toMatchObject({ responsibleAreaId: areaId });
+    }
+    for (const areaId of [countyArea, otherArea, inactiveParkArea]) {
+      await expect(service.createFormal({ actor: admin, enterprise: core(areaId) })).rejects.toMatchObject({ code: "ENTERPRISE_AREA_INVALID" });
+    }
+    const enterprise = await service.createFormal({ actor: admin, enterprise: core(areaA) });
+    await expect(service.formalCorrection({ actor: admin, enterpriseId: enterprise.id, changes: { responsibleAreaId: countyArea }, reason: "非法归属纠正" }))
+      .rejects.toMatchObject({ code: "ENTERPRISE_AREA_INVALID" });
+    const countyScopedTownship = { ...township, townshipAreaIds: [areaA, countyArea] };
+    await expect(service.createChangeRequest({ actor: countyScopedTownship, request: {
+      requestType: "CREATE", proposedAreaId: countyArea, payload: { enterprise: core(countyArea) },
+    } })).rejects.toMatchObject({ code: "ENTERPRISE_AREA_INVALID" });
+  });
+
+  it("separates county-wide read filters from scoped create options", async () => {
+    const validAreaIds = [areaA, areaB, parkArea, highTechArea, developmentArea];
+    for (const actor of [member, minister, department]) {
+      const ids = (await service.formOptions({ actor, purpose: "READ_FILTER" })).areas.map(({ id }) => id);
+      expect(ids).toEqual(expect.arrayContaining(validAreaIds));
+      expect(ids).not.toContain(countyArea);
+      expect(ids).not.toContain(otherArea);
+      expect(ids).not.toContain(inactiveParkArea);
+    }
+    expect((await service.formOptions({ actor: township, purpose: "CREATE_APPLICATION" })).areas.map(({ id }) => id)).toEqual([areaA]);
+    const formalIds = (await service.formOptions({ actor: admin, purpose: "FORMAL_CREATE" })).areas.map(({ id }) => id);
+    expect(formalIds).toEqual(expect.arrayContaining(validAreaIds));
+    for (const invalidAreaId of [countyArea, otherArea, inactiveParkArea]) expect(formalIds).not.toContain(invalidAreaId);
+    await expect(service.createChangeRequest({ actor: township, request: {
+      requestType: "CREATE", proposedAreaId: areaB, payload: { enterprise: core(areaB) },
+    } })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE" });
+  });
+
   it("creates v1, corrects with optimistic versioning, disables and restores", async () => {
     const created = await service.createFormal({ actor: admin, enterprise: core(areaA) });
     expect(await prisma.enterpriseVersion.count({ where: { enterpriseId: created.id, versionNo: 1 } })).toBe(1);
@@ -97,5 +168,40 @@ describe("M1-001 real MySQL requests and contacts", () => {
     await expect(service.createContact({ actor: township, enterpriseId: otherEnterprise.id, contact: { name: "越权", phone: "13800002004", setPrimary: false } })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE" });
     await expect(service.createContact({ actor: admin, enterpriseId: otherEnterprise.id, contact: { name: "管理员", phone: "13800002005", setPrimary: false } })).resolves.toMatchObject({ status: "ACTIVE" });
     const detail = await service.detail({ actor: member, enterpriseId: enterprise.id }); expect(detail?.contacts.some((x) => x.phone === replacement.phone)).toBe(true);
+  });
+
+  it("updates only active contacts of non-merged enterprises", async () => {
+    const enterprise = await service.createFormal({ actor: admin, enterprise: core(areaA) });
+    const active = await service.createContact({ actor: admin, enterpriseId: enterprise.id, contact: { name: "可更新", phone: "13800002101", setPrimary: false } });
+    await expect(service.updateContact({ actor: admin, contactId: active.id, changes: { name: "已更新" } })).resolves.toMatchObject({ name: "已更新" });
+    const inactive = await service.createContact({ actor: admin, enterpriseId: enterprise.id, contact: { name: "将停用", phone: "13800002102", setPrimary: false } });
+    await service.disableContact({ actor: admin, contactId: inactive.id, reason: "离职" });
+    await expect(service.updateContact({ actor: admin, contactId: inactive.id, changes: { name: "不得更新" } })).rejects.toMatchObject({ code: "ENTERPRISE_STATE_CONFLICT" });
+
+    const mergedSource = await service.createFormal({ actor: admin, enterprise: core(areaA) });
+    const mergeTarget = await service.createFormal({ actor: admin, enterprise: core(areaA) });
+    const historical = await service.createContact({ actor: admin, enterpriseId: mergedSource.id, contact: { name: "历史联系人", phone: "13800002103", setPrimary: false } });
+    await service.merge({ actor: admin, enterpriseId: mergedSource.id, targetEnterpriseId: mergeTarget.id, reason: "重复档案", confirmation: "CONFIRM" });
+    await expect(service.updateContact({ actor: admin, contactId: historical.id, changes: { name: "不得修改历史" } })).rejects.toMatchObject({ code: "ENTERPRISE_STATE_CONFLICT" });
+  });
+
+  it("serializes updateContact behind merge and rechecks the locked enterprise state", async () => {
+    const source = await service.createFormal({ actor: admin, enterprise: core(areaA) });
+    const target = await service.createFormal({ actor: admin, enterprise: core(areaA) });
+    const contact = await service.createContact({ actor: admin, enterpriseId: source.id, contact: { name: "并发前姓名", phone: "13800002104", setPrimary: false } });
+    const repository = new MergeGateRepository();
+    const gatedService = new EnterpriseService(repository);
+    const merge = gatedService.merge({ actor: admin, enterpriseId: source.id, targetEnterpriseId: target.id, reason: "并发合并", confirmation: "CONFIRM" });
+    await repository.mergeLocked;
+    const update = gatedService.updateContact({ actor: admin, contactId: contact.id, changes: { name: "并发后姓名" } });
+    await Promise.race([
+      repository.updateLockAttempted,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("updateContact did not attempt the Enterprise row lock")), 2_000)),
+    ]);
+    repository.releaseMerge();
+    const [mergeResult, updateResult] = await Promise.allSettled([merge, update]);
+    expect(mergeResult.status).toBe("fulfilled");
+    expect(updateResult).toMatchObject({ status: "rejected", reason: { code: "ENTERPRISE_STATE_CONFLICT" } });
+    expect(await prisma.enterpriseContact.findUnique({ where: { id: contact.id } })).toMatchObject({ name: "并发前姓名" });
   });
 });

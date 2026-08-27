@@ -6,6 +6,7 @@ import type {
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { writeEnterpriseAudit, writeEnterpriseTransition, type EnterpriseMutationContext } from "./audit";
+import type { EnterpriseFormOptionsPurpose } from "./constants";
 import { EnterpriseError, isPrismaUniqueConflict } from "./errors";
 import { EnterpriseRepository, type EnterpriseTransaction } from "./repository/enterprise-repository";
 import {
@@ -64,22 +65,30 @@ function publicEnterprise(enterprise: Awaited<ReturnType<EnterpriseRepository["f
 export class EnterpriseService {
   constructor(private readonly repository = new EnterpriseRepository()) {}
 
-  async formOptions(input: ServiceInput) {
-    await authorizeActor({ actor: input.actor, action: "enterprise.view", resource: {
-      resourceType: "enterprise", requiredScope: "GLOBAL_PUBLISHED",
-    } });
+  async formOptions(input: ServiceInput & { purpose: EnterpriseFormOptionsPurpose }) {
+    if (input.purpose === "READ_FILTER") {
+      await authorizeActor({ actor: input.actor, action: "enterprise.view", resource: {
+        resourceType: "enterprise", requiredScope: "GLOBAL_PUBLISHED",
+      } });
+    } else if (input.purpose === "CREATE_APPLICATION") {
+      await authorizeActor({ actor: input.actor, action: "enterprise.create_application" });
+    } else {
+      await authorizeActor({ actor: input.actor, action: "enterprise.create_formal", resource: {
+        resourceType: "enterprise", requiredScope: "GLOBAL_OPERATIONAL",
+      } });
+    }
     const options = await this.repository.listFormOptions();
     return {
       ...options,
-      areas: input.actor.hasGlobalOperational
-        ? options.areas
-        : options.areas.filter((area) => input.actor.townshipAreaIds.includes(area.id)),
+      areas: input.purpose === "CREATE_APPLICATION"
+        ? options.areas.filter((area) => input.actor.townshipAreaIds.includes(area.id))
+        : options.areas,
     };
   }
 
   private async requireArea(tx: EnterpriseTransaction, areaId: string): Promise<void> {
     if (!await this.repository.findArea(tx, areaId)) {
-      throw new EnterpriseError("ENTERPRISE_AREA_INVALID", "企业所属区域不存在或已停用");
+      throw new EnterpriseError("ENTERPRISE_AREA_INVALID", "企业所属区域不存在、已停用或不是可归属的镇区/园区");
     }
   }
 
@@ -403,10 +412,13 @@ export class EnterpriseService {
 
   async updateContact(input: ServiceInput & { contactId: string; changes: { name?: string; positionTitle?: string | null; phone?: string } }) {
     return this.repository.transaction(async (tx) => {
-      const contact = await this.repository.findContact(tx, input.contactId);
+      const snapshot = await this.repository.findContact(tx, input.contactId);
+      if (!snapshot) throw new EnterpriseError("ENTERPRISE_CONTACT_NOT_FOUND", "企业联系人不存在");
+      await this.repository.lockEnterprise(tx, snapshot.enterpriseId);
+      const contact = await this.repository.findContactForUpdate(tx, input.contactId);
       if (!contact) throw new EnterpriseError("ENTERPRISE_CONTACT_NOT_FOUND", "企业联系人不存在");
-      await this.authorizeContactManage(input.actor, contact.enterprise.responsibleAreaId);
-      if (contact.enterprise.status === "MERGED" || contact.status !== "ACTIVE") {
+      await this.authorizeContactManage(input.actor, contact.responsibleAreaId);
+      if (contact.enterpriseStatus === "MERGED" || contact.contactStatus !== "ACTIVE") {
         throw new EnterpriseError("ENTERPRISE_STATE_CONFLICT", "当前联系人不可修改");
       }
       const updated = await tx.enterpriseContact.update({ where: { id: contact.id }, data: {

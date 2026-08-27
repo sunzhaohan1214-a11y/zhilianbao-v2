@@ -6,6 +6,7 @@ import type {
   PrismaClient,
 } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
+import { ENTERPRISE_RESPONSIBLE_AREA_TYPES } from "../constants";
 
 export type EnterpriseTransaction = Prisma.TransactionClient;
 
@@ -35,13 +36,16 @@ export class EnterpriseRepository {
   }
 
   findArea(tx: EnterpriseTransaction, areaId: string) {
-    return tx.administrativeArea.findFirst({ where: { id: areaId, status: "ACTIVE" }, select: { id: true, name: true } });
+    return tx.administrativeArea.findFirst({
+      where: { id: areaId, status: "ACTIVE", type: { in: [...ENTERPRISE_RESPONSIBLE_AREA_TYPES] } },
+      select: { id: true, name: true, type: true },
+    });
   }
 
   async listFormOptions() {
     const [areas, tags] = await Promise.all([
       this.prisma.administrativeArea.findMany({
-        where: { status: "ACTIVE" },
+        where: { status: "ACTIVE", type: { in: [...ENTERPRISE_RESPONSIBLE_AREA_TYPES] } },
         orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
         select: { id: true, name: true, type: true },
       }),
@@ -70,6 +74,34 @@ export class EnterpriseRepository {
 
   findContact(tx: EnterpriseTransaction, id: string) {
     return tx.enterpriseContact.findUnique({ where: { id }, include: { enterprise: true } });
+  }
+
+  async findContactForUpdate(tx: EnterpriseTransaction, id: string) {
+    const rows = await tx.$queryRaw<Array<{
+      id: string;
+      enterpriseId: string;
+      name: string;
+      positionTitle: string | null;
+      phone: string;
+      contactStatus: "ACTIVE" | "INACTIVE";
+      enterpriseStatus: "NORMAL" | "DISABLED" | "MERGED";
+      responsibleAreaId: string;
+    }>>`
+      SELECT
+        c.id,
+        c.enterprise_id AS enterpriseId,
+        c.name,
+        c.position_title AS positionTitle,
+        c.phone,
+        c.status AS contactStatus,
+        e.status AS enterpriseStatus,
+        e.responsible_area_id AS responsibleAreaId
+      FROM enterprise_contacts c
+      INNER JOIN enterprises e ON e.id = c.enterprise_id
+      WHERE c.id = ${id}
+      FOR UPDATE
+    `;
+    return rows[0] ?? null;
   }
 
   findChangeRequest(tx: EnterpriseTransaction, id: string) {
