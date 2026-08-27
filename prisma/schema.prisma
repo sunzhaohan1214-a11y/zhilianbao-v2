@@ -142,6 +142,24 @@ enum EnterpriseVersionChangeType {
   COORDINATE
 }
 
+enum PolicyPublicationStatus {
+  DRAFT
+  PUBLISHED
+  WITHDRAWN
+}
+
+enum PolicyEffectStatus {
+  CURRENT
+  REPLACED
+}
+
+enum PolicyAIInterpretationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CONFIRMED
+}
+
 model Person {
   id                            String                    @id @default(uuid()) @db.Char(36)
   name                          String                    @db.VarChar(80)
@@ -169,7 +187,13 @@ model Person {
   submittedEnterpriseRequests   EnterpriseChangeRequest[] @relation("EnterpriseRequestSubmitter")
   reviewedEnterpriseRequests    EnterpriseChangeRequest[] @relation("EnterpriseRequestReviewer")
   enterpriseVersions            EnterpriseVersion[]
-  presenceReports              PresenceReport[]
+  presenceReports               PresenceReport[]
+  createdPolicies                Policy[]                    @relation("PolicyCreator")
+  changedPolicyVersions          PolicyContentVersion[]      @relation("PolicyVersionChanger")
+  confirmedPolicyVersions        PolicyContentVersion[]      @relation("PolicyVersionConfirmer")
+  confirmedPolicyInterpretations PolicyAIInterpretation[]    @relation("PolicyInterpretationConfirmer")
+  createdPolicyReplacements      PolicyReplacementRelation[] @relation("PolicyReplacementCreator")
+  endedPolicyReplacements        PolicyReplacementRelation[] @relation("PolicyReplacementEnder")
 
   @@index([personStatus])
   @@map("persons")
@@ -757,4 +781,124 @@ model EnterpriseVersion {
   @@unique([enterpriseId, versionNo])
   @@index([changedByPersonId, createdAt])
   @@map("enterprise_versions")
+}
+
+model Policy {
+  id                  String                      @id @default(uuid()) @db.Char(36)
+  title               String                      @db.VarChar(300)
+  issuingDepartment   String                      @map("issuing_department") @db.VarChar(300)
+  publicationDate     DateTime                    @map("publication_date") @db.Date
+  level               String                      @db.VarChar(64)
+  applicationDeadline DateTime?                   @map("application_deadline") @db.Date
+  publicationStatus   PolicyPublicationStatus     @default(DRAFT) @map("publication_status")
+  effectStatus        PolicyEffectStatus          @default(CURRENT) @map("effect_status")
+  currentVersionId    String?                     @unique @map("current_version_id") @db.Char(36)
+  createdByPersonId   String                      @map("created_by_person_id") @db.Char(36)
+  publishedAt         DateTime?                   @map("published_at") @db.DateTime(3)
+  withdrawnAt         DateTime?                   @map("withdrawn_at") @db.DateTime(3)
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime                    @updatedAt @map("updated_at") @db.DateTime(3)
+  currentVersion      PolicyContentVersion?       @relation("PolicyCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict)
+  versions            PolicyContentVersion[]      @relation("PolicyVersions")
+  tagRelations        PolicyTagRelation[]
+  replacementsAsOld   PolicyReplacementRelation[] @relation("PolicyReplacementOld")
+  replacementsAsNew   PolicyReplacementRelation[] @relation("PolicyReplacementNew")
+  createdByPerson     Person                      @relation("PolicyCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([publicationStatus, effectStatus, publicationDate])
+  @@index([title])
+  @@index([issuingDepartment])
+  @@map("policies")
+}
+
+model PolicyContentVersion {
+  id                      String                   @id @default(uuid()) @db.Char(36)
+  policyId                String                   @map("policy_id") @db.Char(36)
+  versionNo               Int                      @map("version_no") @db.UnsignedInt
+  snapshotJson            Json                     @map("snapshot_json")
+  changeReason            String?                  @map("change_reason") @db.VarChar(500)
+  changedByPersonId       String                   @map("changed_by_person_id") @db.Char(36)
+  coreFieldsConfirmedAt   DateTime?                @map("core_fields_confirmed_at") @db.DateTime(3)
+  coreFieldsConfirmedById String?                  @map("core_fields_confirmed_by_id") @db.Char(36)
+  createdAt               DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  policy                  Policy                   @relation("PolicyVersions", fields: [policyId], references: [id], onDelete: Restrict)
+  currentForPolicy        Policy?                  @relation("PolicyCurrentVersion")
+  changedByPerson         Person                   @relation("PolicyVersionChanger", fields: [changedByPersonId], references: [id], onDelete: Restrict)
+  coreFieldsConfirmedBy   Person?                  @relation("PolicyVersionConfirmer", fields: [coreFieldsConfirmedById], references: [id], onDelete: Restrict)
+  interpretations         PolicyAIInterpretation[]
+
+  @@unique([policyId, versionNo])
+  @@index([changedByPersonId, createdAt])
+  @@index([coreFieldsConfirmedById])
+  @@map("policy_content_versions")
+}
+
+model PolicyTag {
+  id             String              @id @default(uuid()) @db.Char(36)
+  name           String              @db.VarChar(100)
+  normalizedName String              @unique @map("normalized_name") @db.VarChar(100)
+  status         RecordStatus        @default(ACTIVE)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.DateTime(3)
+  relations      PolicyTagRelation[]
+
+  @@index([status, name])
+  @@map("policy_tags")
+}
+
+model PolicyTagRelation {
+  policyId  String    @map("policy_id") @db.Char(36)
+  tagId     String    @map("tag_id") @db.Char(36)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  policy    Policy    @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  tag       PolicyTag @relation(fields: [tagId], references: [id], onDelete: Restrict)
+
+  @@id([policyId, tagId])
+  @@index([tagId, policyId])
+  @@map("policy_tag_relations")
+}
+
+model PolicyAIInterpretation {
+  id                  String                       @id @default(uuid()) @db.Char(36)
+  versionId           String                       @map("version_id") @db.Char(36)
+  status              PolicyAIInterpretationStatus @default(PENDING)
+  extractedJson       Json?                        @map("extracted_json")
+  provider            String                       @db.VarChar(100)
+  model               String                       @db.VarChar(100)
+  promptVersion       String                       @map("prompt_version") @db.VarChar(100)
+  evidenceJson        Json?                        @map("evidence_json")
+  failureCode         String?                      @map("failure_code") @db.VarChar(100)
+  createdAt           DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  confirmedAt         DateTime?                    @map("confirmed_at") @db.DateTime(3)
+  confirmedByPersonId String?                      @map("confirmed_by_person_id") @db.Char(36)
+  version             PolicyContentVersion         @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  confirmedByPerson   Person?                      @relation("PolicyInterpretationConfirmer", fields: [confirmedByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([versionId, createdAt])
+  @@index([status, createdAt])
+  @@index([confirmedByPersonId])
+  @@map("policy_ai_interpretations")
+}
+
+model PolicyReplacementRelation {
+  id                String    @id @default(uuid()) @db.Char(36)
+  oldPolicyId       String    @map("old_policy_id") @db.Char(36)
+  newPolicyId       String    @map("new_policy_id") @db.Char(36)
+  effectiveAt       DateTime  @map("effective_at") @db.DateTime(3)
+  createdByPersonId String    @map("created_by_person_id") @db.Char(36)
+  reason            String    @db.VarChar(500)
+  endedAt           DateTime? @map("ended_at") @db.DateTime(3)
+  endedByPersonId   String?   @map("ended_by_person_id") @db.Char(36)
+  endReason         String?   @map("end_reason") @db.VarChar(500)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  oldPolicy         Policy    @relation("PolicyReplacementOld", fields: [oldPolicyId], references: [id], onDelete: Restrict)
+  newPolicy         Policy    @relation("PolicyReplacementNew", fields: [newPolicyId], references: [id], onDelete: Restrict)
+  createdByPerson   Person    @relation("PolicyReplacementCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  endedByPerson     Person?   @relation("PolicyReplacementEnder", fields: [endedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([oldPolicyId, newPolicyId, effectiveAt])
+  @@index([oldPolicyId, endedAt])
+  @@index([newPolicyId, endedAt])
+  @@index([createdByPersonId, createdAt])
+  @@index([endedByPersonId])
+  @@map("policy_replacement_relations")
 }

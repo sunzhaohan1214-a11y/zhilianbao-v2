@@ -6,12 +6,16 @@ import { isPermissionError } from "@/modules/permissions/permission-errors";
 import { isAttachmentError } from "@/modules/attachment/attachment-errors";
 import { isEnterpriseError } from "@/modules/enterprise/errors";
 import { isPresenceError } from "@/modules/presence/errors";
+import { isPolicyError } from "@/modules/policy/errors";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
 }
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
+  if (isPolicyError(error)) {
+    return NextResponse.json({ ok: false, error: { code: error.code, message: error.message, details: {} }, requestId }, { status: error.status });
+  }
   if (isPresenceError(error)) {
     return NextResponse.json({
       ok: false,

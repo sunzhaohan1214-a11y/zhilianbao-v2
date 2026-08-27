@@ -4,7 +4,7 @@ export default function ResourcesPage() {
   const resources = [
     ["企业", "/resources/enterprises", "企业名录、联系人和纠错申请"],
     ["团员", "#", "团员资源（后续里程碑）"],
-    ["政策", "#", "政策资源（后续里程碑）"],
+    ["政策", "/resources/policies", "政策原文、智能解读与效力状态"],
     ["人才库", "#", "人才资源（后续里程碑）"],
     ["通讯录", "#", "组织通讯录（后续里程碑）"],
   ] as const;
