@@ -107,7 +107,6 @@ export class HelpRepository {
         ...(organizationIds.length
           ? [{ transferredOrganizationId: { in: [...organizationIds] } }]
           : []),
-        { assignments: { some: { personId: actor.personId } } },
       ],
     };
   }
@@ -167,7 +166,6 @@ export class HelpRepository {
         ? {
             OR: [
               { currentOwnerPersonId: input.actor.personId },
-              { assignments: { some: { personId: input.actor.personId } } },
               ...(organizationIds.length
                 ? [{ transferredOrganizationId: { in: organizationIds } }]
                 : []),
@@ -261,6 +259,14 @@ export class HelpRepository {
       },
       select: { id: true, name: true, type: true },
     });
+  }
+
+  findClaimIdempotency(input: {
+    actorPersonId: string;
+    actionCode: string;
+    idempotencyKeyHash: string;
+  }) {
+    return this.prisma.helpCommandIdempotency.findFirst({ where: input });
   }
 
   async adminOptions() {

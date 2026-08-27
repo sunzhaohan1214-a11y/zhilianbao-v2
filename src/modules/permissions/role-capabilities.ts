@@ -21,6 +21,8 @@ export const INTERNAL_BASE_CAPABILITIES = [
   "help.view",
   "help.update",
   "help.complete",
+  "help.withdraw",
+  "help.reopen",
   "attachment.upload",
   "attachment.temporary_self_access",
   "attachment.abort_self",
@@ -62,8 +64,6 @@ const MEMBER_CURRENT_CAPABILITIES = [
   "reimbursement.submit",
   "reimbursement.withdraw",
   "help.create",
-  "help.withdraw",
-  "help.reopen",
 ] as const satisfies readonly Capability[];
 
 const MEMBER_ALUMNI_CAPABILITIES = [

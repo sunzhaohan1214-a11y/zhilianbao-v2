@@ -21,7 +21,6 @@ async function canViewHelp(actor: PermissionActor, helpRequestId: string) {
       OR: [
         { submitterPersonId: actor.personId },
         { currentOwnerPersonId: actor.personId },
-        { assignments: { some: { personId: actor.personId } } },
         ...(organizationIds.length ? [{ transferredOrganizationId: { in: organizationIds } }] : []),
       ],
     },

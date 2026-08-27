@@ -3,7 +3,7 @@ import type { HelpRequest, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { writeHelpAudit, writeHelpTransition, type HelpMutationContext } from "./audit";
-import { HelpError } from "./errors";
+import { HelpError, isHelpCommandIdempotencyUniqueConflict } from "./errors";
 import { HelpRepository, type HelpTransaction } from "./repository/help-repository";
 import {
   addHelpProgressSchema,
@@ -374,96 +374,114 @@ export class HelpService {
       helpRequestId: input.helpRequestId,
       expectedCompleteAt: body.expectedCompleteAt?.toISOString() ?? null,
     }));
-    return this.repository.transaction(async (tx) => {
-      const help = await this.requireLocked(tx, input.helpRequestId);
-      const existing = await tx.$queryRaw<Array<{
-        helpRequestId: string;
-        payloadHash: string;
-      }>>`
-        SELECT help_request_id AS helpRequestId, payload_hash AS payloadHash
-        FROM help_command_idempotencies
-        WHERE actor_person_id = ${input.actor.personId}
-          AND action_code = 'HELP_CLAIMED'
-          AND idempotency_key_hash = ${keyHash}
-        FOR UPDATE
-      `;
-      if (existing[0]) {
-        if (existing[0].payloadHash !== payloadHash) {
-          throw new HelpError("HELP_IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同的认领请求");
+    try {
+      return await this.repository.transaction(async (tx) => {
+        const help = await this.requireLocked(tx, input.helpRequestId);
+        const existing = await tx.$queryRaw<Array<{
+          helpRequestId: string;
+          payloadHash: string;
+        }>>`
+          SELECT help_request_id AS helpRequestId, payload_hash AS payloadHash
+          FROM help_command_idempotencies
+          WHERE actor_person_id = ${input.actor.personId}
+            AND action_code = 'HELP_CLAIMED'
+            AND idempotency_key_hash = ${keyHash}
+          FOR UPDATE
+        `;
+        if (existing[0]) {
+          if (existing[0].helpRequestId !== input.helpRequestId || existing[0].payloadHash !== payloadHash) {
+            throw new HelpError("HELP_IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同的认领请求");
+          }
+          const previous = await this.repository.findById(tx, existing[0].helpRequestId);
+          if (!previous) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
+          return this.decorateDetail(tx, previous);
         }
-        const previous = await this.repository.findById(tx, existing[0].helpRequestId);
+        if (help.status !== "PENDING" || help.currentOwnerPersonId) {
+          throw new HelpError("HELP_ALREADY_CLAIMED", "该求助已被接手或状态已经变化");
+        }
+        if (!help.transferredOrganizationId) {
+          throw new HelpError("HELP_STATE_CONFLICT", "该求助尚未转交到可接手组织");
+        }
+        if (!await this.repository.isCurrentOrganizationMember(
+          tx,
+          input.actor.personId,
+          help.transferredOrganizationId,
+        )) {
+          throw new HelpError("HELP_ORGANIZATION_MEMBERSHIP_REQUIRED", "当前账号不是被转交组织的有效在岗人员");
+        }
+        const expectedCompleteAt = body.expectedCompleteAt ?? help.expectedCompleteAt;
+        if (!expectedCompleteAt) {
+          throw new HelpError("HELP_EXPECTED_DATE_INVALID", "接手时必须填写预计完成时间");
+        }
+        requireFutureExpectedDate(expectedCompleteAt);
+        const now = new Date();
+        await this.expireActiveAssignment(tx, help.id, now);
+        await tx.helpAssignmentHistory.create({
+          data: {
+            helpRequestId: help.id,
+            personId: input.actor.personId,
+            assignmentType: "CLAIM",
+            effectiveAt: now,
+            changedByPersonId: input.actor.personId,
+          },
+        });
+        const updated = await tx.helpRequest.update({
+          where: { id: help.id },
+          data: {
+            status: "IN_PROGRESS",
+            currentOwnerPersonId: input.actor.personId,
+            expectedCompleteAt,
+          },
+        });
+        await writeHelpTransition(tx, {
+          ...input,
+          entityId: help.id,
+          actionCode: "HELP_CLAIMED",
+          fromState: "PENDING",
+          toState: "IN_PROGRESS",
+          metadata: {
+            personId: input.actor.personId,
+            organizationId: help.transferredOrganizationId,
+            expectedCompleteAt: expectedCompleteAt.toISOString(),
+          },
+        });
+        await writeHelpAudit(tx, {
+          ...input,
+          entityId: help.id,
+          actionCode: "HELP_CLAIMED",
+          before: stateSnapshot(help),
+          after: stateSnapshot(updated),
+        });
+        await tx.helpCommandIdempotency.create({
+          data: {
+            helpRequestId: help.id,
+            actorPersonId: input.actor.personId,
+            actionCode: "HELP_CLAIMED",
+            idempotencyKeyHash: keyHash,
+            payloadHash,
+          },
+        });
+        const detail = await this.repository.findById(tx, help.id);
+        if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
+        return this.decorateDetail(tx, detail);
+      });
+    } catch (error) {
+      if (!isHelpCommandIdempotencyUniqueConflict(error)) throw error;
+      const replay = await this.repository.findClaimIdempotency({
+        actorPersonId: input.actor.personId,
+        actionCode: "HELP_CLAIMED",
+        idempotencyKeyHash: keyHash,
+      });
+      if (!replay) throw error;
+      if (replay.helpRequestId !== input.helpRequestId || replay.payloadHash !== payloadHash) {
+        throw new HelpError("HELP_IDEMPOTENCY_CONFLICT", "同一幂等键不能用于不同的认领请求");
+      }
+      return this.repository.transaction(async (tx) => {
+        const previous = await this.repository.findById(tx, replay.helpRequestId);
         if (!previous) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
         return this.decorateDetail(tx, previous);
-      }
-      if (help.status !== "PENDING" || help.currentOwnerPersonId) {
-        throw new HelpError("HELP_ALREADY_CLAIMED", "该求助已被接手或状态已经变化");
-      }
-      if (!help.transferredOrganizationId) {
-        throw new HelpError("HELP_STATE_CONFLICT", "该求助尚未转交到可接手组织");
-      }
-      if (!await this.repository.isCurrentOrganizationMember(
-        tx,
-        input.actor.personId,
-        help.transferredOrganizationId,
-      )) {
-        throw new HelpError("HELP_ORGANIZATION_MEMBERSHIP_REQUIRED", "当前账号不是被转交组织的有效在岗人员");
-      }
-      const expectedCompleteAt = body.expectedCompleteAt ?? help.expectedCompleteAt;
-      if (!expectedCompleteAt) {
-        throw new HelpError("HELP_EXPECTED_DATE_INVALID", "接手时必须填写预计完成时间");
-      }
-      requireFutureExpectedDate(expectedCompleteAt);
-      const now = new Date();
-      await this.expireActiveAssignment(tx, help.id, now);
-      await tx.helpAssignmentHistory.create({
-        data: {
-          helpRequestId: help.id,
-          personId: input.actor.personId,
-          assignmentType: "CLAIM",
-          effectiveAt: now,
-          changedByPersonId: input.actor.personId,
-        },
       });
-      const updated = await tx.helpRequest.update({
-        where: { id: help.id },
-        data: {
-          status: "IN_PROGRESS",
-          currentOwnerPersonId: input.actor.personId,
-          expectedCompleteAt,
-        },
-      });
-      await writeHelpTransition(tx, {
-        ...input,
-        entityId: help.id,
-        actionCode: "HELP_CLAIMED",
-        fromState: "PENDING",
-        toState: "IN_PROGRESS",
-        metadata: {
-          personId: input.actor.personId,
-          organizationId: help.transferredOrganizationId,
-          expectedCompleteAt: expectedCompleteAt.toISOString(),
-        },
-      });
-      await writeHelpAudit(tx, {
-        ...input,
-        entityId: help.id,
-        actionCode: "HELP_CLAIMED",
-        before: stateSnapshot(help),
-        after: stateSnapshot(updated),
-      });
-      await tx.helpCommandIdempotency.create({
-        data: {
-          helpRequestId: help.id,
-          actorPersonId: input.actor.personId,
-          actionCode: "HELP_CLAIMED",
-          idempotencyKeyHash: keyHash,
-          payloadHash,
-        },
-      });
-      const detail = await this.repository.findById(tx, help.id);
-      if (!detail) throw new HelpError("HELP_NOT_FOUND", "办事求助不存在");
-      return this.decorateDetail(tx, detail);
-    });
+    }
   }
 
   async addProgress(input: ServiceInput & { helpRequestId: string; body: unknown }) {
