@@ -17,6 +17,7 @@ export const enterpriseE2e = {
   areaAId: "30000000-0000-4000-8000-000000000001",
   areaBId: "30000000-0000-4000-8000-000000000002",
   organizationId: "40000000-0000-4000-8000-000000000001",
+  dispatchOrganizationId: "40000000-0000-4000-8000-000000000002",
   batchId: "50000000-0000-4000-8000-000000000001",
   enterpriseId: "60000000-0000-4000-8000-000000000001",
   contactId: "70000000-0000-4000-8000-000000000001",
@@ -40,6 +41,7 @@ export async function seedAuthFixtures() {
   await prisma.enterprise.deleteMany({ where: enterpriseWhere });
   await prisma.stateTransitionHistory.deleteMany({ where: { actorPersonId: { in: users.map(({ personId }) => personId) } } });
   await prisma.auditLog.deleteMany({ where: { actorAccountId: { in: users.map(({ accountId }) => accountId) } } });
+  await prisma.mapBoundaryVersion.deleteMany({ where: { createdByPersonId: { in: users.map(({ personId }) => personId) } } });
   await prisma.memberCapabilityIndustry.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.memberPreferredDemandType.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.memberCapabilityProfile.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
@@ -109,8 +111,9 @@ export async function seedAuthFixtures() {
     update: { status: "ACTIVE", isCurrent: true },
   });
   await prisma.batch.upsert({ where: { id: enterpriseE2e.pastBatchId }, create: { id: enterpriseE2e.pastBatchId, name: "E2E historical batch", year: 2025, startDate: new Date("2025-01-01"), endDate: new Date("2025-12-31"), status: "CLOSED", isCurrent: false }, update: { status: "CLOSED", isCurrent: false } });
+  await prisma.organization.upsert({ where: { id: enterpriseE2e.dispatchOrganizationId }, create: { id: enterpriseE2e.dispatchOrganizationId, name: "E2E 派出单位", type: "DISPATCH_UNIT", address: "TEST ONLY", latitude: 32.0603, longitude: 118.7969 }, update: { name: "E2E 派出单位", type: "DISPATCH_UNIT", status: "ACTIVE", address: "TEST ONLY", latitude: 32.0603, longitude: 118.7969 } });
   await prisma.batchMembership.createMany({ data: [
-    ...[e2eUsers.normal, e2eUsers.minister, e2eUsers.groupLeader].map((fixture) => ({ personId: fixture.personId, batchId: enterpriseE2e.batchId, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: "ACTIVE" })),
+    ...[e2eUsers.normal, e2eUsers.minister, e2eUsers.groupLeader].map((fixture) => ({ personId: fixture.personId, batchId: enterpriseE2e.batchId, dispatchOrganizationId: enterpriseE2e.dispatchOrganizationId, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: "ACTIVE" })),
     { personId: e2eUsers.admin.personId, batchId: enterpriseE2e.pastBatchId, startDate: new Date("2025-01-01"), endDate: new Date("2025-12-31"), status: "COMPLETED" },
     { personId: e2eUsers.alumni.personId, batchId: enterpriseE2e.batchId, startDate: new Date("2025-01-01"), endDate: new Date("2025-12-31"), status: "INACTIVE" },
   ] });

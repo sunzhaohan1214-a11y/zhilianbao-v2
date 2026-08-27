@@ -7,13 +7,14 @@ import { isAttachmentError } from "@/modules/attachment/attachment-errors";
 import { isEnterpriseError } from "@/modules/enterprise/errors";
 import { isFoundationError } from "@/modules/member-foundation/errors";
 import { isPresenceError } from "@/modules/presence/errors";
+import { isMapError } from "@/modules/map/errors";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
 }
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
-  if (isFoundationError(error) || isPresenceError(error)) {
+  if (isFoundationError(error) || isPresenceError(error) || isMapError(error)) {
     return NextResponse.json({
       ok: false,
       error: { code: error.code, message: error.message, details: error.details ?? {} },

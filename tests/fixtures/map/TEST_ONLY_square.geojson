@@ -1,0 +1,8 @@
+{
+  "type": "Feature",
+  "properties": { "name": "TEST ONLY - not a real administrative boundary" },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[119.30, 33.20], [119.40, 33.20], [119.40, 33.30], [119.30, 33.30], [119.30, 33.20]]]
+  }
+}
