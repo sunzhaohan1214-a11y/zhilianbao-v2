@@ -33,6 +33,12 @@ export const policyE2e = {
   tagId: "90000000-0000-4000-8000-000000000004",
 } as const;
 
+export const talentE2e = {
+  talentId: "91000000-0000-4000-8000-000000000001",
+  versionId: "91000000-0000-4000-8000-000000000002",
+  contactHistoryId: "91000000-0000-4000-8000-000000000003",
+} as const;
+
 export async function seedAuthFixtures() {
   const databaseUrl = process.env.DATABASE_URL ?? "";
   if (!/test/i.test(databaseUrl)) throw new Error("E2E auth fixtures require an explicitly named test database");
@@ -77,6 +83,19 @@ export async function seedAuthFixtures() {
   await prisma.demandLeadSupplement.deleteMany({ where: { demandLeadId: { in: e2eLeadIds } } });
   await prisma.demandLead.deleteMany({ where: { id: { in: e2eLeadIds } } });
   const enterpriseWhere = { createdByPersonId: { in: users.map(({ personId }) => personId) } };
+  const talentIds = (await prisma.talent.findMany({ where: { OR: [{ createdByPersonId: { in: users.map(({ personId }) => personId) } }, { id: talentE2e.talentId }] }, select: { id: true } })).map(({ id }) => id);
+  const talentVersionIds = (await prisma.talentVersion.findMany({ where: { talentId: { in: talentIds } }, select: { id: true } })).map(({ id }) => id);
+  const talentRequestIds = (await prisma.talentChangeRequest.findMany({ where: { OR: [{ submitterPersonId: { in: users.map(({ personId }) => personId) } }, { approvedTalentId: { in: talentIds } }] }, select: { id: true } })).map(({ id }) => id);
+  const talentRoundIds = (await prisma.talentTownshipRound.findMany({ where: { talentId: { in: talentIds } }, select: { id: true } })).map(({ id }) => id);
+  await prisma.attachmentLink.deleteMany({ where: { OR: [{ entityType: "TALENT_VERSION", entityId: { in: talentVersionIds } }, { entityType: "TALENT_CHANGE_REQUEST", entityId: { in: talentRequestIds } }] } });
+  await prisma.talentAIExtraction.deleteMany({ where: { requestId: { in: talentRequestIds } } });
+  await prisma.talentTownshipProgress.deleteMany({ where: { roundId: { in: talentRoundIds } } });
+  await prisma.talentTownshipRound.deleteMany({ where: { id: { in: talentRoundIds } } });
+  await prisma.talentContactPersonHistory.deleteMany({ where: { talentId: { in: talentIds } } });
+  await prisma.talentVersion.deleteMany({ where: { id: { in: talentVersionIds } } });
+  await prisma.talentChangeRequest.deleteMany({ where: { id: { in: talentRequestIds } } });
+  await prisma.talent.updateMany({ where: { id: { in: talentIds } }, data: { status: "DISABLED", mergedIntoId: null } });
+  await prisma.talent.deleteMany({ where: { id: { in: talentIds } } });
   await prisma.presenceReport.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.enterprise.updateMany({ where: enterpriseWhere, data: { status: "NORMAL", mergedIntoId: null, primaryContactId: null } });
   await prisma.enterpriseChangeRequest.deleteMany({ where: { OR: [{ submitterPersonId: { in: users.map(({ personId }) => personId) } }, { reviewerPersonId: { in: users.map(({ personId }) => personId) } }] } });
@@ -184,6 +203,9 @@ export async function seedAuthFixtures() {
   await prisma.enterpriseContact.create({ data: { id: enterpriseE2e.contactId, enterpriseId: enterpriseE2e.enterpriseId, name: "王经理", positionTitle: "企业联系人", phone: "13800003001", isPrimary: true, createdByPersonId: e2eUsers.admin.personId } });
   await prisma.enterprise.update({ where: { id: enterpriseE2e.enterpriseId }, data: { primaryContactId: enterpriseE2e.contactId } });
   await prisma.enterpriseVersion.create({ data: { enterpriseId: enterpriseE2e.enterpriseId, versionNo: 1, snapshotJson: { name: "宝应智造示范企业", currentVersion: 1 }, changeType: "CREATE", changedByPersonId: e2eUsers.admin.personId } });
+  await prisma.talent.create({ data: { id: talentE2e.talentId, name: "E2E 智能制造专家", scopeType: "DOMESTIC", organizationName: "宝应人才测试院", title: "首席研究员", professionalDirection: "智能制造与工业软件", workEducationExperience: "长期从事智能制造研究。", representativeAchievements: "获得多项发明专利。", originalRecommenderPersonId: e2eUsers.normal.personId, currentContactPersonId: e2eUsers.normal.personId, createdByPersonId: e2eUsers.admin.personId } });
+  await prisma.talentVersion.create({ data: { id: talentE2e.versionId, talentId: talentE2e.talentId, versionNo: 1, snapshotJson: { name: "E2E 智能制造专家", currentVersion: 1 }, changeType: "CREATE", changedByPersonId: e2eUsers.admin.personId } });
+  await prisma.talentContactPersonHistory.create({ data: { id: talentE2e.contactHistoryId, talentId: talentE2e.talentId, personId: e2eUsers.normal.personId, effectiveAt: new Date("2026-01-01"), changedByPersonId: e2eUsers.admin.personId } });
   await prisma.policyTag.upsert({ where: { id: policyE2e.tagId }, create: { id: policyE2e.tagId, name: "科技创新", normalizedName: "科技创新" }, update: { name: "科技创新", status: "ACTIVE" } });
   await prisma.attachment.create({ data: { id: policyE2e.oldAttachmentId, originalFilename: "E2E旧政策.pdf", extension: "pdf", declaredMimeType: "application/pdf", detectedMimeType: "application/pdf", detectedFileType: "pdf", expectedSizeBytes: 10, actualSizeBytes: 10, sha256: "b".repeat(64), bucket: "test", region: "test", objectKey: "policy/e2e-old.pdf", uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, uploadedByPersonId: e2eUsers.admin.personId } });
   await prisma.policy.create({ data: { id: policyE2e.oldPolicyId, title: "E2E 旧政策", issuingDepartment: "宝应县测试部门", publicationDate: new Date("2025-01-01"), level: "县级", publicationStatus: "PUBLISHED", effectStatus: "CURRENT", createdByPersonId: e2eUsers.admin.personId, publishedAt: new Date("2025-01-02") } });
