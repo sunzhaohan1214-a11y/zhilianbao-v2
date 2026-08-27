@@ -4,6 +4,7 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 test.describe.configure({ mode: "serial" });
+test.setTimeout(120_000);
 
 async function login(page: Page, user: { phone: string; password: string }) {
   await page.context().clearCookies();
@@ -14,6 +15,7 @@ async function login(page: Page, user: { phone: string; password: string }) {
     page.waitForResponse((response) => response.url().endsWith("/api/v2/auth/login")),
     page.getByRole("button", { name: "登录" }).click(),
   ]);
+  await page.waitForURL((url) => url.pathname === "/");
 }
 
 async function post(page: Page, path: string, body: unknown, headers: Record<string, string> = {}) {

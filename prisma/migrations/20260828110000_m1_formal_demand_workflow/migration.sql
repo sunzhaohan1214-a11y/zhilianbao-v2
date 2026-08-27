@@ -75,6 +75,15 @@ ALTER TABLE `demand_command_idempotency`
   ADD CONSTRAINT `demand_command_idempotency_demand_id_fkey`
     FOREIGN KEY (`demand_id`) REFERENCES `demands`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
+-- Provenance is append-only history. Future flows may append a new source row,
+-- but no command may rewrite an existing source, snapshot, or parent link.
+CREATE TRIGGER `demand_provenance_no_update`
+BEFORE UPDATE ON `demand_provenances`
+FOR EACH ROW
+BEGIN
+  SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'DEMAND_PROVENANCE_IMMUTABLE';
+END;
+
 -- first_published_at is a permanent first-publication fact. Core fields are
 -- immutable once the old row is already on the published side of the boundary.
 CREATE TRIGGER `demand_published_core_immutable`
