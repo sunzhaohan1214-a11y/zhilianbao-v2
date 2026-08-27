@@ -96,11 +96,25 @@ export class AttachmentService {
       throw new AttachmentError("ATTACHMENT_VALIDATION_FAILED", "尚未找到已上传的文件");
     }
     if (actualHead.sizeBytes > MAX_ATTACHMENT_SIZE_BYTES) {
-      await this.storage.deleteObject(finalHead.exists ? finalObjectKey : attachment.stagingObjectKey);
-      await this.repository.markUploadFailed(attachment.id, "ACTUAL_SIZE_EXCEEDS_LIMIT");
+      await this.failInvalidUpload({
+        attachmentId: attachment.id,
+        stagingObjectKey: attachment.stagingObjectKey,
+        finalObjectKey,
+        stagingExists: stagingHead.exists,
+        finalExists: finalHead.exists,
+        reason: "ACTUAL_SIZE_EXCEEDS_LIMIT",
+      });
       throw new AttachmentError("ATTACHMENT_TOO_LARGE", "单个附件不能超过 50MB");
     }
     if (actualHead.sizeBytes !== Number(attachment.expectedSizeBytes)) {
+      await this.failInvalidUpload({
+        attachmentId: attachment.id,
+        stagingObjectKey: attachment.stagingObjectKey,
+        finalObjectKey,
+        stagingExists: stagingHead.exists,
+        finalExists: finalHead.exists,
+        reason: "ACTUAL_SIZE_MISMATCH",
+      });
       throw new AttachmentError("ATTACHMENT_VALIDATION_FAILED", "文件实际大小与上传申请不一致");
     }
     const promoted = await this.storage.promoteObject(attachment.stagingObjectKey, finalObjectKey);
@@ -190,5 +204,26 @@ export class AttachmentService {
     const attachment = await this.repository.findById(id);
     if (!attachment) throw new AttachmentError("ATTACHMENT_NOT_FOUND", "附件不存在");
     return attachment;
+  }
+
+  private async failInvalidUpload(input: {
+    attachmentId: string;
+    stagingObjectKey: string;
+    finalObjectKey: string;
+    stagingExists: boolean;
+    finalExists: boolean;
+    reason: string;
+  }): Promise<void> {
+    let cleanupError: unknown;
+    try {
+      await Promise.all([
+        input.stagingExists ? this.storage.deleteObject(input.stagingObjectKey) : Promise.resolve(),
+        input.finalExists ? this.storage.deleteObject(input.finalObjectKey) : Promise.resolve(),
+      ]);
+    } catch (error) {
+      cleanupError = error;
+    }
+    await this.repository.markUploadFailed(input.attachmentId, input.reason);
+    if (cleanupError) throw cleanupError;
   }
 }

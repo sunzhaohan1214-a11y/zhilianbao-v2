@@ -20,6 +20,7 @@ export class AttachmentScanService {
     if (attachment.uploadStatus !== "UPLOADED" || !attachment.objectKey) {
       throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "附件尚未完成上传");
     }
+    // M0-006 must recover work that crashes after entering SCANNING so attachments cannot remain stuck forever.
     if (!await this.repository.beginScan(attachment.id)) {
       throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "附件扫描任务正在处理");
     }

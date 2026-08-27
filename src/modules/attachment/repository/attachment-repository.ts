@@ -194,7 +194,10 @@ export class AttachmentRepository {
       `;
       if (rows.length !== 1) return null;
       const attachment = await tx.attachment.findUniqueOrThrow({ where: { id: input.attachmentId } });
-      if (["ABORTED", "FAILED"].includes(attachment.uploadStatus)) return { attachment, link: null };
+      if (
+        attachment.uploadStatus !== "UPLOADED"
+        || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+      ) return { attachment, link: null };
       const link = await tx.attachmentLink.upsert({
         where: {
           attachmentId_entityType_entityId_relationType: {
@@ -217,7 +220,10 @@ export class AttachmentRepository {
       where: {
         isTemporary: true,
         uploadExpiresAt: { lt: now },
-        uploadStatus: { in: ["PENDING_UPLOAD", "FAILED"] },
+        OR: [
+          { uploadStatus: { in: ["PENDING_UPLOAD", "FAILED"] } },
+          { uploadStatus: "UPLOADED", scanStatus: { in: ["REJECTED", "FAILED"] } },
+        ],
         links: { none: {} },
       },
       orderBy: { uploadExpiresAt: "asc" },

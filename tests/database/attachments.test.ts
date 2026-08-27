@@ -1,13 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { getPrismaClient } from "@/lib/db/prisma";
+import { AttachmentCleanupService } from "@/modules/attachment/attachment-cleanup-service";
 import { AttachmentLinkService } from "@/modules/attachment/attachment-link-service";
 import { AttachmentScanService } from "@/modules/attachment/attachment-scan-service";
 import { AttachmentService } from "@/modules/attachment/attachment-service";
 import { MAX_ATTACHMENT_SIZE_BYTES, sha256 } from "@/modules/attachment/file-policy";
 import { AttachmentParentAuthorizerRegistry } from "@/modules/attachment/parent-authorization";
 import { AttachmentRepository } from "@/modules/attachment/repository/attachment-repository";
-import { FakeCleanScanner, FakeMalwareScanner, type FileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
+import {
+  FakeCleanScanner,
+  FakeMalwareScanner,
+  type FileScanAdapter,
+  UnavailableFileScanAdapter,
+} from "@/modules/attachment/scan/file-scan-adapter";
 import { InMemoryStorageAdapter } from "@/modules/attachment/storage/in-memory-storage-adapter";
 import { resolveCapabilities } from "@/modules/permissions/role-capabilities";
 import type { PermissionActor } from "@/modules/permissions/types";
@@ -65,6 +71,7 @@ function services(scanner: FileScanAdapter = new FakeCleanScanner(), registry = 
     service: new AttachmentService(repository, storage, registry, config),
     scanService: new AttachmentScanService(repository, storage, scanner),
     linkService: new AttachmentLinkService(repository),
+    cleanupService: new AttachmentCleanupService(repository, storage),
   };
 }
 
@@ -149,6 +156,144 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
     await expect(runtime.service.complete({ actor, attachmentId: intent.attachmentId }))
       .rejects.toMatchObject({ code: "ATTACHMENT_TOO_LARGE" });
     expect((await prisma.attachment.findUniqueOrThrow({ where: { id: intent.attachmentId } })).uploadStatus).toBe("FAILED");
+  });
+
+  it.each([99, 101])("fails and removes an actual %i-byte object declared as 100 bytes", async (actualSize) => {
+    const actor = await createActor(`size-mismatch-${actualSize}`);
+    const runtime = services();
+    const intent = await runtime.service.createUploadIntent({
+      actor,
+      filename: "size-mismatch.pdf",
+      declaredMimeType: "application/pdf",
+      expectedSizeBytes: 100,
+    });
+    attachmentIds.push(intent.attachmentId);
+    runtime.storage.putObjectForTest(intent.stagingObjectKey, Buffer.alloc(actualSize, 1));
+
+    await expect(runtime.service.complete({ actor, attachmentId: intent.attachmentId }))
+      .rejects.toMatchObject({ code: "ATTACHMENT_VALIDATION_FAILED", status: 422 });
+    const failed = await prisma.attachment.findUniqueOrThrow({ where: { id: intent.attachmentId } });
+    expect(failed).toMatchObject({
+      uploadStatus: "FAILED",
+      scanStatus: "FAILED",
+      scanReason: "ACTUAL_SIZE_MISMATCH",
+    });
+    await expect(runtime.storage.headObject(intent.stagingObjectKey)).resolves.toEqual({ exists: false, sizeBytes: 0 });
+    expect(await prisma.jobTask.count({ where: { idempotencyKey: `attachment-scan:${intent.attachmentId}` } })).toBe(0);
+    await expect(runtime.service.complete({ actor, attachmentId: intent.attachmentId }))
+      .rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+  });
+
+  it("enforces link state gates while preserving failed links for abort and cleanup", async () => {
+    const actor = await createActor("link-state-gate");
+    const runtime = services();
+
+    const pending = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
+    await expect(runtime.linkService.linkAttachment({
+      attachmentId: pending.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: pending.attachmentId } })).isTemporary).toBe(true);
+    await expect(runtime.service.abort({ actor, attachmentId: pending.attachmentId }))
+      .resolves.toMatchObject({ uploadStatus: "ABORTED" });
+
+    const cleanupCandidate = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
+    await expect(runtime.linkService.linkAttachment({
+      attachmentId: cleanupCandidate.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    await prisma.attachment.update({
+      where: { id: cleanupCandidate.attachmentId },
+      data: { uploadExpiresAt: new Date(Date.now() - 60_000) },
+    });
+    await expect(runtime.cleanupService.cleanupExpiredTemporaryAttachments()).resolves.toBe(1);
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: cleanupCandidate.attachmentId } })).uploadStatus).toBe("ABORTED");
+    await expect(runtime.storage.headObject(cleanupCandidate.stagingObjectKey)).resolves.toEqual({ exists: false, sizeBytes: 0 });
+
+    const pendingScan = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor, attachmentId: pendingScan.attachmentId });
+    await expect(runtime.linkService.linkAttachment({
+      attachmentId: pendingScan.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).resolves.toMatchObject({ attachmentId: pendingScan.attachmentId });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: pendingScan.attachmentId } })).isTemporary).toBe(false);
+    await expect(runtime.service.access({
+      actor,
+      attachmentId: pendingScan.attachmentId,
+      action: "PREVIEW",
+      context: requestContext(),
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+
+    const scanning = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor, attachmentId: scanning.attachmentId });
+    await expect(runtime.repository.beginScan(scanning.attachmentId)).resolves.toBe(true);
+    await expect(runtime.linkService.linkAttachment({
+      attachmentId: scanning.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).resolves.toMatchObject({ attachmentId: scanning.attachmentId });
+
+    const passed = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
+    await runtime.service.complete({ actor, attachmentId: passed.attachmentId });
+    await runtime.scanService.processAttachmentScan(passed.attachmentId);
+    await expect(runtime.linkService.linkAttachment({
+      attachmentId: passed.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).resolves.toMatchObject({ attachmentId: passed.attachmentId });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: passed.attachmentId } })).isTemporary).toBe(false);
+
+    const rejected = await intentAndUpload({
+      actor,
+      service: runtime.service,
+      storage: runtime.storage,
+      content: Buffer.from("MZ disguised executable"),
+    });
+    await runtime.service.complete({ actor, attachmentId: rejected.attachmentId });
+    await runtime.scanService.processAttachmentScan(rejected.attachmentId);
+    await expect(runtime.linkService.linkAttachment({
+      attachmentId: rejected.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: rejected.attachmentId } })).isTemporary).toBe(true);
+    await prisma.attachment.update({
+      where: { id: rejected.attachmentId },
+      data: { uploadExpiresAt: new Date(Date.now() - 60_000) },
+    });
+    await expect(runtime.cleanupService.cleanupExpiredTemporaryAttachments()).resolves.toBe(1);
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: rejected.attachmentId } })).uploadStatus).toBe("ABORTED");
+
+    const failedRuntime = services(new UnavailableFileScanAdapter());
+    const scanFailed = await intentAndUpload({ actor, service: failedRuntime.service, storage: failedRuntime.storage });
+    await failedRuntime.service.complete({ actor, attachmentId: scanFailed.attachmentId });
+    await expect(failedRuntime.scanService.processAttachmentScan(scanFailed.attachmentId))
+      .rejects.toMatchObject({ code: "ATTACHMENT_SCANNER_UNAVAILABLE" });
+    await expect(failedRuntime.linkService.linkAttachment({
+      attachmentId: scanFailed.attachmentId,
+      entityType: "TEST_RESOURCE",
+      entityId: randomUUID(),
+      relationType: "FILE",
+      authorizedDomainActorPersonId: actor.personId,
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: scanFailed.attachmentId } })).isTemporary).toBe(true);
+    await expect(failedRuntime.service.abort({ actor, attachmentId: scanFailed.attachmentId }))
+      .resolves.toMatchObject({ uploadStatus: "ABORTED" });
   });
 
   it("rejects executable magic disguised as PDF and infected scanner results", async () => {

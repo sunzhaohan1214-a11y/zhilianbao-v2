@@ -65,7 +65,7 @@ ATTACHMENT_SIGNED_URL_TTL_SECONDS
 ATTACHMENT_UPLOAD_TTL_SECONDS
 ```
 
-TEST 连接真实 COS 前须确认 bucket 为 private、地域与 bucket 名一致、服务账号仅有必需的对象权限、CORS 只允许 TEST 来源，并验证分片上传、断点续传、staging 清理和短时下载 URL。未配置扫描器或扫描器不可用时，附件保持不可访问（fail closed）。本里程碑只创建 `ATTACHMENT_SCAN` 任务和处理服务；通用扫描 Worker 从 M0-006 开始。
+TEST 连接真实 COS 前须确认 bucket 为 private、地域与 bucket 名一致、服务账号仅有必需的对象权限、CORS 只允许 TEST 来源，并验证分片上传、同一 SDK 实例内的 task 级暂停/恢复与 multipart 重试、staging 清理和短时下载 URL。该能力不等同于浏览器关闭后的无限期跨会话续传。未配置扫描器或扫描器不可用时，附件保持不可访问（fail closed）。本里程碑只创建 `ATTACHMENT_SCAN` 任务和处理服务；通用扫描 Worker 从 M0-006 开始，且必须恢复进入 `SCANNING` 后因进程崩溃而卡住的附件。
 
 ## 开发规范
 

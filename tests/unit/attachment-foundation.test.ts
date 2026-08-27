@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AttachmentError } from "@/modules/attachment/attachment-errors";
 import { AttachmentScanService } from "@/modules/attachment/attachment-scan-service";
+import { createAttachmentUploadTask } from "@/modules/attachment/client/cos-browser-uploader";
 import {
   inspectAttachmentContent,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -178,8 +179,9 @@ describe("M0-005 storage authorization and keys", () => {
     expect(`${staging}${finalKey}`).not.toContain("report.pdf");
   });
 
-  it("limits STS policy to one staging object without wildcard resources", () => {
+  it("grants only the advanced-upload actions on one exact staging object", () => {
     const objectKey = createStagingObjectKey(attachmentId, "0123456789abcdef");
+    const otherObjectKey = createStagingObjectKey("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "fedcba9876543210");
     const policy = buildCosUploadPolicy({
       bucket: "private-1250000000",
       region: "ap-shanghai",
@@ -188,15 +190,97 @@ describe("M0-005 storage authorization and keys", () => {
     const serialized = JSON.stringify(policy);
     expect(policy.statement).toHaveLength(1);
     expect(policy.statement[0].action).toEqual([...COS_UPLOAD_ACTIONS]);
+    expect(policy.statement[0].action).toContain("name/cos:HeadObject");
+    expect(policy.statement[0].action).toContain("name/cos:ListMultipartUploads");
     expect(policy.statement[0].resource).toContain(objectKey);
+    expect(policy.statement[0].resource.endsWith(`/${objectKey}`)).toBe(true);
     expect(policy.statement[0].resource).not.toBe("*");
     expect(serialized).not.toContain(`${objectKey}*`);
+    expect(serialized).not.toContain(otherObjectKey);
+    expect(serialized).not.toContain("attachments/");
+    for (const forbiddenAction of ["name/cos:GetObject", "name/cos:DeleteObject", "name/cos:PutObjectACL"]) {
+      expect(policy.statement[0].action).not.toContain(forbiddenAction);
+    }
   });
 
   it("honors the requested signed URL TTL", async () => {
     const storage = new InMemoryStorageAdapter();
     storage.putObjectForTest("attachments/a", Buffer.from("content"));
     await expect(storage.createSignedGetUrl("attachments/a", 300)).resolves.toContain("expires=300");
+  });
+});
+
+describe("M0-005 browser upload task controls", () => {
+  it("defers pre-ready controls and exposes pause, resume and terminal cancel", async () => {
+    let onTaskReady: ((id: string) => void) | undefined;
+    let finishUpload: (() => void) | undefined;
+    const uploadPromise = new Promise<void>((resolve) => { finishUpload = resolve; });
+    const client = {
+      uploadFile: vi.fn((params: { onTaskReady?: (id: string) => void }) => {
+        onTaskReady = params.onTaskReady;
+        return uploadPromise;
+      }),
+      pauseTask: vi.fn(),
+      restartTask: vi.fn(),
+      cancelTask: vi.fn(),
+    };
+    const task = createAttachmentUploadTask(
+      client as unknown as Parameters<typeof createAttachmentUploadTask>[0],
+      {
+        Bucket: "private-1250000000",
+        Region: "ap-shanghai",
+        Key: `incoming/${attachmentId}/file`,
+        Body: new Blob(["content"]),
+      },
+    );
+
+    expect(task.getTaskId()).toBeUndefined();
+    task.pause();
+    expect(client.pauseTask).not.toHaveBeenCalled();
+    onTaskReady?.("task-1");
+    expect(task.getTaskId()).toBe("task-1");
+    expect(client.pauseTask).toHaveBeenCalledWith("task-1");
+
+    task.resume();
+    expect(client.restartTask).toHaveBeenCalledWith("task-1");
+    task.cancel();
+    expect(client.cancelTask).toHaveBeenCalledWith("task-1");
+    task.resume();
+    expect(client.restartTask).toHaveBeenCalledTimes(1);
+
+    finishUpload?.();
+    await task.promise;
+  });
+
+  it("safely applies cancel requested before task readiness", () => {
+    let onTaskReady: ((id: string) => void) | undefined;
+    const client = {
+      uploadFile: vi.fn((params: { onTaskReady?: (id: string) => void }) => {
+        onTaskReady = params.onTaskReady;
+        return new Promise<void>(() => undefined);
+      }),
+      pauseTask: vi.fn(),
+      restartTask: vi.fn(),
+      cancelTask: vi.fn(),
+    };
+    const task = createAttachmentUploadTask(
+      client as unknown as Parameters<typeof createAttachmentUploadTask>[0],
+      {
+        Bucket: "private-1250000000",
+        Region: "ap-shanghai",
+        Key: `incoming/${attachmentId}/file`,
+        Body: new Blob(["content"]),
+      },
+    );
+
+    task.cancel();
+    expect(client.cancelTask).not.toHaveBeenCalled();
+    onTaskReady?.("task-2");
+    expect(client.cancelTask).toHaveBeenCalledWith("task-2");
+    task.pause();
+    task.resume();
+    expect(client.pauseTask).not.toHaveBeenCalled();
+    expect(client.restartTask).not.toHaveBeenCalled();
   });
 });
 

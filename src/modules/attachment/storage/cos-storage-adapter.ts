@@ -5,7 +5,9 @@ import type { StorageAdapter, StoredObjectHead, UploadAuthorization } from "./st
 
 export const COS_UPLOAD_ACTIONS = [
   "name/cos:PutObject",
+  "name/cos:HeadObject",
   "name/cos:InitiateMultipartUpload",
+  "name/cos:ListMultipartUploads",
   "name/cos:UploadPart",
   "name/cos:CompleteMultipartUpload",
   "name/cos:ListParts",
