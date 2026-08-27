@@ -152,7 +152,7 @@ describe("M1-003 real MySQL formal demand workflow", () => {
     const adminDraft = await createDraft(admin);
     expect(townshipDraft.provenances).toEqual([expect.objectContaining({ sourceType: "TOWNSHIP_DIRECT" })]);
     expect(adminDraft.provenances).toEqual([expect.objectContaining({ sourceType: "ADMIN_DIRECT" })]);
-    await expect(createDraft(otherTownship)).rejects.toMatchObject({ code: "DEMAND_NOT_FOUND" });
+    await expect(createDraft(otherTownship)).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
     const updated = await service.updateDraft({ actor: township, demandId: townshipDraft.id, changes: { title: "镇区修改后的核心标题" } });
     expect(updated?.title).toBe("镇区修改后的核心标题");
     await submit(townshipDraft.id);
