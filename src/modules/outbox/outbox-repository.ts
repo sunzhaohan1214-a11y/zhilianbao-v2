@@ -1,5 +1,4 @@
 import type { OutboxEvent, Prisma, PrismaClient } from "@/generated/prisma/client";
-import { getPrismaClient } from "@/lib/db/prisma";
 import type { OutboxEventType, OutboxPayloadByType } from "./outbox-types";
 
 function isUniqueConflict(error: unknown): boolean {
@@ -7,7 +6,7 @@ function isUniqueConflict(error: unknown): boolean {
 }
 
 export class OutboxRepository {
-  constructor(private readonly prisma: PrismaClient = getPrismaClient()) {}
+  constructor(private readonly prisma: PrismaClient | null = null) {}
 
   async append<T extends OutboxEventType>(input: {
     eventType: T;
@@ -16,9 +15,11 @@ export class OutboxRepository {
     payload: OutboxPayloadByType[T];
     dedupeKey: string;
     occurredAt?: Date;
-  }, client: PrismaClient | Prisma.TransactionClient = this.prisma): Promise<OutboxEvent> {
+  }, client?: PrismaClient | Prisma.TransactionClient): Promise<OutboxEvent> {
+    const database = client ?? this.prisma;
+    if (!database) throw new Error("OUTBOX_DATABASE_CLIENT_REQUIRED");
     try {
-      return await client.outboxEvent.create({ data: {
+      return await database.outboxEvent.create({ data: {
         eventType: input.eventType,
         aggregateType: input.aggregateType.slice(0, 100),
         aggregateId: input.aggregateId,
@@ -28,7 +29,7 @@ export class OutboxRepository {
       } });
     } catch (error) {
       if (!isUniqueConflict(error)) throw error;
-      return client.outboxEvent.findUniqueOrThrow({ where: { dedupeKey: input.dedupeKey.slice(0, 191) } });
+      return database.outboxEvent.findUniqueOrThrow({ where: { dedupeKey: input.dedupeKey.slice(0, 191) } });
     }
   }
 }

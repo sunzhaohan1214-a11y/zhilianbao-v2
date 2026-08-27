@@ -3,6 +3,8 @@ import type { Demand, DemandStatus, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import { PermissionError } from "@/modules/permissions/permission-errors";
 import type { PermissionActor } from "@/modules/permissions/types";
+import { OutboxRepository } from "@/modules/outbox/outbox-repository";
+import { activeAdministrators, activeAreaStaff } from "@/modules/notification/recipient-resolver";
 import {
   DEMAND_ENTITY,
   DEMAND_PRE_PUBLISH_STATUSES,
@@ -99,6 +101,7 @@ export function isDeterministicDuplicateTitle(source: string, candidate: string)
 
 export class FormalDemandService {
   constructor(private readonly repository = new FormalDemandRepository()) {}
+  private readonly outbox = new OutboxRepository();
 
   async formOptions(input: ServiceInput & { sourceType: DirectDemandSourceType }) {
     await authorizeActor({ actor: input.actor, action: "demand.formal.create" });
@@ -509,6 +512,14 @@ export class FormalDemandService {
           after: snapshotDemand(updated),
           context: input.context,
         });
+        const recipients = await activeAdministrators(tx, submittedAt);
+        await this.outbox.append({
+          eventType: "DEMAND_SUBMITTED_REVIEW",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: [], todoRecipientIds: recipients, eventKey: submittedAt.toISOString() },
+          dedupeKey: `demand:submitted-review:${demand.id}:${submittedAt.toISOString()}`,
+        }, tx);
         const result = commandResult(updated);
         await tx.demandCommandIdempotency.create({ data: {
           actorPersonId: input.actor.personId,
@@ -598,6 +609,14 @@ export class FormalDemandService {
           reason: review.reason,
           context: input.context,
         });
+        const recipients = await activeAreaStaff(tx, demand.responsibleAreaId, reviewedAt);
+        await this.outbox.append({
+          eventType: "DEMAND_REVIEW_RETURNED",
+          aggregateType: DEMAND_ENTITY,
+          aggregateId: demand.id,
+          payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: recipients, eventKey: reviewedAt.toISOString() },
+          dedupeKey: `demand:review-returned:${demand.id}:${reviewedAt.toISOString()}`,
+        }, tx);
         return commandResult(updated);
       }
 
@@ -647,6 +666,14 @@ export class FormalDemandService {
         after: snapshotDemand(updated),
         context: input.context,
       });
+      const recipients = [...new Set([demand.createdByPersonId, ...await activeAreaStaff(tx, demand.responsibleAreaId, reviewedAt)])];
+      await this.outbox.append({
+        eventType: "DEMAND_PUBLISHED",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: [], eventKey: reviewedAt.toISOString() },
+        dedupeKey: `demand:published:${demand.id}`,
+      }, tx);
       return commandResult(updated);
     });
   }
@@ -714,6 +741,14 @@ export class FormalDemandService {
         after: snapshotDemand(updated),
         context: input.context,
       });
+      const recipients = [...new Set([demand.createdByPersonId, ...await activeAreaStaff(tx, demand.responsibleAreaId, publishedAt)])];
+      await this.outbox.append({
+        eventType: "DEMAND_PUBLISHED",
+        aggregateType: DEMAND_ENTITY,
+        aggregateId: demand.id,
+        payload: { aggregateId: demand.id, recipientIds: recipients, todoRecipientIds: [], eventKey: publishedAt.toISOString() },
+        dedupeKey: `demand:published:${demand.id}`,
+      }, tx);
       return commandResult(updated);
     });
   }

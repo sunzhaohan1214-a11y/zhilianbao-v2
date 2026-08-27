@@ -298,6 +298,26 @@ enum HelpAssignmentType {
   REASSIGN
 }
 
+enum AnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  WITHDRAWN
+}
+
+enum AnnouncementAudienceType {
+  ALL
+  ROLE
+  ADMINISTRATIVE_AREA
+  ORGANIZATION
+  PERSON
+}
+
+enum TodoStatus {
+  OPEN
+  COMPLETED
+  STALE
+}
+
 model Person {
   id                             String                       @id @default(uuid()) @db.Char(36)
   name                           String                       @db.VarChar(80)
@@ -364,6 +384,15 @@ model Person {
   publishedDemands               Demand[]                      @relation("DemandPublisher")
   demandReviews                  DemandReview[]
   demandCommandIdempotencies     DemandCommandIdempotency[]
+  createdAnnouncements           Announcement[]               @relation("AnnouncementCreator")
+  publishedAnnouncements         Announcement[]               @relation("AnnouncementPublisher")
+  withdrawnAnnouncements         Announcement[]               @relation("AnnouncementWithdrawer")
+  createdAnnouncementVersions    AnnouncementVersion[]        @relation("AnnouncementVersionCreator")
+  targetedAnnouncementRules      AnnouncementAudienceRule[]   @relation("AnnouncementAudiencePerson")
+  createdAnnouncementRules       AnnouncementAudienceRule[]   @relation("AnnouncementAudienceCreator")
+  announcementRecipientStates    AnnouncementRecipientState[]
+  messages                       Message[]
+  todos                          Todo[]
 
   @@index([personStatus])
   @@map("persons")
@@ -463,6 +492,7 @@ model Organization {
   postBatchMemberships     BatchMembership[]            @relation("PostOrganization")
   transferredHelpRequests  HelpRequest[]                 @relation("HelpTransferredOrganization")
   helpAssignments          HelpAssignmentHistory[]       @relation("HelpAssignmentOrganization")
+  announcementAudienceRules AnnouncementAudienceRule[]
 
   @@index([parentId])
   @@index([type, status])
@@ -490,6 +520,7 @@ model AdministrativeArea {
   demandLeads                DemandLead[]
   demands                    Demand[]
   talentTownshipRounds       TalentTownshipRound[]
+  announcementAudienceRules  AnnouncementAudienceRule[]
 
   @@index([parentId])
   @@index([type, status, sortOrder])
@@ -1621,4 +1652,135 @@ model HelpCommandIdempotency {
   @@unique([actorPersonId, actionCode, idempotencyKeyHash], map: "help_claim_idempotency_key")
   @@index([helpRequestId, createdAt])
   @@map("help_command_idempotencies")
+}
+
+model Announcement {
+  id                  String              @id @default(uuid()) @db.Char(36)
+  status              AnnouncementStatus  @default(DRAFT)
+  currentVersionId    String?             @unique @map("current_version_id") @db.Char(36)
+  isPinned            Boolean             @default(false) @map("is_pinned")
+  pinnedKey           Int?                @unique @map("pinned_key") @db.UnsignedTinyInt
+  publishedAt         DateTime?           @map("published_at") @db.DateTime(3)
+  publishedByPersonId String?             @map("published_by_person_id") @db.Char(36)
+  withdrawnAt         DateTime?           @map("withdrawn_at") @db.DateTime(3)
+  withdrawnByPersonId String?             @map("withdrawn_by_person_id") @db.Char(36)
+  withdrawReason      String?             @map("withdraw_reason") @db.VarChar(500)
+  createdByPersonId   String              @map("created_by_person_id") @db.Char(36)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.DateTime(3)
+  currentVersion      AnnouncementVersion? @relation("AnnouncementCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  versions            AnnouncementVersion[] @relation("AnnouncementVersions")
+  audienceRules       AnnouncementAudienceRule[]
+  createdByPerson     Person              @relation("AnnouncementCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  publishedByPerson   Person?             @relation("AnnouncementPublisher", fields: [publishedByPersonId], references: [id], onDelete: Restrict)
+  withdrawnByPerson   Person?             @relation("AnnouncementWithdrawer", fields: [withdrawnByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([status, isPinned, publishedAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("announcements")
+}
+
+model AnnouncementVersion {
+  id                String                       @id @default(uuid()) @db.Char(36)
+  announcementId    String                       @map("announcement_id") @db.Char(36)
+  versionNo         Int                          @map("version_no") @db.UnsignedInt
+  title             String                       @db.VarChar(200)
+  body              String                       @db.Text
+  isImportant       Boolean                      @default(false) @map("is_important")
+  needConfirm       Boolean                      @default(false) @map("need_confirm")
+  reason            String?                      @db.VarChar(500)
+  createdByPersonId String                       @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  announcement      Announcement                 @relation("AnnouncementVersions", fields: [announcementId], references: [id], onDelete: Restrict)
+  currentFor        Announcement?                @relation("AnnouncementCurrentVersion")
+  createdByPerson   Person                       @relation("AnnouncementVersionCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  recipientStates   AnnouncementRecipientState[]
+
+  @@unique([announcementId, versionNo])
+  @@index([createdByPersonId, createdAt])
+  @@map("announcement_versions")
+}
+
+model AnnouncementAudienceRule {
+  id                String                       @id @default(uuid()) @db.Char(36)
+  announcementId    String                       @map("announcement_id") @db.Char(36)
+  audienceType      AnnouncementAudienceType     @map("audience_type")
+  roleCode          RoleCode?                    @map("role_code")
+  areaId            String?                      @map("area_id") @db.Char(36)
+  organizationId    String?                      @map("organization_id") @db.Char(36)
+  personId          String?                      @map("person_id") @db.Char(36)
+  effectiveAt       DateTime                     @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime?                    @map("expired_at") @db.DateTime(3)
+  createdByPersonId String                       @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  announcement      Announcement                 @relation(fields: [announcementId], references: [id], onDelete: Restrict)
+  area              AdministrativeArea?          @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  organization      Organization?                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  person            Person?                      @relation("AnnouncementAudiencePerson", fields: [personId], references: [id], onDelete: Restrict)
+  createdByPerson   Person                       @relation("AnnouncementAudienceCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([announcementId, effectiveAt, expiredAt])
+  @@index([audienceType, roleCode, areaId, organizationId, personId])
+  @@map("announcement_audience_rules")
+}
+
+model AnnouncementRecipientState {
+  id          String              @id @default(uuid()) @db.Char(36)
+  versionId   String              @map("version_id") @db.Char(36)
+  personId    String              @map("person_id") @db.Char(36)
+  readAt      DateTime?           @map("read_at") @db.DateTime(3)
+  confirmedAt DateTime?           @map("confirmed_at") @db.DateTime(3)
+  revokedAt   DateTime?           @map("revoked_at") @db.DateTime(3)
+  createdAt   DateTime            @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.DateTime(3)
+  version     AnnouncementVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  person      Person              @relation(fields: [personId], references: [id], onDelete: Restrict)
+
+  @@unique([versionId, personId])
+  @@index([personId, revokedAt, confirmedAt])
+  @@map("announcement_recipient_states")
+}
+
+model Message {
+  id            String   @id @default(uuid()) @db.Char(36)
+  personId      String   @map("person_id") @db.Char(36)
+  messageType   String   @map("message_type") @db.VarChar(100)
+  title         String   @db.VarChar(200)
+  summary       String   @db.VarChar(500)
+  aggregateType String?  @map("aggregate_type") @db.VarChar(100)
+  aggregateId   String?  @map("aggregate_id") @db.Char(36)
+  actionUrl     String?  @map("action_url") @db.VarChar(500)
+  dedupeKey     String   @unique @map("dedupe_key") @db.VarChar(191)
+  eventAt       DateTime @map("event_at") @db.DateTime(3)
+  readAt        DateTime? @map("read_at") @db.DateTime(3)
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+  person        Person   @relation(fields: [personId], references: [id], onDelete: Restrict)
+
+  @@index([personId, readAt, eventAt])
+  @@index([aggregateType, aggregateId])
+  @@map("messages")
+}
+
+model Todo {
+  id            String     @id @default(uuid()) @db.Char(36)
+  personId      String     @map("person_id") @db.Char(36)
+  todoType      String     @map("todo_type") @db.VarChar(100)
+  module        String     @db.VarChar(100)
+  aggregateType String     @map("aggregate_type") @db.VarChar(100)
+  aggregateId   String     @map("aggregate_id") @db.Char(36)
+  actionUrl     String     @map("action_url") @db.VarChar(500)
+  dedupeKey     String     @unique @map("dedupe_key") @db.VarChar(191)
+  eventKey      String?    @map("event_key") @db.VarChar(191)
+  status        TodoStatus @default(OPEN)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.DateTime(3)
+  completedAt   DateTime?  @map("completed_at") @db.DateTime(3)
+  staleAt       DateTime?  @map("stale_at") @db.DateTime(3)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.DateTime(3)
+  person        Person     @relation(fields: [personId], references: [id], onDelete: Restrict)
+
+  @@index([personId, status, module, createdAt])
+  @@index([aggregateType, aggregateId, status])
+  @@index([eventKey])
+  @@map("todos")
 }

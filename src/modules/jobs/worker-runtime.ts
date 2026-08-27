@@ -4,6 +4,8 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attachment-uploaded-handler";
+import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/announcement-notification-handler";
+import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
@@ -61,6 +63,12 @@ export class WorkerRuntime {
 
     const outboxHandlers = new OutboxHandlerRegistry();
     outboxHandlers.register("ATTACHMENT_UPLOADED", new AttachmentUploadedOutboxHandler(this.jobs));
+    for (const eventType of ["ANNOUNCEMENT_PUBLISHED", "ANNOUNCEMENT_UPDATED", "ANNOUNCEMENT_AUDIENCE_ADDED", "ANNOUNCEMENT_AUDIENCE_REMOVED", "ANNOUNCEMENT_WITHDRAWN"] as const) {
+      outboxHandlers.register(eventType, new AnnouncementNotificationHandler(eventType));
+    }
+    for (const eventType of ["DEMAND_SUBMITTED_REVIEW", "DEMAND_REVIEW_RETURNED", "DEMAND_PUBLISHED", "HELP_TRANSFERRED_ORG", "HELP_ASSIGNED_PERSON", "HELP_CLAIMED", "HELP_COMPLETED", "HELP_REOPENED", "HELP_REASSIGNED", "HELP_WITHDRAWN"] as const) {
+      outboxHandlers.register(eventType, new BusinessNotificationHandler(eventType));
+    }
     this.outbox = dependencies?.outbox ?? new OutboxConsumer(outboxHandlers, config.outboxMaxAttempts, logger);
   }
 

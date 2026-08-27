@@ -1,0 +1,2 @@
+import Link from "next/link"; import { AdminAnnouncementEditor } from "@/components/announcement/admin-announcement-editor";
+export default function NewAnnouncementPage(){return <section><Link href="/admin/announcements" className="text-sm text-blue-600">‹ 返回公告治理</Link><h1 className="mt-3 text-3xl font-semibold">新建公告草稿</h1><div className="mt-6 rounded-2xl border bg-white p-6"><AdminAnnouncementEditor/></div></section>}
