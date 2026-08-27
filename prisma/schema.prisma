@@ -895,7 +895,7 @@ model PolicyReplacementRelation {
   createdByPerson   Person    @relation("PolicyReplacementCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
   endedByPerson     Person?   @relation("PolicyReplacementEnder", fields: [endedByPersonId], references: [id], onDelete: Restrict)
 
-  @@unique([oldPolicyId, newPolicyId, effectiveAt])
+  @@unique([oldPolicyId, newPolicyId, effectiveAt], map: "policy_replacement_unique")
   @@index([oldPolicyId, endedAt])
   @@index([newPolicyId, endedAt])
   @@index([createdByPersonId, createdAt])

@@ -97,7 +97,7 @@ CREATE TABLE `policy_replacement_relations` (
   `ended_by_person_id` CHAR(36) NULL,
   `end_reason` VARCHAR(500) NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  UNIQUE INDEX `policy_replacement_relations_old_policy_id_new_policy_id_effective_at_key` (`old_policy_id`, `new_policy_id`, `effective_at`),
+  UNIQUE INDEX `policy_replacement_unique` (`old_policy_id`, `new_policy_id`, `effective_at`),
   INDEX `policy_replacement_relations_old_policy_id_ended_at_idx` (`old_policy_id`, `ended_at`),
   INDEX `policy_replacement_relations_new_policy_id_ended_at_idx` (`new_policy_id`, `ended_at`),
   INDEX `policy_replacement_relations_created_by_person_id_created_at_idx` (`created_by_person_id`, `created_at`),
