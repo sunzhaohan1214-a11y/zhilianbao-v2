@@ -60,6 +60,7 @@ export function staleTodos(tx: Prisma.TransactionClient, input: {
   aggregateId: string;
   personIds?: readonly string[];
   todoType?: string;
+  eventKey?: string;
   excludeEventKey?: string;
   now?: Date;
 }) {
@@ -70,6 +71,7 @@ export function staleTodos(tx: Prisma.TransactionClient, input: {
       status: "OPEN",
       ...(input.personIds ? { personId: { in: [...input.personIds] } } : {}),
       ...(input.todoType ? { todoType: input.todoType } : {}),
+      ...(input.eventKey ? { eventKey: input.eventKey } : {}),
       ...(input.excludeEventKey ? { NOT: { eventKey: input.excludeEventKey } } : {}),
     },
     data: { status: "STALE", staleAt: input.now ?? new Date() },

@@ -6,6 +6,7 @@ import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attachment-uploaded-handler";
 import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/announcement-notification-handler";
 import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-notification-handler";
+import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
 import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
@@ -71,6 +72,9 @@ export class WorkerRuntime {
     }
     for (const eventType of ["DEMAND_SUBMITTED_REVIEW", "DEMAND_REVIEW_RETURNED", "DEMAND_PUBLISHED", "HELP_TRANSFERRED_ORG", "HELP_ASSIGNED_PERSON", "HELP_CLAIMED", "HELP_COMPLETED", "HELP_REOPENED", "HELP_REASSIGNED", "HELP_WITHDRAWN"] as const) {
       outboxHandlers.register(eventType, new BusinessNotificationHandler(eventType));
+    }
+    for (const eventType of ["DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED", "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] as const) {
+      outboxHandlers.register(eventType, new DemandParticipationNotificationHandler(eventType));
     }
     outboxHandlers.register("TRIP_PARTICIPANT_ADDED", new TripParticipantAddedHandler());
     outboxHandlers.register("TRIP_UPDATED", new TripLifecycleHandler("TRIP_UPDATED"));
