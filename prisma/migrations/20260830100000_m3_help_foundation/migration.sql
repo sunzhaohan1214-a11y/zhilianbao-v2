@@ -51,9 +51,9 @@ CREATE TABLE `help_assignment_history` (
   `changed_by_person_id` CHAR(36) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE INDEX `help_assignment_history_help_request_id_active_key_key` (`help_request_id`, `active_key`),
-  INDEX `help_assignment_history_help_request_id_effective_at_expired_at_idx` (`help_request_id`, `effective_at`, `expired_at`),
+  INDEX `help_assignment_request_period_idx` (`help_request_id`, `effective_at`, `expired_at`),
   INDEX `help_assignment_history_person_id_effective_at_expired_at_idx` (`person_id`, `effective_at`, `expired_at`),
-  INDEX `help_assignment_history_organization_id_effective_at_expired_at_idx` (`organization_id`, `effective_at`, `expired_at`),
+  INDEX `help_assignment_org_period_idx` (`organization_id`, `effective_at`, `expired_at`),
   INDEX `help_assignment_history_changed_by_person_id_created_at_idx` (`changed_by_person_id`, `created_at`),
   PRIMARY KEY (`id`),
   CONSTRAINT `help_assignment_target_check` CHECK (
@@ -85,7 +85,7 @@ CREATE TABLE `help_command_idempotencies` (
   `idempotency_key_hash` CHAR(64) NOT NULL,
   `payload_hash` CHAR(64) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  UNIQUE INDEX `help_command_idempotencies_actor_person_id_action_code_idempotency_key_hash_key` (`actor_person_id`, `action_code`, `idempotency_key_hash`),
+  UNIQUE INDEX `help_claim_idempotency_key` (`actor_person_id`, `action_code`, `idempotency_key_hash`),
   INDEX `help_command_idempotencies_help_request_id_created_at_idx` (`help_request_id`, `created_at`),
   PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

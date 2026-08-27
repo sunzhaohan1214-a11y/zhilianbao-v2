@@ -1585,9 +1585,9 @@ model HelpAssignmentHistory {
   changedByPerson   Person             @relation("HelpAssignmentChanger", fields: [changedByPersonId], references: [id], onDelete: Restrict)
 
   @@unique([helpRequestId, activeKey])
-  @@index([helpRequestId, effectiveAt, expiredAt])
+  @@index([helpRequestId, effectiveAt, expiredAt], map: "help_assignment_request_period_idx")
   @@index([personId, effectiveAt, expiredAt])
-  @@index([organizationId, effectiveAt, expiredAt])
+  @@index([organizationId, effectiveAt, expiredAt], map: "help_assignment_org_period_idx")
   @@index([changedByPersonId, createdAt])
   @@map("help_assignment_history")
 }
@@ -1618,7 +1618,7 @@ model HelpCommandIdempotency {
   helpRequest        HelpRequest @relation(fields: [helpRequestId], references: [id], onDelete: Restrict)
   actorPerson        Person      @relation("HelpIdempotencyActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
 
-  @@unique([actorPersonId, actionCode, idempotencyKeyHash])
+  @@unique([actorPersonId, actionCode, idempotencyKeyHash], map: "help_claim_idempotency_key")
   @@index([helpRequestId, createdAt])
   @@map("help_command_idempotencies")
 }
