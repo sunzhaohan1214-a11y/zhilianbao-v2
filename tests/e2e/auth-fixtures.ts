@@ -14,6 +14,7 @@ export const e2eUsers = {
   disabled: { personId: "10000000-0000-4000-8000-000000000010", accountId: "20000000-0000-4000-8000-000000000010", phone: "13800001010", password: "Disabled-pass-123" },
   department: { personId: "10000000-0000-4000-8000-000000000011", accountId: "20000000-0000-4000-8000-000000000011", phone: "13800001011", password: "Department-pass-123" },
   ministerOnly: { personId: "10000000-0000-4000-8000-000000000012", accountId: "20000000-0000-4000-8000-000000000012", phone: "13800001012", password: "Minister-only-pass-123" },
+  township2: { personId: "10000000-0000-4000-8000-000000000014", accountId: "20000000-0000-4000-8000-000000000014", phone: "13800001014", password: "Township2-pass-123" },
 } as const;
 
 export const enterpriseE2e = {
@@ -22,6 +23,7 @@ export const enterpriseE2e = {
   organizationId: "40000000-0000-4000-8000-000000000001",
   dispatchOrganizationId: "40000000-0000-4000-8000-000000000002",
   departmentOrganizationId: "40000000-0000-4000-8000-000000000003",
+  organizationBId: "40000000-0000-4000-8000-000000000004",
   batchId: "50000000-0000-4000-8000-000000000001",
   enterpriseId: "60000000-0000-4000-8000-000000000001",
   enterprise2Id: "60000000-0000-4000-8000-000000000002",
@@ -51,6 +53,16 @@ export async function seedAuthFixtures() {
   if (!/test/i.test(databaseUrl)) throw new Error("E2E auth fixtures require an explicitly named test database");
   const prisma = getPrismaClient();
   const users = Object.values(e2eUsers);
+  const helpIds = (await prisma.helpRequest.findMany({ where: { submitterPersonId: { in: users.map(({ personId }) => personId) } }, select: { id: true } })).map(({ id }) => id);
+  const helpProgressIds = (await prisma.helpProgress.findMany({ where: { helpRequestId: { in: helpIds } }, select: { id: true } })).map(({ id }) => id);
+  const helpAttachmentIds = (await prisma.attachmentLink.findMany({ where: { OR: [{ entityType: "HELP_REQUEST", entityId: { in: helpIds } }, { entityType: "HELP_PROGRESS", entityId: { in: helpProgressIds } }] }, select: { attachmentId: true } })).map(({ attachmentId }) => attachmentId);
+  await prisma.attachmentLink.deleteMany({ where: { OR: [{ entityType: "HELP_REQUEST", entityId: { in: helpIds } }, { entityType: "HELP_PROGRESS", entityId: { in: helpProgressIds } }] } });
+  await prisma.helpCommandIdempotency.deleteMany({ where: { helpRequestId: { in: helpIds } } });
+  await prisma.helpProgress.deleteMany({ where: { helpRequestId: { in: helpIds } } });
+  await prisma.helpAssignmentHistory.deleteMany({ where: { helpRequestId: { in: helpIds } } });
+  await prisma.helpRequest.deleteMany({ where: { id: { in: helpIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: helpAttachmentIds } } });
+  await prisma.attachment.deleteMany({ where: { id: { in: helpAttachmentIds } } });
   const policyRecords = await prisma.policy.findMany({ where: { createdByPersonId: { in: users.map(({ personId }) => personId) } }, select: { id: true, versions: { select: { id: true } } } });
   const policyIds = policyRecords.map(({ id }) => id); const policyVersionIds = policyRecords.flatMap(({ versions }) => versions.map(({ id }) => id));
   const policyAttachmentIds = (await prisma.attachmentLink.findMany({ where: { entityType: "POLICY_CONTENT_VERSION", entityId: { in: policyVersionIds } }, select: { attachmentId: true } })).map(({ attachmentId }) => attachmentId);
@@ -141,6 +153,7 @@ export async function seedAuthFixtures() {
   await prisma.memberPreferredDemandType.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.memberCapabilityProfile.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.groupLeaderAssignment.deleteMany({ where: { OR: [{ personId: { in: users.map(({ personId }) => personId) } }, { grantedByPersonId: { in: users.map(({ personId }) => personId) } }] } });
+  await prisma.specialPermissionGrant.deleteMany({ where: { OR: [{ personId: { in: users.map(({ personId }) => personId) } }, { grantedByPersonId: { in: users.map(({ personId }) => personId) } }] } });
   await prisma.batchMembership.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
   await prisma.batch.deleteMany({ where: { name: "E2E 延任批次", id: { notIn: [enterpriseE2e.batchId, enterpriseE2e.pastBatchId] } } });
   await prisma.appointment.deleteMany({ where: { personId: { in: users.map(({ personId }) => personId) } } });
@@ -192,6 +205,7 @@ export async function seedAuthFixtures() {
       { personId: e2eUsers.superAdmin.personId, roleCode: "SUPER_ADMIN" as const },
       { personId: e2eUsers.normal.personId, roleCode: "MEMBER_CURRENT" as const },
       { personId: e2eUsers.township.personId, roleCode: "TOWNSHIP_STAFF" as const },
+      { personId: e2eUsers.township2.personId, roleCode: "TOWNSHIP_STAFF" as const },
       { personId: e2eUsers.alumni.personId, roleCode: "MEMBER_ALUMNI_PLATFORM" as const },
       { personId: e2eUsers.department.personId, roleCode: "DEPARTMENT_STAFF" as const },
       { personId: e2eUsers.ministerOnly.personId, roleCode: "MINISTER" as const },
@@ -229,13 +243,16 @@ export async function seedAuthFixtures() {
   }
   await prisma.organization.upsert({ where: { id: enterpriseE2e.organizationId }, create: { id: enterpriseE2e.organizationId, name: "E2E 安宜镇", type: "TOWNSHIP_ORG" }, update: { status: "ACTIVE" } });
   await prisma.organization.upsert({ where: { id: enterpriseE2e.departmentOrganizationId }, create: { id: enterpriseE2e.departmentOrganizationId, name: "E2E 县级部门", type: "DEPARTMENT" }, update: { name: "E2E 县级部门", type: "DEPARTMENT", status: "ACTIVE" } });
+  await prisma.organization.upsert({ where: { id: enterpriseE2e.organizationBId }, create: { id: enterpriseE2e.organizationBId, name: "E2E 射阳湖镇", type: "TOWNSHIP_ORG" }, update: { status: "ACTIVE" } });
   const mapping = await prisma.organizationAreaMapping.findFirst({ where: { organizationId: enterpriseE2e.organizationId, areaId: enterpriseE2e.areaAId, expiredAt: null } });
   if (!mapping) await prisma.organizationAreaMapping.create({ data: { organizationId: enterpriseE2e.organizationId, areaId: enterpriseE2e.areaAId, effectiveAt: new Date("2026-01-01") } });
   await prisma.departmentTownshipRelation.deleteMany({ where: { departmentOrganizationId: enterpriseE2e.departmentOrganizationId } });
   await prisma.departmentTownshipRelation.create({ data: { departmentOrganizationId: enterpriseE2e.departmentOrganizationId, areaId: enterpriseE2e.areaAId, effectiveAt: new Date("2026-01-01") } });
   await prisma.appointment.createMany({ data: [
     { personId: e2eUsers.township.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "企业服务专员", effectiveAt: new Date("2026-01-01") },
+    { personId: e2eUsers.township2.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "求助服务专员", effectiveAt: new Date("2026-01-01") },
     { personId: e2eUsers.normal.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "挂职专员", effectiveAt: new Date("2026-01-01") },
+    { personId: e2eUsers.groupLeader.personId, organizationId: enterpriseE2e.organizationBId, positionTitle: "其他镇街专员", effectiveAt: new Date("2026-01-01") },
     { personId: e2eUsers.admin.personId, organizationId: enterpriseE2e.organizationId, positionTitle: "管理员兼镇区服务专员", effectiveAt: new Date("2026-01-01") },
     { personId: e2eUsers.department.personId, organizationId: enterpriseE2e.departmentOrganizationId, positionTitle: "部门工作人员", effectiveAt: new Date("2026-01-01") },
   ] });

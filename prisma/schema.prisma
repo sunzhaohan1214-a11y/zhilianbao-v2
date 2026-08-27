@@ -270,6 +270,34 @@ enum TalentAIExtractionStatus {
   CONFIRMED
 }
 
+enum HelpCategory {
+  ACCOMMODATION
+  TRANSPORTATION
+  DINING
+  WORK
+  LIFE
+  OTHER
+}
+
+enum HelpUrgency {
+  NORMAL
+  URGENT
+}
+
+enum HelpRequestStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  WITHDRAWN
+}
+
+enum HelpAssignmentType {
+  DIRECT_PERSON
+  ORGANIZATION_TRANSFER
+  CLAIM
+  REASSIGN
+}
+
 model Person {
   id                             String                       @id @default(uuid()) @db.Char(36)
   name                           String                       @db.VarChar(80)
@@ -334,8 +362,14 @@ model Person {
   talentRoundProgresses          TalentTownshipProgress[]     @relation("TalentProgressCreator")
   requestedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIRequester")
   confirmedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIConfirmer")
-  reviewedDemands                Demand[]                     @relation("DemandReviewer")
-  publishedDemands               Demand[]                     @relation("DemandPublisher")
+  submittedHelpRequests          HelpRequest[]                 @relation("HelpSubmitter")
+  ownedHelpRequests              HelpRequest[]                 @relation("HelpCurrentOwner")
+  helpAssignments                HelpAssignmentHistory[]       @relation("HelpAssignmentPerson")
+  changedHelpAssignments         HelpAssignmentHistory[]       @relation("HelpAssignmentChanger")
+  helpProgresses                 HelpProgress[]                @relation("HelpProgressCreator")
+  helpCommandIdempotencies       HelpCommandIdempotency[]      @relation("HelpIdempotencyActor")
+  reviewedDemands                Demand[]                      @relation("DemandReviewer")
+  publishedDemands               Demand[]                      @relation("DemandPublisher")
   demandReviews                  DemandReview[]
   demandCommandIdempotencies     DemandCommandIdempotency[]
 
@@ -435,6 +469,8 @@ model Organization {
   departmentAreaRelations  DepartmentTownshipRelation[]
   dispatchBatchMemberships BatchMembership[]            @relation("DispatchOrganization")
   postBatchMemberships     BatchMembership[]            @relation("PostOrganization")
+  transferredHelpRequests  HelpRequest[]                 @relation("HelpTransferredOrganization")
+  helpAssignments          HelpAssignmentHistory[]       @relation("HelpAssignmentOrganization")
 
   @@index([parentId])
   @@index([type, status])
@@ -1667,4 +1703,97 @@ model TalentAIExtraction {
   @@index([attachmentId])
   @@index([status, createdAt])
   @@map("talent_ai_extractions")
+}
+
+model HelpRequest {
+  id                        String                  @id @default(uuid()) @db.Char(36)
+  businessNo                String                  @unique @map("business_no") @db.VarChar(32)
+  submitterPersonId         String                  @map("submitter_person_id") @db.Char(36)
+  category                  HelpCategory
+  title                     String                  @db.VarChar(200)
+  description               String                  @db.Text
+  urgency                   HelpUrgency             @default(NORMAL)
+  status                    HelpRequestStatus       @default(PENDING)
+  currentOwnerPersonId      String?                 @map("current_owner_person_id") @db.Char(36)
+  transferredOrganizationId String?                 @map("transferred_organization_id") @db.Char(36)
+  expectedCompleteAt        DateTime?               @map("expected_complete_at") @db.DateTime(3)
+  completedAt               DateTime?               @map("completed_at") @db.DateTime(3)
+  completionSummary         String?                 @map("completion_summary") @db.VarChar(5000)
+  withdrawnAt               DateTime?               @map("withdrawn_at") @db.DateTime(3)
+  withdrawReason            String?                 @map("withdraw_reason") @db.VarChar(500)
+  reopenedAt                DateTime?               @map("reopened_at") @db.DateTime(3)
+  reopenReason              String?                 @map("reopen_reason") @db.VarChar(500)
+  sourceSystem              String                  @default("V2") @map("source_system") @db.VarChar(50)
+  sourceRecordId            String?                 @map("source_record_id") @db.VarChar(191)
+  createdAt                 DateTime                @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                 DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
+  submitter                 Person                  @relation("HelpSubmitter", fields: [submitterPersonId], references: [id], onDelete: Restrict)
+  currentOwner              Person?                 @relation("HelpCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  transferredOrganization   Organization?           @relation("HelpTransferredOrganization", fields: [transferredOrganizationId], references: [id], onDelete: Restrict)
+  assignments               HelpAssignmentHistory[]
+  progresses                HelpProgress[]
+  commandIdempotencies      HelpCommandIdempotency[]
+
+  @@unique([sourceSystem, sourceRecordId])
+  @@index([submitterPersonId, createdAt])
+  @@index([currentOwnerPersonId, status, updatedAt])
+  @@index([transferredOrganizationId, status, createdAt])
+  @@index([status, expectedCompleteAt])
+  @@map("help_requests")
+}
+
+model HelpAssignmentHistory {
+  id                String             @id @default(uuid()) @db.Char(36)
+  helpRequestId     String             @map("help_request_id") @db.Char(36)
+  personId          String?            @map("person_id") @db.Char(36)
+  organizationId    String?            @map("organization_id") @db.Char(36)
+  assignmentType    HelpAssignmentType @map("assignment_type")
+  effectiveAt       DateTime           @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime?          @map("expired_at") @db.DateTime(3)
+  activeKey         Int?               @default(1) @map("active_key") @db.UnsignedTinyInt
+  reason            String?            @db.VarChar(500)
+  changedByPersonId String             @map("changed_by_person_id") @db.Char(36)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.DateTime(3)
+  helpRequest       HelpRequest        @relation(fields: [helpRequestId], references: [id], onDelete: Restrict)
+  person            Person?            @relation("HelpAssignmentPerson", fields: [personId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  organization      Organization?      @relation("HelpAssignmentOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  changedByPerson   Person             @relation("HelpAssignmentChanger", fields: [changedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([helpRequestId, activeKey])
+  @@index([helpRequestId, effectiveAt, expiredAt], map: "help_assignment_request_period_idx")
+  @@index([personId, effectiveAt, expiredAt])
+  @@index([organizationId, effectiveAt, expiredAt], map: "help_assignment_org_period_idx")
+  @@index([changedByPersonId, createdAt])
+  @@map("help_assignment_history")
+}
+
+model HelpProgress {
+  id                String      @id @default(uuid()) @db.Char(36)
+  helpRequestId     String      @map("help_request_id") @db.Char(36)
+  content           String      @db.VarChar(5000)
+  nextStep          String?     @map("next_step") @db.VarChar(2000)
+  createdByPersonId String      @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime    @default(now()) @map("created_at") @db.DateTime(3)
+  helpRequest       HelpRequest @relation(fields: [helpRequestId], references: [id], onDelete: Restrict)
+  createdByPerson   Person      @relation("HelpProgressCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@index([helpRequestId, createdAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("help_progresses")
+}
+
+model HelpCommandIdempotency {
+  id                 String      @id @default(uuid()) @db.Char(36)
+  helpRequestId      String      @map("help_request_id") @db.Char(36)
+  actorPersonId      String      @map("actor_person_id") @db.Char(36)
+  actionCode         String      @map("action_code") @db.VarChar(100)
+  idempotencyKeyHash String      @map("idempotency_key_hash") @db.Char(64)
+  payloadHash        String      @map("payload_hash") @db.Char(64)
+  createdAt          DateTime    @default(now()) @map("created_at") @db.DateTime(3)
+  helpRequest        HelpRequest @relation(fields: [helpRequestId], references: [id], onDelete: Restrict)
+  actorPerson        Person      @relation("HelpIdempotencyActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([actorPersonId, actionCode, idempotencyKeyHash], map: "help_claim_idempotency_key")
+  @@index([helpRequestId, createdAt])
+  @@map("help_command_idempotencies")
 }
