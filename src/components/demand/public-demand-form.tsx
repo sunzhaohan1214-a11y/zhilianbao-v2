@@ -11,6 +11,15 @@ type SubmissionAttempt = {
   attachments: PublicAttachmentReference[];
 };
 
+async function fileAsBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
 export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: string }) {
   const formStartedAt = useRef(new Date().toISOString());
   const attempt = useRef<SubmissionAttempt | null>(null);
@@ -34,7 +43,16 @@ export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: str
       const intentPayload = await intentResponse.json();
       if (!intentResponse.ok) throw new Error(intentPayload.error?.message ?? "附件上传申请失败");
       const intent = intentPayload.data as PublicAttachmentIntent;
-      await uploadAttachmentToCos(intent, file).promise;
+      if (intent.upload.type === "TEST_MEMORY") {
+        const testUploadResponse = await fetch(`/api/v2/test/public-attachments/${intent.attachmentId}/upload`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadToken: intent.uploadToken, base64: await fileAsBase64(file) }),
+        });
+        if (!testUploadResponse.ok) throw new Error("测试附件上传失败");
+      } else {
+        await uploadAttachmentToCos(intent, file).promise;
+      }
       const completeResponse = await fetch(`/api/v2/public/demand-leads/attachments/${intent.attachmentId}/complete`, {
         method: "POST",
         headers: { "content-type": "application/json" },
