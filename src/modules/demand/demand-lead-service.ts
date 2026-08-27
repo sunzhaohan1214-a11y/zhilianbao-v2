@@ -401,13 +401,16 @@ export class DemandLeadService {
     }));
   }
 
-  async createFromMemberVisit(input: ServiceInput & { command: unknown }) {
+  async createFromMemberVisitInTransaction(
+    tx: DemandTransaction,
+    input: ServiceInput & { command: unknown },
+  ) {
     await authorizeActor({ actor: input.actor, action: "demand.lead.create" });
     if (!input.actor.currentBatchMember || !input.actor.effectiveRoles.includes("MEMBER_CURRENT")) {
       throw new DemandLeadError("DEMAND_LEAD_STATE_CONFLICT", "只有当前批次在任团员可创建走访线索");
     }
     const command = memberVisitDemandLeadSchema.parse(input.command);
-    return this.repository.transaction((tx) => this.createLeadInTransaction(tx, {
+    return this.createLeadInTransaction(tx, {
       ...command,
       sourceType: "MEMBER_VISIT",
       sourceAt: new Date(command.sourceAt),
@@ -416,7 +419,11 @@ export class DemandLeadService {
       actor: input.actor,
       context: input.context,
       internalAttachmentIds: command.attachmentIds,
-    }));
+    });
+  }
+
+  async createFromMemberVisit(input: ServiceInput & { command: unknown }) {
+    return this.repository.transaction((tx) => this.createFromMemberVisitInTransaction(tx, input));
   }
 
   async list(input: ServiceInput & {
