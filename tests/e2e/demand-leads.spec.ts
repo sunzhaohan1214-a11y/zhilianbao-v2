@@ -92,11 +92,9 @@ test("public browser retry reuses attachment references after the successful res
   await expect(page.getByRole("alert")).toBeVisible();
   const retryButton = page.getByRole("button", { name: "提交需求线索" });
   await expect(retryButton).toBeEnabled();
-  const [replayed] = await Promise.all([
-    page.waitForResponse((response) => response.url().endsWith("/api/v2/public/demand-leads") && response.request().method() === "POST"),
-    retryButton.click(),
-  ]);
-  expect(replayed.status()).toBe(201);
+  expect(await page.locator("form").evaluate((form) => (form as HTMLFormElement).checkValidity())).toBe(true);
+  await retryButton.click();
+  await expect.poll(() => ({ uploadIntentCount, finalPostCount })).toEqual({ uploadIntentCount: 1, finalPostCount: 2 });
   await expect(page.getByText(/参考编号 XS-/)).toBeVisible();
   expect(uploadIntentCount).toBe(1);
   expect(finalPostCount).toBe(2);
