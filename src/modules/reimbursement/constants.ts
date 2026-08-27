@@ -26,9 +26,9 @@ export const EDITABLE_STATUSES = ["DRAFT", "RETURNED"] as const satisfies readon
 
 export const REIMBURSEMENT_STATUS_LABELS: Record<ReimbursementStatus, string> = {
   DRAFT: "草稿",
-  PENDING_ONLINE_REVIEW: "待线上核验",
-  RETURNED: "已退回",
+  PENDING_ONLINE_REVIEW: "待线上核对",
+  RETURNED: "退回修改",
   VERIFIED_PENDING_PAPER: "已核对（待交纸质材料）",
-  PAPER_RECEIVED: "纸质材料已收",
+  PAPER_RECEIVED: "已收材料",
   FINANCE_SUBMITTED: "已提交财务",
 };

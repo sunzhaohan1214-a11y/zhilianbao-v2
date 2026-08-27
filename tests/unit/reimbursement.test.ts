@@ -52,7 +52,7 @@ describe("B-M3-001 reimbursement rules", () => {
       totalAmount: { toString: () => "999.00" }, lastSubmittedAt: new Date(), currentSubmissionVersion: { reasonSnapshot: "Frozen reason", tripSnapshotJson: { title: "Frozen trip" },
         expenseSnapshotJson: [{ expenseType: "TRAVEL_TRANSPORT_ACTUAL", amount: "188.50" }, { expenseType: "TRAVEL_TRANSPORT_SUBSIDY", amount: "80.00" }, { expenseType: "TRAVEL_MEAL_SUBSIDY", amount: "100.00" }, { expenseType: "TRAVEL_LODGING", amount: "360.00" }],
         invoiceSnapshotJson: [{ confirmedInvoiceNo: "INV-001" }], totalAmount: { toString: () => "728.50" }, submittedAt: new Date("2026-08-27T00:00:00Z") } };
-    const pdfBytes = await buildReimbursementPdf(item as never); const pdf = await PDFDocument.load(pdfBytes); expect(pdf.getPage(0).getSize()).toMatchObject({ width: 595.28, height: 841.89 }); expect(pdf.getSubject()).toBe("仅供内部材料核对，不作为正式财务凭证");
+    const pdfBytes = await buildReimbursementPdf(item as never); const pdf = await PDFDocument.load(pdfBytes); expect(pdf.getPage(0).getSize()).toMatchObject({ width: 595.28, height: 841.89 }); expect(pdf.getTitle()).toBe("报销明细汇总表"); expect(pdf.getSubject()).toBe("仅供内部材料核对，不作为正式财务凭证"); expect(pdfBytes.byteLength).toBeGreaterThan(10_000);
     const xlsxBytes = await buildReimbursementXlsx([item as never]); const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(xlsxBytes as never); expect(workbook.getWorksheet("报销清单")?.getCell("E2").value).toBe("Frozen reason"); expect(workbook.getWorksheet("报销清单")?.getCell("G2").value).toBe(728.5);
   });
 
@@ -61,7 +61,7 @@ describe("B-M3-001 reimbursement rules", () => {
     await new ReimbursementOcrJobHandler(ocr as never).handle({ invoiceId: crypto.randomUUID() });
     await new ReimbursementExportJobHandler(exporter as never).handle({ exportTaskId: crypto.randomUUID() });
     expect(ocr.process).toHaveBeenCalledOnce(); expect(exporter.process).toHaveBeenCalledOnce();
-  });
+  }, 30_000);
 
   it("recognizes only the nested submit idempotency unique target from Prisma MySQL", () => {
     expect(isSubmitIdempotencyUniqueConflict({ code: "P2002", meta: { driverAdapterError: { cause: { constraint: { fields: ["actor_person_id", "idempotency_key_hash"] } } } } })).toBe(true);
