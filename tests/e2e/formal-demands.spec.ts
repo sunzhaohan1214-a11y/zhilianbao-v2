@@ -13,6 +13,7 @@ async function login(page: Page, user: { phone: string; password: string }) {
     data: { phone: user.phone, password: user.password },
   });
   expect(response.status()).toBe(200);
+  await page.goto("/");
 }
 
 async function post(page: Page, path: string, body: unknown, headers: Record<string, string> = {}) {
