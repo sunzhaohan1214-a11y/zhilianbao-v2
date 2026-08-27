@@ -136,8 +136,8 @@ test("formal demand return/resubmit/approve and ADMIN_DIRECT publish preserve ev
   authenticated = await login(browser, e2eUsers.admin);
   page = authenticated.page;
   await page.goto(`/admin/demands/${demandId}`);
-  await page.getByLabel("类型", { exact: true }).selectOption("TALENT");
-  await page.getByLabel("紧急程度", { exact: true }).selectOption("URGENT");
+  await page.locator('select[name="demandType"]').selectOption("TALENT");
+  await page.locator('select[name="urgency"]').selectOption("URGENT");
   await page.getByRole("button", { name: "审核通过并立即发布" }).click();
   await expect(page.getByText("待对接", { exact: true })).toBeVisible();
 
