@@ -58,10 +58,14 @@ export class PolicyService {
     return this.repository.transaction(async (tx) => {
       const policy = await this.repository.findPolicy(tx, input.policyId);
       if (!policy) throw new PolicyError("POLICY_NOT_FOUND", "政策不存在", 404);
-      if (policy.publicationStatus !== "PUBLISHED" && !input.actor.capabilities.has("policy.edit")) throw new PolicyError("POLICY_NOT_FOUND", "政策不存在", 404);
-      const links = await this.repository.findVersionLinks(tx, policy.versions.map(({ id }) => id));
-      return normalizePolicy({ ...policy, versions: policy.versions.map((version) => ({
+      const canGovern = input.actor.capabilities.has("policy.edit");
+      if (policy.publicationStatus !== "PUBLISHED" && !canGovern) throw new PolicyError("POLICY_NOT_FOUND", "政策不存在", 404);
+      const visibleVersions = canGovern ? policy.versions : policy.versions.filter(({ id }) => id === policy.currentVersionId);
+      const links = await this.repository.findVersionLinks(tx, visibleVersions.map(({ id }) => id));
+      const currentVersion = policy.currentVersion && !canGovern ? { ...policy.currentVersion, interpretations: [] } : policy.currentVersion;
+      return normalizePolicy({ ...policy, currentVersion, versions: visibleVersions.map((version) => ({
         ...version,
+        interpretations: canGovern ? version.interpretations : [],
         attachments: links.filter(({ entityId }) => entityId === version.id).map(({ attachment, relationType }) => ({
           id: attachment.id, filename: attachment.originalFilename, relationType, scanStatus: attachment.scanStatus,
         })),
@@ -121,14 +125,18 @@ export class PolicyService {
       if (!policy?.currentVersion) throw new PolicyError("POLICY_VERSION_REQUIRED", "政策当前版本不存在", 409);
       if (policy.publicationStatus !== "DRAFT") throw new PolicyError("POLICY_STATE_CONFLICT", "只有草稿可执行智能提取", 409);
       const links = await this.repository.findVersionLinks(tx, [policy.currentVersion.id]);
+      const primary = links.filter(({ relationType }) => relationType === "PRIMARY");
+      if (primary.length !== 1 || primary[0].attachment.uploadStatus !== "UPLOADED" || primary[0].attachment.scanStatus !== "PASSED") {
+        throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "主政策文件通过安全扫描后才能执行智能提取", 422);
+      }
       const record = await tx.policyAIInterpretation.create({ data: {
         versionId: policy.currentVersion.id, provider: "pending", model: "pending", promptVersion: "policy-extract-v1",
       } });
       await writePolicyAudit(tx, { ...input, actionCode: "POLICY_AI_EXTRACTION_REQUESTED", entityType: "POLICY_AI_INTERPRETATION", entityId: record.id, after: { versionId: record.versionId, status: "PENDING" } });
-      return { record, attachmentIds: links.map(({ attachmentId }) => attachmentId) };
+      return { record, primaryAttachmentId: primary[0].attachmentId, supplementaryAttachmentIds: links.filter(({ relationType }) => relationType === "SUPPLEMENTARY").map(({ attachmentId }) => attachmentId) };
     });
     try {
-      const result = await this.extraction.extract({ policyId: input.policyId, versionId: pending.record.versionId, attachmentIds: pending.attachmentIds });
+      const result = await this.extraction.extract({ policyId: input.policyId, versionId: pending.record.versionId, primaryAttachmentId: pending.primaryAttachmentId, supplementaryAttachmentIds: pending.supplementaryAttachmentIds });
       return await this.repository.transaction((tx) => tx.policyAIInterpretation.update({ where: { id: pending.record.id }, data: {
         status: "COMPLETED", extractedJson: result.extracted as Prisma.InputJsonObject, evidenceJson: result.evidence as Prisma.InputJsonObject,
         provider: result.provider, model: result.model, promptVersion: result.promptVersion,
@@ -148,7 +156,16 @@ export class PolicyService {
       const policy = await this.repository.findPolicy(tx, input.policyId);
       if (!policy?.currentVersion) throw new PolicyError("POLICY_VERSION_REQUIRED", "政策当前版本不存在", 409);
       if (policy.publicationStatus !== "DRAFT") throw new PolicyError("POLICY_STATE_CONFLICT", "只有草稿可确认政策内容", 409);
+      if (policy.currentVersion.coreFieldsConfirmedAt) throw new PolicyError("POLICY_VERSION_ALREADY_CONFIRMED", "当前版本已人工确认，如需修改请建立新内容版本", 409);
       await this.validateTags(tx, input.core.tagIds);
+      const evidenceAttachmentIds = input.interpretation.evidence.flatMap(({ attachmentId }) => attachmentId ? [attachmentId] : []);
+      if (evidenceAttachmentIds.length) {
+        const links = await this.repository.findVersionLinks(tx, [policy.currentVersion.id]);
+        const linkedAttachmentIds = new Set(links.map(({ attachmentId }) => attachmentId));
+        if (evidenceAttachmentIds.some((attachmentId) => !linkedAttachmentIds.has(attachmentId))) {
+          throw new PolicyError("POLICY_EVIDENCE_ATTACHMENT_INVALID", "原文依据附件必须属于当前政策版本", 422);
+        }
+      }
       if (input.interpretationId) {
         const ai = await tx.policyAIInterpretation.findUnique({ where: { id: input.interpretationId } });
         if (!ai || ai.versionId !== policy.currentVersion.id) throw new PolicyError("POLICY_INTERPRETATION_NOT_FOUND", "智能提取结果不存在", 404);
@@ -208,13 +225,14 @@ export class PolicyService {
       await this.repository.lockPolicies(tx, [input.oldPolicyId, input.newPolicyId]);
       const [oldPolicy, newPolicy] = await Promise.all([tx.policy.findUnique({ where: { id: input.oldPolicyId } }), tx.policy.findUnique({ where: { id: input.newPolicyId } })]);
       if (!oldPolicy || !newPolicy) throw new PolicyError("POLICY_NOT_FOUND", "政策不存在", 404);
-      if (newPolicy.publicationStatus !== "PUBLISHED") throw new PolicyError("POLICY_REPLACEMENT_INVALID", "新政策必须已发布", 422);
       const active = await this.repository.findActiveReplacementRelations(tx);
       if (active.some((edge) => edge.oldPolicyId === oldPolicy.id)) throw new PolicyError("POLICY_REPLACEMENT_CONFLICT", "旧政策已有生效中的替代关系", 409);
       const graph = new Map<string, string[]>();
       for (const edge of active) graph.set(edge.oldPolicyId, [...(graph.get(edge.oldPolicyId) ?? []), edge.newPolicyId]);
       const pending = [newPolicy.id]; const seen = new Set<string>();
       while (pending.length) { const node = pending.pop()!; if (node === oldPolicy.id) throw new PolicyError("POLICY_REPLACEMENT_CYCLE", "替代关系不能形成环", 409); if (seen.has(node)) continue; seen.add(node); pending.push(...(graph.get(node) ?? [])); }
+      if (oldPolicy.publicationStatus !== "PUBLISHED" || oldPolicy.effectStatus !== "CURRENT") throw new PolicyError("POLICY_REPLACEMENT_INVALID", "旧政策必须为已发布且现行政策", 422);
+      if (newPolicy.publicationStatus !== "PUBLISHED" || newPolicy.effectStatus !== "CURRENT") throw new PolicyError("POLICY_REPLACEMENT_INVALID", "新政策必须为已发布且现行政策", 422);
       const relation = await tx.policyReplacementRelation.create({ data: { oldPolicyId: oldPolicy.id, newPolicyId: newPolicy.id, effectiveAt: new Date(), createdByPersonId: input.actor.personId, reason: input.reason } });
       await tx.policy.update({ where: { id: oldPolicy.id }, data: { effectStatus: "REPLACED" } });
       await tx.policy.update({ where: { id: newPolicy.id }, data: { effectStatus: "CURRENT" } });
@@ -232,12 +250,13 @@ export class PolicyService {
       if (!relation) throw new PolicyError("POLICY_REPLACEMENT_NOT_FOUND", "替代关系不存在", 404);
       await this.repository.lockPolicies(tx, [relation.oldPolicyId, relation.newPolicyId]);
       if (relation.endedAt) throw new PolicyError("POLICY_REPLACEMENT_CONFLICT", "替代关系已经结束", 409);
+      const old = input.restoreOldAsCurrent ? await tx.policy.findUniqueOrThrow({ where: { id: relation.oldPolicyId } }) : null;
+      if (old && old.publicationStatus !== "PUBLISHED") throw new PolicyError("POLICY_REPLACEMENT_RESTORE_INVALID", "撤回政策不能恢复为现行，请先核实正式政策状态", 409);
       const ended = await tx.policyReplacementRelation.update({ where: { id: relation.id }, data: { endedAt: new Date(), endedByPersonId: input.actor.personId, endReason: input.reason } });
       if (input.restoreOldAsCurrent) {
-        const old = await tx.policy.findUniqueOrThrow({ where: { id: relation.oldPolicyId } });
-        await tx.policy.update({ where: { id: old.id }, data: { effectStatus: "CURRENT" } });
-        await writePolicyTransition(tx, { ...input, entityId: old.id, fromState: `${old.publicationStatus}/${old.effectStatus}`, toState: `${old.publicationStatus}/CURRENT`, actionCode: "POLICY_EFFECT_RESTORED", reason: input.reason, metadata: { relationId: relation.id } });
-        await writePolicyAudit(tx, { ...input, actionCode: "POLICY_EFFECT_RESTORED", entityType: "POLICY", entityId: old.id, before: { effectStatus: old.effectStatus }, after: { effectStatus: "CURRENT" }, reason: input.reason });
+        await tx.policy.update({ where: { id: old!.id }, data: { effectStatus: "CURRENT" } });
+        await writePolicyTransition(tx, { ...input, entityId: old!.id, fromState: `${old!.publicationStatus}/${old!.effectStatus}`, toState: `${old!.publicationStatus}/CURRENT`, actionCode: "POLICY_EFFECT_RESTORED", reason: input.reason, metadata: { relationId: relation.id } });
+        await writePolicyAudit(tx, { ...input, actionCode: "POLICY_EFFECT_RESTORED", entityType: "POLICY", entityId: old!.id, before: { effectStatus: old!.effectStatus }, after: { effectStatus: "CURRENT" }, reason: input.reason });
       }
       await writePolicyAudit(tx, { ...input, actionCode: "POLICY_REPLACEMENT_ENDED", entityType: "POLICY_REPLACEMENT", entityId: relation.id, after: { restoreOldAsCurrent: input.restoreOldAsCurrent }, reason: input.reason });
       return ended;
@@ -263,9 +282,10 @@ export class PolicyService {
   private async attachVersionFiles(tx: PolicyTransaction, versionId: string, input: Pick<CreatePolicyInput, "primaryAttachmentId" | "supplementaryAttachmentIds">, actorPersonId: string) {
     const ids = [input.primaryAttachmentId, ...input.supplementaryAttachmentIds];
     if (new Set(ids).size !== ids.length) throw new PolicyError("POLICY_ATTACHMENT_DUPLICATE", "主文件与补充附件不能重复", 422);
+    if (!await this.repository.lockAttachments(tx, ids)) throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "政策附件不存在或已被其他业务使用", 422);
     const attachments = await tx.attachment.findMany({ where: { id: { in: ids } }, include: { links: true } });
-    if (attachments.length !== ids.length || attachments.some((attachment) => attachment.uploadStatus !== "UPLOADED" || attachment.scanStatus !== "PASSED" || (!attachment.isTemporary && !attachment.links.some(({ entityType }) => entityType === "POLICY_CONTENT_VERSION")))) {
-      throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "政策附件不存在、未通过扫描或已用于其他业务", 422);
+    if (attachments.length !== ids.length || attachments.some((attachment) => attachment.uploadedByPersonId !== actorPersonId || !attachment.isTemporary || attachment.links.length > 0 || attachment.uploadStatus !== "UPLOADED" || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus))) {
+      throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "仅可关联本人本次上传且等待扫描或已通过扫描的临时附件", 422);
     }
     await tx.attachmentLink.create({ data: { attachmentId: input.primaryAttachmentId, entityType: "POLICY_CONTENT_VERSION", entityId: versionId, relationType: "PRIMARY", createdByPersonId: actorPersonId } });
     if (input.supplementaryAttachmentIds.length) await tx.attachmentLink.createMany({ data: input.supplementaryAttachmentIds.map((attachmentId) => ({ attachmentId, entityType: "POLICY_CONTENT_VERSION", entityId: versionId, relationType: "SUPPLEMENTARY", createdByPersonId: actorPersonId })) });

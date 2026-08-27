@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { resolveCapabilities } from "@/modules/permissions";
-import { FakePolicyExtractionAdapter, policyListQuerySchema, policyInterpretationSchema } from "@/modules/policy";
+import { FakePolicyExtractionAdapter, policyCoreSchema, policyListQuerySchema, policyInterpretationSchema } from "@/modules/policy";
 import { PolicyRepository } from "@/modules/policy/repository/policy-repository";
 
 describe("M2-006 policy foundation", () => {
@@ -28,8 +28,15 @@ describe("M2-006 policy foundation", () => {
   });
 
   it("keeps fake extraction provider-agnostic and candidate-only", async () => {
-    const result = await new FakePolicyExtractionAdapter().extract({ policyId: "p", versionId: "v", attachmentIds: ["a"] });
-    expect(result.provider).toBe("fake"); expect(result.extracted).toHaveProperty("targetAudience"); expect(result.evidence).toEqual(expect.objectContaining({ items: expect.any(Array) }));
+    const result = await new FakePolicyExtractionAdapter().extract({ policyId: "p", versionId: "v", primaryAttachmentId: "primary", supplementaryAttachmentIds: ["supplementary"] });
+    expect(result.provider).toBe("fake"); expect(result.extracted).toHaveProperty("targetAudience"); expect(result.evidence).toEqual({ items: [{ attachmentId: "primary", relationType: "PRIMARY", page: 1, locator: "第1页" }] });
+  });
+
+  it("rejects impossible calendar dates before domain conversion", () => {
+    const valid = { title: "政策", issuingDepartment: "部门", publicationDate: "2026-02-28", level: "县级", applicationDeadline: null, tagIds: [] };
+    expect(policyCoreSchema.parse(valid)).toMatchObject(valid);
+    expect(() => policyCoreSchema.parse({ ...valid, publicationDate: "2026-02-31" })).toThrow();
+    expect(() => policyCoreSchema.parse({ ...valid, applicationDeadline: "2026-13-01" })).toThrow();
   });
 
   it("retries only transaction write conflicts within a finite boundary", async () => {

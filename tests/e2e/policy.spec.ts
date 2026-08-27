@@ -16,7 +16,7 @@ test("admin creates, extracts, confirms and publishes; member reads file; replac
   await page.getByLabel("补充附件（可多选）").setInputFiles({ name: "补充材料.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 E2E policy supplementary") });
   await page.getByRole("button", { name: "创建政策草稿" }).click(); await page.waitForURL(/\/admin\/policies\/[0-9a-f-]{36}$/); const policyId = page.url().split("/").at(-1)!;
   await expect(page.getByText("DRAFT/CURRENT")).toBeVisible(); await page.getByRole("button", { name: "AI 提取" }).click(); await expect(page.getByLabel("适用对象")).toHaveValue("AI 候选适用对象");
-  await page.getByRole("button", { name: "管理员人工确认" }).click(); await expect(page.getByText("人工确认已保存。")).toBeVisible();
+  await page.getByRole("button", { name: "管理员人工确认" }).click(); await expect(page.getByText("当前版本已人工确认，如需修改请建立新内容版本。")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept()); await page.getByRole("button", { name: "发布政策" }).click(); await expect(page.getByText("PUBLISHED/CURRENT")).toBeVisible();
 
   await page.context().clearCookies(); await login(page, e2eUsers.normal); await page.goto("/resources"); await page.getByRole("link", { name: /3\. 政策/ }).click(); await expect(page.getByRole("link", { name: /E2E 新政策/ })).toBeVisible(); await page.getByRole("link", { name: /E2E 新政策/ }).click();

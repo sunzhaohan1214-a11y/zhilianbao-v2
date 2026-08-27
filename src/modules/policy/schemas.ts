@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional();
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const date = z.iso.date();
 const optionalQueryString = z.preprocess((value) => value === null || value === "" ? undefined : value, z.string().optional());
 const optionalInteger = (fallback: number, maximum: number) => z.preprocess(
   (value) => value === null || value === "" || value === undefined ? fallback : Number(value),

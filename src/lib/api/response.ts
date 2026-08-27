@@ -17,7 +17,7 @@ export function apiError(error: unknown, requestId: string = randomUUID()) {
   if (isPolicyError(error)) {
     return NextResponse.json({
       ok: false,
-      error: { code: error.code, message: error.message, details: error.details ?? {} },
+      error: { code: error.code, message: error.message, details: {} },
       requestId,
     }, { status: error.status });
   }

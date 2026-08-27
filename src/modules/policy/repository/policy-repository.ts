@@ -32,6 +32,14 @@ export class PolicyRepository {
     for (const id of [...new Set(policyIds)].sort()) await this.lockPolicy(tx, id);
   }
 
+  async lockAttachments(tx: PolicyTransaction, attachmentIds: readonly string[]) {
+    for (const id of [...new Set(attachmentIds)].sort()) {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM attachments WHERE id = ${id} FOR UPDATE`;
+      if (rows.length !== 1) return false;
+    }
+    return true;
+  }
+
   async lockReplacement(tx: PolicyTransaction, relationId: string) {
     const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM policy_replacement_relations WHERE id = ${relationId} FOR UPDATE`;
     if (rows.length !== 1) throw new Error("POLICY_REPLACEMENT_LOCK_TARGET_NOT_FOUND");

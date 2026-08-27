@@ -7,7 +7,7 @@ export type PolicyExtractionResult = {
 };
 
 export interface PolicyExtractionAdapter {
-  extract(input: { policyId: string; versionId: string; attachmentIds: string[] }): Promise<PolicyExtractionResult>;
+  extract(input: { policyId: string; versionId: string; primaryAttachmentId: string; supplementaryAttachmentIds: string[] }): Promise<PolicyExtractionResult>;
 }
 
 export class UnavailablePolicyExtractionAdapter implements PolicyExtractionAdapter {
@@ -17,7 +17,7 @@ export class UnavailablePolicyExtractionAdapter implements PolicyExtractionAdapt
 }
 
 export class FakePolicyExtractionAdapter implements PolicyExtractionAdapter {
-  async extract(input: { policyId: string; versionId: string; attachmentIds: string[] }): Promise<PolicyExtractionResult> {
+  async extract(input: { policyId: string; versionId: string; primaryAttachmentId: string; supplementaryAttachmentIds: string[] }): Promise<PolicyExtractionResult> {
     return {
       provider: "fake",
       model: "fake-policy-extractor",
@@ -30,7 +30,7 @@ export class FakePolicyExtractionAdapter implements PolicyExtractionAdapter {
         applicationConditions: "AI 候选申报条件",
         keyClauses: ["AI 候选关键条款"],
       },
-      evidence: { items: [{ attachmentId: input.attachmentIds[0], page: 1, locator: "第1页" }] },
+      evidence: { items: [{ attachmentId: input.primaryAttachmentId, relationType: "PRIMARY", page: 1, locator: "第1页" }] },
     };
   }
 }
