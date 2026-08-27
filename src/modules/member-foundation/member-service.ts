@@ -159,4 +159,36 @@ export class MemberService {
     await authorizeActor({ actor: input.actor, action: "member.view", resource: { resourceType: "member", requiredScope: "GLOBAL_PUBLISHED" } });
     return { industries: await this.prisma.memberIndustry.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" }, select: { id: true, name: true } }) };
   }
+
+  async collaborationCandidates(input: ServiceInput & { query: { keyword?: string; limit: number } }) {
+    await authorizeActor({ actor: input.actor, action: "member.view", resource: { resourceType: "member", requiredScope: "GLOBAL_PUBLISHED" } });
+    const currentBatchId = await this.currentBatchId();
+    if (!currentBatchId) throw new FoundationError("BATCH_STATE_CONFLICT", "当前有效批次不存在");
+    const now = new Date();
+    return this.prisma.person.findMany({
+      where: {
+        personStatus: "ACTIVE",
+        ...(input.query.keyword ? { name: { contains: input.query.keyword } } : {}),
+        account: {
+          status: "NORMAL",
+          forcePasswordChange: false,
+          confidentialityConfirmedAt: { not: null },
+        },
+        batchMemberships: { some: {
+          batchId: currentBatchId,
+          status: "ACTIVE",
+          startDate: { lte: now },
+          OR: [{ endDate: null }, { endDate: { gt: now } }],
+        } },
+        roleAssignments: { some: {
+          roleCode: "MEMBER_CURRENT",
+          effectiveAt: { lte: now },
+          OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
+        } },
+      },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      take: input.query.limit,
+      select: { id: true, name: true },
+    });
+  }
 }
