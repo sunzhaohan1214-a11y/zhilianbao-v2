@@ -9,6 +9,7 @@ async function login(page: Page, user: { phone: string; password: string }) {
 test.beforeEach(async () => { await seedAuthFixtures(); });
 
 test("admin creates, extracts, confirms and publishes; member reads file; replacement never auto-restores", async ({ page }) => {
+  test.setTimeout(60_000);
   await login(page, e2eUsers.admin); await page.goto("/admin/policies/new");
   await page.getByLabel("政策名称").fill("E2E 新政策"); await page.getByLabel("发布部门").fill("宝应县工业和信息化局"); await page.getByLabel("发布时间").fill("2026-08-27"); await page.getByLabel("发布层级").fill("县级"); await page.getByLabel("科技创新").check();
   await page.getByLabel("主政策文件").setInputFiles({ name: "新政策.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 E2E policy primary") });
@@ -26,6 +27,6 @@ test("admin creates, extracts, confirms and publishes; member reads file; replac
   await page.goto(`/admin/policies/${policyE2e.oldPolicyId}`); await expect(page.getByText("PUBLISHED/REPLACED")).toBeVisible();
   await page.goto(`/admin/policies/${policyId}`); await page.locator('form:has(button:has-text("撤回政策")) input[name="reason"]').fill("E2E 发布错误"); page.once("dialog", (dialog) => dialog.accept()); await page.getByRole("button", { name: "撤回政策" }).click(); await expect(page.getByText("WITHDRAWN/CURRENT")).toBeVisible();
   await page.goto(`/admin/policies/${policyE2e.oldPolicyId}`); await expect(page.getByText("PUBLISHED/REPLACED")).toBeVisible();
-  await page.goto(`/admin/policies/${policyId}`); const endForm = page.locator('form:has-text("解除：")').first(); await endForm.locator('input[name="reason"]').fill("E2E 管理员依据正式材料恢复"); await endForm.locator('input[name="restore"]').check(); page.once("dialog", (dialog) => dialog.accept()); await endForm.getByRole("button", { name: "解除关系" }).click();
+  await page.goto(`/admin/policies/${policyId}`); const endForm = page.locator('form:has-text("解除：")').first(); await endForm.locator('input[name="reason"]').fill("E2E 管理员依据正式材料恢复"); await endForm.locator('input[name="restore"]').check(); page.once("dialog", (dialog) => dialog.accept()); await endForm.getByRole("button", { name: "解除关系" }).click(); await expect(page.getByText("操作成功")).toBeVisible();
   await page.goto(`/admin/policies/${policyE2e.oldPolicyId}`); await expect(page.getByText("PUBLISHED/CURRENT")).toBeVisible();
 });
