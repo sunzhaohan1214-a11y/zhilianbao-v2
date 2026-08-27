@@ -14,7 +14,13 @@ export class AnnouncementNotificationHandler<T extends EventType> implements Out
     if (!version) return;
 
     if (this.eventType === "ANNOUNCEMENT_UPDATED") {
-      await staleTodos(tx, { aggregateType: "ANNOUNCEMENT", aggregateId: payload.announcementId, todoType: "ANNOUNCEMENT_CONFIRM", now: event.occurredAt });
+      await staleTodos(tx, {
+        aggregateType: "ANNOUNCEMENT",
+        aggregateId: payload.announcementId,
+        todoType: "ANNOUNCEMENT_CONFIRM",
+        excludeEventKey: payload.eventKey,
+        now: event.occurredAt,
+      });
     }
     if (this.eventType === "ANNOUNCEMENT_AUDIENCE_REMOVED" || this.eventType === "ANNOUNCEMENT_WITHDRAWN") {
       await staleTodos(tx, { aggregateType: "ANNOUNCEMENT", aggregateId: payload.announcementId, personIds: payload.recipientIds, todoType: "ANNOUNCEMENT_CONFIRM", now: event.occurredAt });
@@ -35,6 +41,11 @@ export class AnnouncementNotificationHandler<T extends EventType> implements Out
         eventAt: event.occurredAt,
       });
       if (payload.needConfirm) {
+        const recipientState = await tx.announcementRecipientState.findUnique({
+          where: { versionId_personId: { versionId: payload.versionId, personId } },
+          select: { confirmedAt: true, revokedAt: true },
+        });
+        if (!recipientState || recipientState.revokedAt || recipientState.confirmedAt) continue;
         await createTodo(tx, {
           personId,
           todoType: "ANNOUNCEMENT_CONFIRM",
@@ -44,6 +55,7 @@ export class AnnouncementNotificationHandler<T extends EventType> implements Out
           actionUrl: `/announcements/${payload.announcementId}`,
           dedupeKey: `ANNOUNCEMENT_CONFIRM:${payload.versionId}:${personId}`,
           eventKey: payload.eventKey,
+          reopenStale: this.eventType === "ANNOUNCEMENT_AUDIENCE_ADDED",
         });
       }
     }

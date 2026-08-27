@@ -34,11 +34,24 @@ export async function createTodo(tx: Prisma.TransactionClient, input: {
   actionUrl: string;
   dedupeKey: string;
   eventKey?: string;
+  reopenStale?: boolean;
 }) {
   return tx.todo.upsert({
     where: { dedupeKey: input.dedupeKey.slice(0, 191) },
-    create: { ...input, dedupeKey: input.dedupeKey.slice(0, 191) },
-    update: { actionUrl: input.actionUrl },
+    create: {
+      personId: input.personId,
+      todoType: input.todoType,
+      module: input.module,
+      aggregateType: input.aggregateType,
+      aggregateId: input.aggregateId,
+      actionUrl: input.actionUrl,
+      dedupeKey: input.dedupeKey.slice(0, 191),
+      eventKey: input.eventKey,
+    },
+    update: {
+      actionUrl: input.actionUrl,
+      ...(input.reopenStale ? { status: "OPEN", staleAt: null, completedAt: null } : {}),
+    },
   });
 }
 
@@ -47,6 +60,7 @@ export function staleTodos(tx: Prisma.TransactionClient, input: {
   aggregateId: string;
   personIds?: readonly string[];
   todoType?: string;
+  excludeEventKey?: string;
   now?: Date;
 }) {
   return tx.todo.updateMany({
@@ -56,6 +70,7 @@ export function staleTodos(tx: Prisma.TransactionClient, input: {
       status: "OPEN",
       ...(input.personIds ? { personId: { in: [...input.personIds] } } : {}),
       ...(input.todoType ? { todoType: input.todoType } : {}),
+      ...(input.excludeEventKey ? { NOT: { eventKey: input.excludeEventKey } } : {}),
     },
     data: { status: "STALE", staleAt: input.now ?? new Date() },
   });
