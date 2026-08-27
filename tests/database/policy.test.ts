@@ -35,6 +35,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma.policy.updateMany({ where: { id: { in: policyIds } }, data: { currentVersionId: null } });
   await prisma.attachmentLink.deleteMany({ where: { entityType: "POLICY_CONTENT_VERSION", entityId: { in: (await prisma.policyContentVersion.findMany({ where: { policyId: { in: policyIds } }, select: { id: true } })).map(({ id }) => id) } } });
+  await prisma.attachmentLink.deleteMany({ where: { attachmentId: { in: attachmentIds } } });
   await prisma.policyAIInterpretation.deleteMany({ where: { version: { policyId: { in: policyIds } } } });
   await prisma.policyReplacementRelation.deleteMany({ where: { OR: [{ oldPolicyId: { in: policyIds } }, { newPolicyId: { in: policyIds } }] } });
   await prisma.policyTagRelation.deleteMany({ where: { policyId: { in: policyIds } } });
@@ -85,7 +86,7 @@ describe("M2-006 real MySQL policy lifecycle", () => {
     const sharedAttachmentId = await attachment(); const sharedInput = input(sharedAttachmentId);
     const concurrent = await Promise.allSettled([service().create({ actor: admin, policy: sharedInput }), service().create({ actor: admin, policy: sharedInput })]);
     const fulfilled = concurrent.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<PolicyService["create"]>>> => result.status === "fulfilled");
-    expect(fulfilled).toHaveLength(1); policyIds.push(fulfilled[0].value.id);
+    policyIds.push(...fulfilled.map(({ value }) => value.id)); expect(fulfilled).toHaveLength(1);
     expect(await prisma.attachmentLink.count({ where: { attachmentId: sharedAttachmentId } })).toBe(1);
   });
 

@@ -2,6 +2,14 @@ import type { PolicyEffectStatus, PolicyPublicationStatus, Prisma, PrismaClient 
 import { getPrismaClient } from "@/lib/db/prisma";
 
 export type PolicyTransaction = Prisma.TransactionClient;
+export type LockedPolicyAttachment = {
+  id: string;
+  uploadedByPersonId: string;
+  isTemporary: boolean | number;
+  uploadStatus: string;
+  scanStatus: string;
+  linkId: string | null;
+};
 
 const MAX_TRANSACTION_ATTEMPTS = 4;
 
@@ -33,11 +41,25 @@ export class PolicyRepository {
   }
 
   async lockAttachments(tx: PolicyTransaction, attachmentIds: readonly string[]) {
+    const locked: LockedPolicyAttachment[] = [];
     for (const id of [...new Set(attachmentIds)].sort()) {
-      const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM attachments WHERE id = ${id} FOR UPDATE`;
-      if (rows.length !== 1) return false;
+      const rows = await tx.$queryRaw<LockedPolicyAttachment[]>`
+        SELECT
+          a.id,
+          a.uploaded_by_person_id AS uploadedByPersonId,
+          a.is_temporary AS isTemporary,
+          a.upload_status AS uploadStatus,
+          a.scan_status AS scanStatus,
+          l.id AS linkId
+        FROM attachments a
+        LEFT JOIN attachment_links l ON l.attachment_id = a.id
+        WHERE a.id = ${id}
+        FOR UPDATE
+      `;
+      if (rows.length !== 1) return null;
+      locked.push(rows[0]);
     }
-    return true;
+    return locked;
   }
 
   async lockReplacement(tx: PolicyTransaction, relationId: string) {

@@ -282,9 +282,8 @@ export class PolicyService {
   private async attachVersionFiles(tx: PolicyTransaction, versionId: string, input: Pick<CreatePolicyInput, "primaryAttachmentId" | "supplementaryAttachmentIds">, actorPersonId: string) {
     const ids = [input.primaryAttachmentId, ...input.supplementaryAttachmentIds];
     if (new Set(ids).size !== ids.length) throw new PolicyError("POLICY_ATTACHMENT_DUPLICATE", "主文件与补充附件不能重复", 422);
-    if (!await this.repository.lockAttachments(tx, ids)) throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "政策附件不存在或已被其他业务使用", 422);
-    const attachments = await tx.attachment.findMany({ where: { id: { in: ids } }, include: { links: true } });
-    if (attachments.length !== ids.length || attachments.some((attachment) => attachment.uploadedByPersonId !== actorPersonId || !attachment.isTemporary || attachment.links.length > 0 || attachment.uploadStatus !== "UPLOADED" || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus))) {
+    const attachments = await this.repository.lockAttachments(tx, ids);
+    if (!attachments || attachments.length !== ids.length || attachments.some((attachment) => attachment.uploadedByPersonId !== actorPersonId || !(attachment.isTemporary === true || attachment.isTemporary === 1) || attachment.linkId !== null || attachment.uploadStatus !== "UPLOADED" || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus))) {
       throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "仅可关联本人本次上传且等待扫描或已通过扫描的临时附件", 422);
     }
     await tx.attachmentLink.create({ data: { attachmentId: input.primaryAttachmentId, entityType: "POLICY_CONTENT_VERSION", entityId: versionId, relationType: "PRIMARY", createdByPersonId: actorPersonId } });
