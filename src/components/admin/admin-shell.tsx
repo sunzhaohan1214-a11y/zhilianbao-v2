@@ -11,6 +11,9 @@ export function AdminShell({ children }: Readonly<{ children: ReactNode }>) {
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin">工作台</Link>
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/enterprises">企业管理</Link>
           <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/enterprise-change-requests">企业申请审核</Link>
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/members">人员与团员</Link>
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/batches">批次与团长</Link>
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/organizations">组织与任职</Link>
         </nav>
       </aside>
       <main className="p-6 lg:p-10">{children}</main>
