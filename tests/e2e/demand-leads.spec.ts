@@ -65,7 +65,11 @@ test("public browser retry reuses attachment references after the successful res
       expect(serverResponse.status()).toBe(201);
       const serverPayload = await serverResponse.json();
       expect(serverPayload.data.referenceNo).toMatch(/^XS-\d{4}-\d{6}$/);
-      await route.abort("failed");
+      await route.fulfill({
+        status: 504,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: false, error: { code: "UPSTREAM_RESPONSE_LOST", message: "提交结果响应丢失，请重试" } }),
+      });
       return;
     }
     await route.continue();
