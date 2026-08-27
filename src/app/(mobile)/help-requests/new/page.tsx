@@ -1,0 +1,2 @@
+import Link from "next/link"; import { notFound } from "next/navigation"; import { HelpCreateForm } from "@/components/help/help-create-form"; import { helpPageContext } from "@/lib/help/page-context";
+export default async function NewHelpRequestPage(){const{actor}=await helpPageContext();if(!actor.capabilities.has("help.create")||!actor.currentBatchMember)notFound();return <section><Link href="/help-requests" className="text-sm text-blue-600">‹ 返回办事求助</Link><h1 className="my-4 text-2xl font-semibold">发起求助</h1><HelpCreateForm/></section>}
