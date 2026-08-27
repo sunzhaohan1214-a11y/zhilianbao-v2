@@ -415,4 +415,23 @@ V2所有DB结构改动走 Migration。
 9. 不直接下载原始完整系统备份到业务电脑；
 10. 不绕过维护模式执行恢复。
 
+## 23. 附件服务
+
+COS bucket 必须保持 private。应用只向浏览器签发限定单个 staging object、短期有效的 STS 上传凭证；`COS_SECRET_ID`、`COS_SECRET_KEY` 只存在于服务端 Secret 管理中。下载与预览使用短时 signed URL，禁止记录 URL 或凭证正文。
+
+环境变量：
+
+```text
+COS_REGION
+COS_BUCKET
+COS_SECRET_ID
+COS_SECRET_KEY
+ATTACHMENT_SIGNED_URL_TTL_SECONDS
+ATTACHMENT_UPLOAD_TTL_SECONDS
+```
+
+V2 TEST 首次连接真实 COS 前必须检查：bucket 访问控制为 private；地域、bucket 名与 CORS 来源正确；服务账号仅有 staging 上传、服务端 HEAD/COPY/GET/DELETE 和签名所需的最小权限；浏览器分片上传及断点续传可用；staging 到 immutable final 的复制、源对象清理和短时访问 URL 均已验证。
+
+扫描器未配置、超时或失败时必须 fail closed，`scanStatus` 不得自动变为 `PASSED`。M0-005 只创建 `ATTACHMENT_SCAN` JobTask 并提供单任务扫描与过期清理服务；通用 Worker loop、claim scheduler 与 cron 从 M0-006 开始。
+
 **OPERATIONS.md v1.0 END**

@@ -79,3 +79,55 @@ test("security page shows own devices without token hashes", async ({ page }) =>
   await expect(page.locator("body")).not.toContainText("tokenHash");
   await expect(page.getByRole("button", { name: "退出全部设备" })).toBeVisible();
 });
+
+test("attachment API enforces scan gate, self access, short URL and abort", async ({ browser }) => {
+  const ownerContext = await browser.newContext();
+  const owner = await ownerContext.newPage();
+  await login(owner, e2eUsers.normal.phone, e2eUsers.normal.password);
+  const pdf = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+  const intent = await owner.evaluate(async ({ expectedSizeBytes }) => {
+    const response = await fetch("/api/v2/attachments/upload-intent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: "e2e-report.pdf", declaredMimeType: "application/pdf", expectedSizeBytes }),
+    });
+    return { status: response.status, body: await response.json() };
+  }, { expectedSizeBytes: Buffer.byteLength(pdf) });
+  expect(intent.status).toBe(201);
+  const attachmentId = intent.body.data.attachmentId as string;
+  expect(intent.body.data.upload.type).toBe("TEST_MEMORY");
+
+  const uploadStatus = await owner.evaluate(async ({ id, base64 }) => {
+    const response = await fetch(`/api/v2/test/attachments/${id}/upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ base64 }),
+    });
+    return response.status;
+  }, { id: attachmentId, base64: Buffer.from(pdf).toString("base64") });
+  expect(uploadStatus).toBe(200);
+
+  const completeStatus = await owner.evaluate(async (id) => (await fetch(`/api/v2/attachments/${id}/complete`, { method: "POST" })).status, attachmentId);
+  expect(completeStatus).toBe(200);
+  const pendingAccess = await owner.evaluate(async (id) => (await fetch(`/api/v2/attachments/${id}/access?action=preview`)).status, attachmentId);
+  expect(pendingAccess).toBe(409);
+  const scanStatus = await owner.evaluate(async (id) => (await fetch(`/api/v2/test/attachments/${id}/scan`, { method: "POST" })).status, attachmentId);
+  expect(scanStatus).toBe(200);
+  const access = await owner.evaluate(async (id) => {
+    const response = await fetch(`/api/v2/attachments/${id}/access?action=download`);
+    return { status: response.status, body: await response.json() };
+  }, attachmentId);
+  expect(access.status).toBe(200);
+  expect(access.body.data.ttlSeconds).toBe(300);
+
+  const otherContext = await browser.newContext();
+  const other = await otherContext.newPage();
+  await login(other, e2eUsers.minister.phone, e2eUsers.minister.password);
+  const otherAccess = await other.evaluate(async (id) => (await fetch(`/api/v2/attachments/${id}/access?action=download`)).status, attachmentId);
+  expect(otherAccess).toBe(403);
+  await otherContext.close();
+
+  const abortStatus = await owner.evaluate(async (id) => (await fetch(`/api/v2/attachments/${id}/abort`, { method: "POST" })).status, attachmentId);
+  expect(abortStatus).toBe(200);
+  await ownerContext.close();
+});

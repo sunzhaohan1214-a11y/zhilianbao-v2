@@ -16,6 +16,9 @@ export const INTERNAL_BASE_CAPABILITIES = [
   "announcement.view",
   "announcement.confirm",
   "ai.assistant.use",
+  "attachment.upload",
+  "attachment.temporary_self_access",
+  "attachment.abort_self",
 ] as const satisfies readonly Capability[];
 
 export const TEAM_COORDINATOR_CAPABILITIES = [
