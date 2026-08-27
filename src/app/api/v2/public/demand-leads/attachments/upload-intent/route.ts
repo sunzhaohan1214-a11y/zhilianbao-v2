@@ -16,7 +16,9 @@ export async function POST(request: NextRequest) {
   try {
     assertTrustedMutationOrigin(request);
     const input = publicUploadIntentSchema.parse(await request.json());
-    await new DemandLeadService().validatePublicArea(input.responsibleAreaId);
+    const demandLeadService = new DemandLeadService();
+    await demandLeadService.checkPublicUploadRateLimit({ ip: context.ip, deviceId });
+    await demandLeadService.validatePublicArea(input.responsibleAreaId);
     const response = apiSuccess(
       await getAttachmentRuntime().service.createPublicUploadIntent(input),
       context.requestId,

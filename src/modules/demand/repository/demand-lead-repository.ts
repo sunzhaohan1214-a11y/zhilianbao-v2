@@ -13,6 +13,8 @@ import {
   PUBLIC_DEMAND_DEVICE_MAXIMUM,
   PUBLIC_DEMAND_IP_MAXIMUM,
   PUBLIC_DEMAND_RATE_LIMIT_WINDOW_MS,
+  PUBLIC_DEMAND_UPLOAD_DEVICE_MAXIMUM,
+  PUBLIC_DEMAND_UPLOAD_IP_MAXIMUM,
 } from "../constants";
 
 export type DemandTransaction = Prisma.TransactionClient;
@@ -28,9 +30,11 @@ function publicRateLimitSecret(): string {
   return "local-test-only-rate-limit-secret";
 }
 
-function publicRateKey(dimension: AuthRateLimitDimension, value: string): string {
+type PublicRateLimitNamespace = "PUBLIC_DEMAND" | "PUBLIC_DEMAND_UPLOAD";
+
+function publicRateKey(namespace: PublicRateLimitNamespace, dimension: AuthRateLimitDimension, value: string): string {
   return createHash("sha256")
-    .update(`${publicRateLimitSecret()}:PUBLIC_DEMAND:${dimension}:${value}`)
+    .update(`${publicRateLimitSecret()}:${namespace}:${dimension}:${value}`)
     .digest("hex");
 }
 
@@ -50,6 +54,13 @@ export class DemandLeadRepository {
 
   async lockLeads(tx: DemandTransaction, leadIds: readonly string[]): Promise<void> {
     for (const id of [...new Set(leadIds)].sort()) await this.lockLead(tx, id);
+  }
+
+  async lockEnterprise(tx: DemandTransaction, enterpriseId: string): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM enterprises WHERE id = ${enterpriseId} FOR UPDATE
+    `;
+    if (rows.length !== 1) throw new Error("ENTERPRISE_LOCK_TARGET_NOT_FOUND");
   }
 
   async nextBusinessNo(tx: DemandTransaction, prefix: "XS" | "XQ", at = new Date()): Promise<string> {
@@ -155,6 +166,8 @@ export class DemandLeadRepository {
     sourceType?: DemandLeadSourceType;
     areaId?: string;
     keyword?: string;
+    excludeId?: string;
+    actionableOnly?: boolean;
     page: number;
     pageSize: number;
   }) {
@@ -163,6 +176,8 @@ export class DemandLeadRepository {
       ...(input.areaId ? { responsibleAreaId: input.areaId } : {}),
       ...(input.status ? { status: input.status } : {}),
       ...(input.sourceType ? { sourceType: input.sourceType } : {}),
+      ...(input.excludeId ? { id: { not: input.excludeId } } : {}),
+      ...(input.actionableOnly ? { status: { in: ["PENDING_TOWNSHIP_VERIFY", "PENDING_ENTERPRISE_LINK", "NEED_MORE_INFO"] } } : {}),
       ...(input.keyword ? { OR: [
         { businessNo: { contains: input.keyword } },
         { rawEnterpriseName: { contains: input.keyword } },
@@ -216,16 +231,20 @@ export class DemandLeadRepository {
     return rows;
   }
 
-  async checkAndRecordPublicRateLimit(input: { ip: string; deviceId: string }): Promise<void> {
+  async checkAndRecordPublicRateLimit(
+    input: { ip: string; deviceId: string },
+    namespace: PublicRateLimitNamespace = "PUBLIC_DEMAND",
+  ): Promise<void> {
+    const upload = namespace === "PUBLIC_DEMAND_UPLOAD";
     const policies = [
-      { dimension: "IP" as const, value: input.ip, maximum: PUBLIC_DEMAND_IP_MAXIMUM },
-      { dimension: "DEVICE" as const, value: input.deviceId, maximum: PUBLIC_DEMAND_DEVICE_MAXIMUM },
+      { dimension: "IP" as const, value: input.ip, maximum: upload ? PUBLIC_DEMAND_UPLOAD_IP_MAXIMUM : PUBLIC_DEMAND_IP_MAXIMUM },
+      { dimension: "DEVICE" as const, value: input.deviceId, maximum: upload ? PUBLIC_DEMAND_UPLOAD_DEVICE_MAXIMUM : PUBLIC_DEMAND_DEVICE_MAXIMUM },
     ];
     const now = new Date();
     const limited = await this.prisma.$transaction(async (tx) => {
       let isLimited = false;
       for (const policy of policies) {
-        const keyHash = publicRateKey(policy.dimension, policy.value);
+        const keyHash = publicRateKey(namespace, policy.dimension, policy.value);
         await tx.$executeRaw`
           INSERT INTO auth_rate_limit_buckets
             (id, dimension, key_hash, window_start, attempt_count, updated_at)

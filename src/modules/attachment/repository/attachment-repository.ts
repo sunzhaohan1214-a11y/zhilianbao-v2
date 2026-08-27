@@ -191,6 +191,9 @@ export class AttachmentRepository {
       if (rows.length !== 1) return null;
       const attachment = await tx.attachment.findUnique({ where: { id }, include: { links: true } });
       if (!attachment || !attachment.isTemporary || attachment.links.length > 0) return attachment;
+      if (!attachment.uploadExpiresAt || attachment.uploadExpiresAt >= new Date() || attachment.scanStatus === "SCANNING") {
+        return attachment;
+      }
       if (attachment.uploadStatus !== "ABORTED") {
         await tx.attachment.update({
           where: { id },
@@ -250,8 +253,24 @@ export class AttachmentRepository {
       where: {
         isTemporary: true,
         uploadExpiresAt: { lt: now },
-        uploadStatus: { in: ["PENDING_UPLOAD", "UPLOADED", "FAILED"] },
         links: { none: {} },
+        OR: [
+          {
+            uploadedByPersonId: { not: null },
+            OR: [
+              { uploadStatus: { in: ["PENDING_UPLOAD", "FAILED"] } },
+              { uploadStatus: "UPLOADED", scanStatus: { in: ["REJECTED", "FAILED"] } },
+            ],
+          },
+          {
+            uploadedByPersonId: null,
+            publicUploadTokenHash: { not: null },
+            OR: [
+              { uploadStatus: { in: ["PENDING_UPLOAD", "FAILED"] } },
+              { uploadStatus: "UPLOADED", scanStatus: { in: ["PENDING", "PASSED", "REJECTED", "FAILED"] } },
+            ],
+          },
+        ],
       },
       orderBy: { uploadExpiresAt: "asc" },
       take: limit,

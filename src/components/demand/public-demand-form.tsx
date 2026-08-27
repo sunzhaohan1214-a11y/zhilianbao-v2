@@ -4,16 +4,22 @@ import { useRef, useState, type FormEvent } from "react";
 import { uploadAttachmentToCos, type BrowserUploadIntent } from "@/modules/attachment/client/cos-browser-uploader";
 
 type PublicAttachmentIntent = BrowserUploadIntent & { attachmentId: string; uploadToken: string };
+type PublicAttachmentReference = { attachmentId: string; uploadToken: string };
+type SubmissionAttempt = {
+  fingerprint: string;
+  idempotencyKey: string;
+  attachments: PublicAttachmentReference[];
+};
 
 export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: string }) {
   const formStartedAt = useRef(new Date().toISOString());
-  const idempotencyKey = useRef("");
+  const attempt = useRef<SubmissionAttempt | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
 
-  async function uploadFiles(files: File[]) {
-    const references: { attachmentId: string; uploadToken: string }[] = [];
+  async function uploadFiles(files: File[]): Promise<PublicAttachmentReference[]> {
+    const references: PublicAttachmentReference[] = [];
     for (const file of files) {
       const intentResponse = await fetch("/api/v2/public/demand-leads/attachments/upload-intent", {
         method: "POST",
@@ -43,37 +49,51 @@ export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: str
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setPending(true);
     setMessage("");
     try {
-      const form = new FormData(event.currentTarget);
+      const form = new FormData(formElement);
       const files = form.getAll("attachments").filter((item): item is File => item instanceof File && item.size > 0);
-      const attachments = await uploadFiles(files);
+      const basePayload = {
+        responsibleAreaId,
+        enterpriseName: form.get("enterpriseName"),
+        contactName: form.get("contactName"),
+        contactPhone: form.get("contactPhone"),
+        title: form.get("title"),
+        description: form.get("description"),
+        truthConfirmed: form.get("truthConfirmed") === "on",
+        contactConsent: form.get("contactConsent") === "on",
+        formStartedAt: formStartedAt.current,
+        website: form.get("website"),
+      };
+      const fingerprint = JSON.stringify({
+        ...basePayload,
+        files: files.map((file) => ({ name: file.name, size: file.size, type: file.type, lastModified: file.lastModified })),
+      });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = {
+          fingerprint,
+          idempotencyKey: crypto.randomUUID(),
+          attachments: await uploadFiles(files),
+        };
+      }
       const response = await fetch("/api/v2/public/demand-leads", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "Idempotency-Key": idempotencyKey.current ||= crypto.randomUUID(),
+          "Idempotency-Key": attempt.current.idempotencyKey,
         },
         body: JSON.stringify({
-          responsibleAreaId,
-          enterpriseName: form.get("enterpriseName"),
-          contactName: form.get("contactName"),
-          contactPhone: form.get("contactPhone"),
-          title: form.get("title"),
-          description: form.get("description"),
-          truthConfirmed: form.get("truthConfirmed") === "on",
-          contactConsent: form.get("contactConsent") === "on",
-          formStartedAt: formStartedAt.current,
-          website: form.get("website"),
-          attachments,
+          ...basePayload,
+          attachments: attempt.current.attachments,
         }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error?.message ?? "提交失败，请稍后再试");
       setReferenceNo(payload.data.referenceNo);
       setMessage(payload.data.message);
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "提交失败，请稍后再试");
     } finally {
@@ -93,7 +113,7 @@ export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: str
   }
 
   return (
-    <form onSubmit={submit} className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <form onSubmit={submit} onChange={() => { attempt.current = null; }} className="space-y-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="grid gap-5 sm:grid-cols-2">
         <label className="text-sm font-medium text-slate-700">企业名称
           <input name="enterpriseName" required maxLength={200} className="mt-2 w-full rounded-xl border border-slate-300 p-3" />

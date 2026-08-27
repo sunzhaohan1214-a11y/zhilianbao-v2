@@ -9,9 +9,11 @@ import {
   addDemandLeadInfoSchema,
   convertDemandLeadSchema,
   createOtherDemandLeadSchema,
+  demandLeadListQuerySchema,
   memberVisitDemandLeadSchema,
   publicDemandLeadSchema,
 } from "@/modules/demand/schemas";
+import { OUTBOX_EVENT_TYPES } from "@/modules/outbox/outbox-types";
 import { authorizeActor, resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 
 function actor(roles: RoleCode[], townshipAreaIds: string[] = []): PermissionActor {
@@ -47,6 +49,19 @@ describe("M1-002 Demand Lead contracts", () => {
     expect([...DEMAND_LEAD_TERMINAL_STATUSES]).toEqual(["MERGED", "CLOSED", "CONVERTED"]);
     expect(formatBusinessNo("XS", 2026, BigInt(8))).toBe("XS-2026-000008");
     expect(formatBusinessNo("XQ", 2026, BigInt(128))).toBe("XQ-2026-000128");
+  });
+
+  it("keeps consumerless Demand lifecycle events out of the Worker contract", () => {
+    expect(OUTBOX_EVENT_TYPES).toEqual(["TEST_ENTITY_CHANGED", "ATTACHMENT_UPLOADED"]);
+  });
+
+  it("parses scoped actionable merge-candidate search without exposing IDs as query text", () => {
+    const excludeId = crypto.randomUUID();
+    expect(demandLeadListQuerySchema.parse({
+      keyword: "XS-2026",
+      excludeId,
+      actionableOnly: "true",
+    })).toMatchObject({ keyword: "XS-2026", excludeId, actionableOnly: true, page: 1, pageSize: 20 });
   });
 
   it("keeps the public payload strict, minimal and free of client-controlled status", () => {

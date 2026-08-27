@@ -49,24 +49,73 @@ test("public submit is minimal and the responsible township sees the immutable s
   await expect(page.getByText(referenceNo)).toBeVisible();
 });
 
+test("public browser retry reuses attachment references after the successful response is lost", async ({ page }) => {
+  const suffix = `retry-${Date.now()}`;
+  const attachmentFilename = `network-retry-${suffix}.pdf`;
+  let uploadIntentCount = 0;
+  let finalPostCount = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/v2/public/demand-leads/attachments/upload-intent")) uploadIntentCount += 1;
+  });
+  await page.route("**/api/v2/public/demand-leads", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    finalPostCount += 1;
+    if (finalPostCount === 1) {
+      const serverResponse = await route.fetch();
+      expect(serverResponse.status()).toBe(201);
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto(`/public/demand?areaId=${enterpriseE2e.areaAId}`);
+  await page.getByLabel("企业名称").fill(`E2E 网络重试企业 ${suffix}`);
+  await page.getByLabel("联系人").fill("网络重试联系人");
+  await page.getByLabel("联系电话").fill("13800005009");
+  await page.getByLabel("需求标题").fill(`E2E 网络重试线索 ${suffix}`);
+  await page.getByLabel("需求描述").fill("服务端成功后响应丢失，浏览器应复用附件引用。");
+  await page.getByLabel("图片、PDF 或 Word（可选，单个不超过 50MB）").setInputFiles({
+    name: attachmentFilename,
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+  });
+  await page.getByLabel("我确认以上信息真实。").check();
+  await page.getByLabel("我同意镇区工作人员联系核实。").check();
+  await page.waitForTimeout(900);
+  await page.getByRole("button", { name: "提交需求线索" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("button", { name: "提交需求线索" }).click();
+  await expect(page.getByText(/参考编号 XS-/)).toBeVisible();
+  expect(uploadIntentCount).toBe(1);
+  expect(finalPostCount).toBe(2);
+  const prisma = getPrismaClient();
+  expect(await prisma.demandLead.count({ where: { rawTitle: `E2E 网络重试线索 ${suffix}` } })).toBe(1);
+  expect(await prisma.attachment.count({ where: { originalFilename: attachmentFilename } })).toBe(1);
+});
+
 test("township links, supplements and converts a public lead to exactly one DRAFT", async ({ page }) => {
   const referenceNo = await publicSubmit(page, `convert-${Date.now()}`);
   const prisma = getPrismaClient();
   const lead = await prisma.demandLead.findUniqueOrThrow({ where: { businessNo: referenceNo } });
   await page.context().clearCookies();
   await login(page, e2eUsers.township);
-  const result = await page.evaluate(async ({ leadId, enterpriseId, contactId }) => {
+  await page.goto(`/demand-leads/${lead.id}`);
+  await expect(page.getByPlaceholder("正式 Enterprise ID")).toHaveCount(0);
+  await page.getByLabel("企业名称搜索").fill("宝应智造");
+  await page.getByRole("button", { name: /宝应智造示范企业/ }).click();
+  await expect(page.getByText(/已选择：宝应智造示范企业/)).toBeVisible();
+  await page.getByRole("button", { name: "确认关联" }).click();
+  await expect(page.getByText(/宝应智造示范企业/).first()).toBeVisible();
+  const result = await page.evaluate(async ({ leadId, contactId }) => {
     const post = async (path: string, body: unknown) => {
       const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       return { status: response.status, payload: await response.json() };
     };
-    const linked = await post(`/api/v2/demand-leads/${leadId}/link-enterprise`, { enterpriseId });
     const supplemented = await post(`/api/v2/demand-leads/${leadId}/add-info`, { action: "ADD_SUPPLEMENT", verifiedTitle: "人工核验标题", verifiedDescription: "镇区核验后的正式输入", demandType: "TECHNICAL", urgency: "NORMAL", selectedContactId: contactId });
     const converted = await post(`/api/v2/demand-leads/${leadId}/convert-to-draft`, { selectedContactId: contactId, title: "人工核验标题", originalDescription: "镇区核验后的正式输入", demandType: "TECHNICAL", urgency: "NORMAL", confirmation: "CONFIRM" });
     const repeated = await post(`/api/v2/demand-leads/${leadId}/convert-to-draft`, { selectedContactId: contactId, title: "人工核验标题", originalDescription: "镇区核验后的正式输入", demandType: "TECHNICAL", urgency: "NORMAL", confirmation: "CONFIRM" });
-    return { linked, supplemented, converted, repeated };
-  }, { leadId: lead.id, enterpriseId: enterpriseE2e.enterpriseId, contactId: enterpriseE2e.contactId });
-  expect(result.linked.status).toBe(200);
+    return { supplemented, converted, repeated };
+  }, { leadId: lead.id, contactId: enterpriseE2e.contactId });
   expect(result.supplemented.status).toBe(200);
   expect(result.converted.status).toBe(200);
   expect(result.repeated.status).toBe(200);
@@ -85,18 +134,58 @@ test("admin merges, closes and restores from detail-confirmation endpoints", asy
     };
     return { source: await create("source"), target: await create("target"), closed: await create("closed") };
   }, enterpriseE2e.areaAId);
+  await page.goto(`/admin/demand-leads/${ids.source}`);
+  await expect(page.getByPlaceholder("主 Lead ID")).toHaveCount(0);
+  await page.getByLabel("主线索搜索").fill("管理线索 target");
+  await page.getByRole("button", { name: /管理线索 target/ }).click();
+  await page.getByPlaceholder("合并原因").fill("E2E 重复");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "预览并确认合并" }).click();
+  await expect(page.getByText("该线索已进入终态，原始来源和附件保持只读。")).toBeVisible();
   const statuses = await page.evaluate(async (input) => {
     const post = async (path: string, body: unknown) => (await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).status;
     return {
-      merged: await post(`/api/v2/demand-leads/${input.source}/merge`, { targetLeadId: input.target, reason: "E2E 重复", confirmation: "CONFIRM" }),
       closed: await post(`/api/v2/demand-leads/${input.closed}/close`, { reason: "E2E 误关闭" }),
       restored: await post(`/api/v2/demand-leads/${input.closed}/restore`, { reason: "E2E 恢复", confirmation: "CONFIRM" }),
     };
   }, ids);
-  expect(statuses).toEqual({ merged: 200, closed: 200, restored: 200 });
-  await page.goto(`/admin/demand-leads/${ids.source}`);
+  expect(statuses).toEqual({ closed: 200, restored: 200 });
   await expect(page.getByText("该线索已进入终态，原始来源和附件保持只读。")).toBeVisible();
   await expect(page.getByText(/已合并/)).toBeVisible();
+});
+
+test("township merge search excludes leads from unauthorized areas", async ({ page }) => {
+  const prisma = getPrismaClient();
+  const suffix = Math.floor(Math.random() * 900_000 + 100_000).toString();
+  const source = await prisma.demandLead.create({ data: {
+    businessNo: `XS-2097-${suffix}`,
+    sourceType: "OTHER",
+    responsibleAreaId: enterpriseE2e.areaAId,
+    rawEnterpriseName: "本镇源企业",
+    rawTitle: `本镇源线索 ${suffix}`,
+    rawContent: "本镇可见",
+    sourceAt: new Date(),
+    status: "PENDING_ENTERPRISE_LINK",
+    createdByPersonId: e2eUsers.township.personId,
+  } });
+  await prisma.demandLead.create({ data: {
+    businessNo: `XS-2096-${suffix}`,
+    sourceType: "OTHER",
+    responsibleAreaId: enterpriseE2e.areaBId,
+    rawEnterpriseName: "其他区域企业",
+    rawTitle: `越权候选 ${suffix}`,
+    rawContent: "不应出现在本镇搜索结果",
+    sourceAt: new Date(),
+    status: "PENDING_ENTERPRISE_LINK",
+    createdByPersonId: e2eUsers.admin.personId,
+  } });
+  await login(page, e2eUsers.township);
+  await page.goto(`/demand-leads/${source.id}`);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes("/api/v2/demand-leads?") && response.url().includes("actionableOnly=true")),
+    page.getByLabel("主线索搜索").fill(`越权候选 ${suffix}`),
+  ]);
+  await expect(page.getByRole("button", { name: new RegExp(`越权候选 ${suffix}`) })).toHaveCount(0);
 });
 
 test("unauthorized member cannot discover pre-publish leads through page or API", async ({ page }) => {

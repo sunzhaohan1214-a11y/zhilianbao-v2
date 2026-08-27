@@ -11,10 +11,10 @@ export async function POST(request: NextRequest) {
   try {
     assertTrustedMutationOrigin(request);
     const service = new DemandLeadService();
-    await service.checkPublicRateLimit({ ip: context.ip, deviceId });
     const data = await service.createPublic({
       payload: await request.json(),
       idempotencyKey: request.headers.get("idempotency-key"),
+      rateLimit: { ip: context.ip, deviceId },
       context,
     });
     const response = apiSuccess(data, context.requestId, 201);

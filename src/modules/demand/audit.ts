@@ -58,15 +58,3 @@ export async function writeDemandTransition(
     requestId: input.context?.requestId?.slice(0, 100),
   } });
 }
-
-export async function writeDemandOutbox(
-  tx: Prisma.TransactionClient,
-  input: { eventType: string; aggregateType: "DEMAND_LEAD" | "DEMAND"; aggregateId: string; payload: Prisma.InputJsonObject },
-): Promise<void> {
-  await tx.outboxEvent.create({ data: {
-    eventType: input.eventType,
-    aggregateType: input.aggregateType,
-    aggregateId: input.aggregateId,
-    payloadJson: input.payload,
-  } });
-}

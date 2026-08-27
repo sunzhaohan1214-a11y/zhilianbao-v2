@@ -14,7 +14,7 @@ import {
   ORIGINAL_ATTACHMENT_RELATION,
   SOURCE_ATTACHMENT_RELATION,
 } from "./constants";
-import { writeDemandAudit, writeDemandOutbox, writeDemandTransition, type DemandMutationContext } from "./audit";
+import { writeDemandAudit, writeDemandTransition, type DemandMutationContext } from "./audit";
 import { DemandLeadError, isPrismaUniqueConflict } from "./errors";
 import { DemandLeadRepository, type DemandTransaction } from "./repository/demand-lead-repository";
 import {
@@ -118,15 +118,22 @@ export class DemandLeadService {
     await this.repository.transaction(async (tx) => { await this.requireArea(tx, areaId); });
   }
 
-  async checkPublicRateLimit(input: { ip: string; deviceId: string }) {
+  private async checkPublicRateLimit(
+    input: { ip: string; deviceId: string },
+    namespace: "PUBLIC_DEMAND" | "PUBLIC_DEMAND_UPLOAD",
+  ) {
     try {
-      await this.repository.checkAndRecordPublicRateLimit(input);
+      await this.repository.checkAndRecordPublicRateLimit(input, namespace);
     } catch (error) {
       if ((error as Error).message === "PUBLIC_DEMAND_RATE_LIMITED") {
         throw new DemandLeadError("DEMAND_LEAD_RATE_LIMITED", "提交过于频繁，请稍后再试");
       }
       throw error;
     }
+  }
+
+  async checkPublicUploadRateLimit(input: { ip: string; deviceId: string }) {
+    await this.checkPublicRateLimit(input, "PUBLIC_DEMAND_UPLOAD");
   }
 
   private async requireArea(tx: DemandTransaction, areaId: string) {
@@ -141,6 +148,18 @@ export class DemandLeadService {
       throw new DemandLeadError("DEMAND_LEAD_ENTERPRISE_INVALID", "只能关联正常状态的正式企业");
     }
     return enterprise;
+  }
+
+  private async lockAndRequireNormalEnterprise(tx: DemandTransaction, enterpriseId: string) {
+    try {
+      await this.repository.lockEnterprise(tx, enterpriseId);
+    } catch (error) {
+      if ((error as Error).message === "ENTERPRISE_LOCK_TARGET_NOT_FOUND") {
+        throw new DemandLeadError("DEMAND_LEAD_ENTERPRISE_INVALID", "只能关联正常状态的正式企业");
+      }
+      throw error;
+    }
+    return this.requireNormalEnterprise(tx, enterpriseId);
   }
 
   private async authorizeLead(actor: PermissionActor, action: "demand.lead.view" | "demand.lead.verify", areaId: string) {
@@ -175,6 +194,8 @@ export class DemandLeadService {
         ? attachment.uploadedByPersonId === null
           && attachment.publicAreaId === input.areaId
           && attachment.publicUploadTokenHash === publicTokenHash
+          && attachment.uploadExpiresAt !== null
+          && attachment.uploadExpiresAt > new Date()
         : Boolean(input.actorPersonId) && attachment.uploadedByPersonId === input.actorPersonId;
       if (
         !ownershipAllowed
@@ -220,7 +241,7 @@ export class DemandLeadService {
     publicAttachments?: readonly { attachmentId: string; uploadToken: string }[];
   }) {
     await this.requireArea(tx, input.responsibleAreaId);
-    if (input.enterpriseId) await this.requireNormalEnterprise(tx, input.enterpriseId);
+    if (input.enterpriseId) await this.lockAndRequireNormalEnterprise(tx, input.enterpriseId);
     const businessNo = await this.repository.nextBusinessNo(tx, "XS", input.sourceAt);
     const lead = await tx.demandLead.create({ data: {
       businessNo,
@@ -270,18 +291,13 @@ export class DemandLeadService {
       },
       context: input.context,
     });
-    await writeDemandOutbox(tx, {
-      eventType: "DEMAND_LEAD_CREATED",
-      aggregateType: DEMAND_LEAD_ENTITY,
-      aggregateId: lead.id,
-      payload: { leadId: lead.id, businessNo: lead.businessNo, responsibleAreaId: lead.responsibleAreaId, status: lead.status },
-    });
     return lead;
   }
 
   async createPublic(input: {
     payload: unknown;
     idempotencyKey: string | null;
+    rateLimit: { ip: string; deviceId: string };
     context?: DemandMutationContext;
   }) {
     if (!input.idempotencyKey) {
@@ -289,7 +305,6 @@ export class DemandLeadService {
     }
     const key = idempotencyKeySchema.parse(input.idempotencyKey);
     const payload = publicDemandLeadSchema.parse(input.payload);
-    assertBehavior(payload);
     const keyHash = sha256(`PUBLIC_DEMAND:${key}`);
     const payloadHash = publicPayloadHash(payload);
     const existing = await this.repository.findPublicIdempotency(keyHash);
@@ -299,6 +314,9 @@ export class DemandLeadService {
       }
       return publicResult(existing.demandLead);
     }
+
+    assertBehavior(payload);
+    await this.checkPublicRateLimit(input.rateLimit, "PUBLIC_DEMAND");
 
     const now = new Date();
     const duplicateWindowKey = publicDuplicateWindowKey(payload, now);
@@ -411,6 +429,8 @@ export class DemandLeadService {
       sourceType?: "ENTERPRISE_PUBLIC" | "MEMBER_VISIT" | "OTHER";
       areaId?: string;
       keyword?: string;
+      excludeId?: string;
+      actionableOnly: boolean;
       page: number;
       pageSize: number;
     };
@@ -499,12 +519,6 @@ export class DemandLeadService {
         reason: supplement.note,
         context: input.context,
       });
-      await writeDemandOutbox(tx, {
-        eventType: supplement.action === "REQUEST_MORE_INFO" ? "DEMAND_LEAD_MORE_INFO_REQUESTED" : "DEMAND_LEAD_INFO_ADDED",
-        aggregateType: DEMAND_LEAD_ENTITY,
-        aggregateId: lead.id,
-        payload: { leadId: lead.id, status: toStatus, responsibleAreaId: lead.responsibleAreaId },
-      });
       return this.repository.findLead(tx, lead.id);
     });
   }
@@ -518,7 +532,7 @@ export class DemandLeadService {
       const lead = await tx.demandLead.findUniqueOrThrow({ where: { id: input.leadId } });
       await this.authorizeLead(input.actor, "demand.lead.verify", lead.responsibleAreaId);
       if (lead.status !== "PENDING_ENTERPRISE_LINK") throw new DemandLeadError("DEMAND_LEAD_STATE_CONFLICT", "当前状态不能关联企业");
-      const enterprise = await this.requireNormalEnterprise(tx, input.enterpriseId);
+      const enterprise = await this.lockAndRequireNormalEnterprise(tx, input.enterpriseId);
       const updated = await tx.demandLead.update({ where: { id: lead.id }, data: {
         enterpriseId: enterprise.id,
         status: "PENDING_TOWNSHIP_VERIFY",
@@ -532,10 +546,6 @@ export class DemandLeadService {
         actor: input.actor, actionCode: "DEMAND_LEAD_ENTERPRISE_LINKED", entityType: DEMAND_LEAD_ENTITY, entityId: lead.id,
         before: { enterpriseId: lead.enterpriseId, status: lead.status },
         after: { enterpriseId: enterprise.id, status: updated.status }, context: input.context,
-      });
-      await writeDemandOutbox(tx, {
-        eventType: "DEMAND_LEAD_ENTERPRISE_LINKED", aggregateType: DEMAND_LEAD_ENTITY, aggregateId: lead.id,
-        payload: { leadId: lead.id, enterpriseId: enterprise.id, status: updated.status },
       });
       return this.repository.findLead(tx, lead.id);
     });
@@ -574,10 +584,6 @@ export class DemandLeadService {
         before: { status: source.status, mergedIntoLeadId: source.mergedIntoLeadId },
         after: { status: updated.status, mergedIntoLeadId: target.id }, reason: input.reason, context: input.context,
       });
-      await writeDemandOutbox(tx, {
-        eventType: "DEMAND_LEAD_MERGED", aggregateType: DEMAND_LEAD_ENTITY, aggregateId: source.id,
-        payload: { sourceLeadId: source.id, targetLeadId: target.id, responsibleAreaId: source.responsibleAreaId },
-      });
       return this.repository.findLead(tx, source.id);
     });
   }
@@ -596,7 +602,6 @@ export class DemandLeadService {
       } });
       await writeDemandTransition(tx, { actor: input.actor, entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, fromState: lead.status, toState: "CLOSED", actionCode: "DEMAND_LEAD_CLOSED", reason: input.reason, context: input.context });
       await writeDemandAudit(tx, { actor: input.actor, actionCode: "DEMAND_LEAD_CLOSED", entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, before: { status: lead.status }, after: { status: "CLOSED" }, reason: input.reason, context: input.context });
-      await writeDemandOutbox(tx, { eventType: "DEMAND_LEAD_CLOSED", aggregateType: DEMAND_LEAD_ENTITY, aggregateId: lead.id, payload: { leadId: lead.id, responsibleAreaId: lead.responsibleAreaId } });
       return updated;
     });
   }
@@ -612,15 +617,26 @@ export class DemandLeadService {
       }
       const lead = await tx.demandLead.findUniqueOrThrow({ where: { id: input.leadId } });
       if (lead.status !== "CLOSED") throw new DemandLeadError("DEMAND_LEAD_STATE_CONFLICT", "只有误关闭线索可以恢复");
-      if (lead.enterpriseId) await this.requireNormalEnterprise(tx, lead.enterpriseId);
-      let toStatus: DemandLeadStatus = lead.enterpriseId ? "PENDING_TOWNSHIP_VERIFY" : "PENDING_ENTERPRISE_LINK";
-      if (lead.enterpriseId && lead.closedFromStatus === "NEED_MORE_INFO") toStatus = "NEED_MORE_INFO";
+      let toStatus: DemandLeadStatus;
+      if (lead.closedFromStatus === "NEED_MORE_INFO") {
+        toStatus = "NEED_MORE_INFO";
+      } else if (lead.closedFromStatus === "PENDING_ENTERPRISE_LINK") {
+        toStatus = "PENDING_ENTERPRISE_LINK";
+      } else if (lead.closedFromStatus === "PENDING_TOWNSHIP_VERIFY") {
+        if (!lead.enterpriseId) {
+          toStatus = "PENDING_ENTERPRISE_LINK";
+        } else {
+          await this.lockAndRequireNormalEnterprise(tx, lead.enterpriseId);
+          toStatus = "PENDING_TOWNSHIP_VERIFY";
+        }
+      } else {
+        throw new DemandLeadError("DEMAND_LEAD_STATE_CONFLICT", "关闭前状态无效，不能恢复");
+      }
       const updated = await tx.demandLead.update({ where: { id: lead.id }, data: {
         status: toStatus, closeReason: null, closedFromStatus: null,
       } });
       await writeDemandTransition(tx, { actor: input.actor, entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, fromState: "CLOSED", toState: toStatus, actionCode: "DEMAND_LEAD_RESTORED", reason: input.reason, context: input.context });
       await writeDemandAudit(tx, { actor: input.actor, actionCode: "DEMAND_LEAD_RESTORED", entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, before: { status: "CLOSED" }, after: { status: toStatus }, reason: input.reason, context: input.context });
-      await writeDemandOutbox(tx, { eventType: "DEMAND_LEAD_RESTORED", aggregateType: DEMAND_LEAD_ENTITY, aggregateId: lead.id, payload: { leadId: lead.id, status: toStatus, responsibleAreaId: lead.responsibleAreaId } });
       return updated;
     });
   }
@@ -647,7 +663,7 @@ export class DemandLeadService {
         throw new DemandLeadError("DEMAND_LEAD_STATE_CONFLICT", "只有已关联企业且完成补充的待核验线索可以转换");
       }
       await this.requireArea(tx, lead.responsibleAreaId);
-      const enterprise = await this.requireNormalEnterprise(tx, lead.enterpriseId);
+      const enterprise = await this.lockAndRequireNormalEnterprise(tx, lead.enterpriseId);
       const contact = await this.repository.findContact(tx, conversion.selectedContactId);
       if (!contact || contact.status !== "ACTIVE" || contact.enterpriseId !== enterprise.id || contact.enterprise.status !== "NORMAL") {
         throw new DemandLeadError("DEMAND_LEAD_CONTACT_INVALID", "联系人不存在、已停用或不属于关联企业");
@@ -725,7 +741,6 @@ export class DemandLeadService {
       await writeDemandTransition(tx, { actor: input.actor, entityType: DEMAND_ENTITY, entityId: demand.id, toState: "DRAFT", actionCode: "DEMAND_DRAFT_CREATED_FROM_LEAD", metadata: { demandLeadId: lead.id, businessNo }, context: input.context });
       await writeDemandTransition(tx, { actor: input.actor, entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, fromState: lead.status, toState: "CONVERTED", actionCode: "DEMAND_LEAD_CONVERTED", metadata: { demandId: demand.id, businessNo }, context: input.context });
       await writeDemandAudit(tx, { actor: input.actor, actionCode: "DEMAND_LEAD_CONVERTED", entityType: DEMAND_LEAD_ENTITY, entityId: lead.id, before: { status: lead.status }, after: { status: "CONVERTED", demandId: demand.id, businessNo }, context: input.context });
-      await writeDemandOutbox(tx, { eventType: "DEMAND_DRAFT_CREATED_FROM_LEAD", aggregateType: DEMAND_ENTITY, aggregateId: demand.id, payload: { demandId: demand.id, demandLeadId: lead.id, businessNo, responsibleAreaId: lead.responsibleAreaId } });
       return tx.demand.findUniqueOrThrow({ where: { id: demand.id }, include: { contactSnapshot: true, provenances: true } });
     });
   }

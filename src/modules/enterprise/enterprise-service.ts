@@ -327,6 +327,13 @@ export class EnterpriseService {
       if (source.status === "MERGED" || target.status !== "NORMAL") {
         throw new EnterpriseError("ENTERPRISE_STATE_CONFLICT", "目标企业必须正常且源企业不能已合并");
       }
+      const [leadDependencies, demandDependencies] = await Promise.all([
+        tx.demandLead.count({ where: { enterpriseId: source.id } }),
+        tx.demand.count({ where: { enterpriseId: source.id } }),
+      ]);
+      if (leadDependencies > 0 || demandDependencies > 0) {
+        throw new EnterpriseError("ENTERPRISE_STATE_CONFLICT", "源企业存在需求线索或需求依赖，请先处理关联后再合并");
+      }
       const before = snapshotEnterprise(source, source.tagRelations.map(({ tagId }) => tagId));
       const updated = await tx.enterprise.update({ where: { id: source.id }, data: {
         status: "MERGED", mergedIntoId: target.id, currentVersion: { increment: 1 },

@@ -196,6 +196,9 @@ export class AttachmentService {
     ) {
       throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开附件凭证无效");
     }
+    if (!attachment.uploadExpiresAt || attachment.uploadExpiresAt <= new Date()) {
+      throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开附件凭证已过期");
+    }
     if (attachment.uploadStatus === "UPLOADED") return attachmentSummary(attachment);
     if (attachment.uploadStatus !== "PENDING_UPLOAD" || !attachment.stagingObjectKey) {
       throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "附件当前状态不能确认上传");

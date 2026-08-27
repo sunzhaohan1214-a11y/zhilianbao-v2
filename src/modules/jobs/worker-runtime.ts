@@ -4,7 +4,6 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attachment-uploaded-handler";
-import { DemandLifecycleOutboxHandler } from "@/modules/outbox/handlers/demand-lifecycle-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
@@ -62,14 +61,6 @@ export class WorkerRuntime {
 
     const outboxHandlers = new OutboxHandlerRegistry();
     outboxHandlers.register("ATTACHMENT_UPLOADED", new AttachmentUploadedOutboxHandler(this.jobs));
-    outboxHandlers.register("DEMAND_LEAD_CREATED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_CREATED">());
-    outboxHandlers.register("DEMAND_LEAD_MORE_INFO_REQUESTED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_MORE_INFO_REQUESTED">());
-    outboxHandlers.register("DEMAND_LEAD_INFO_ADDED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_INFO_ADDED">());
-    outboxHandlers.register("DEMAND_LEAD_ENTERPRISE_LINKED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_ENTERPRISE_LINKED">());
-    outboxHandlers.register("DEMAND_LEAD_MERGED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_MERGED">());
-    outboxHandlers.register("DEMAND_LEAD_CLOSED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_CLOSED">());
-    outboxHandlers.register("DEMAND_LEAD_RESTORED", new DemandLifecycleOutboxHandler<"DEMAND_LEAD_RESTORED">());
-    outboxHandlers.register("DEMAND_DRAFT_CREATED_FROM_LEAD", new DemandLifecycleOutboxHandler<"DEMAND_DRAFT_CREATED_FROM_LEAD">());
     this.outbox = dependencies?.outbox ?? new OutboxConsumer(outboxHandlers, config.outboxMaxAttempts, logger);
   }
 

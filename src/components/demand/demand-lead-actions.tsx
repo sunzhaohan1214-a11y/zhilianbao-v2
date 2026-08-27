@@ -1,9 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 type Contact = { id: string; name: string; positionTitle: string | null; phone: string };
+type EnterpriseOption = { id: string; name: string; responsibleArea: { name: string } };
+type LeadOption = {
+  id: string;
+  businessNo: string;
+  rawTitle: string;
+  status: string;
+  responsibleArea: { name: string };
+  enterprise: { name: string } | null;
+};
 
 async function command(path: string, body: Record<string, unknown>) {
   const response = await fetch(path, {
@@ -36,7 +45,41 @@ export function DemandLeadActions({
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [enterpriseOptions, setEnterpriseOptions] = useState<EnterpriseOption[]>([]);
+  const [selectedEnterprise, setSelectedEnterprise] = useState<EnterpriseOption | null>(null);
+  const [leadOptions, setLeadOptions] = useState<LeadOption[]>([]);
+  const [selectedLead, setSelectedLead] = useState<LeadOption | null>(null);
+  const enterpriseSearchVersion = useRef(0);
+  const leadSearchVersion = useRef(0);
   const terminal = ["MERGED", "CLOSED", "CONVERTED"].includes(status);
+
+  async function searchEnterprises(keyword: string) {
+    setSelectedEnterprise(null);
+    const version = ++enterpriseSearchVersion.current;
+    if (keyword.trim().length < 2) return setEnterpriseOptions([]);
+    const response = await fetch(`/api/v2/enterprises?keyword=${encodeURIComponent(keyword.trim())}&pageSize=10`);
+    const payload = await response.json();
+    if (version !== enterpriseSearchVersion.current) return;
+    if (!response.ok) throw new Error(payload.error?.message ?? "企业搜索失败");
+    setEnterpriseOptions(payload.data.items as EnterpriseOption[]);
+  }
+
+  async function searchLeads(keyword: string) {
+    setSelectedLead(null);
+    const version = ++leadSearchVersion.current;
+    if (keyword.trim().length < 2) return setLeadOptions([]);
+    const query = new URLSearchParams({
+      keyword: keyword.trim(),
+      excludeId: leadId,
+      actionableOnly: "true",
+      pageSize: "10",
+    });
+    const response = await fetch(`/api/v2/demand-leads?${query}`);
+    const payload = await response.json();
+    if (version !== leadSearchVersion.current) return;
+    if (!response.ok) throw new Error(payload.error?.message ?? "线索搜索失败");
+    setLeadOptions(payload.data.items as LeadOption[]);
+  }
 
   async function run(action: () => Promise<unknown>) {
     setPending(true);
@@ -77,18 +120,19 @@ export function DemandLeadActions({
 
   function linkEnterprise(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    if (!selectedEnterprise) return setMessage("请先从企业名称搜索结果中选择企业。");
     return run(() => command(`/api/v2/demand-leads/${leadId}/link-enterprise`, {
-      enterpriseId: value(form, "enterpriseId"),
+      enterpriseId: selectedEnterprise.id,
     }));
   }
 
   function merge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedLead) return setMessage("请先从线索搜索结果中选择主线索。");
     if (!window.confirm("合并后本线索将只读并指向主线索，确认继续？")) return;
     const form = new FormData(event.currentTarget);
     return run(() => command(`/api/v2/demand-leads/${leadId}/merge`, {
-      targetLeadId: value(form, "targetLeadId"),
+      targetLeadId: selectedLead.id,
       reason: value(form, "reason"),
       confirmation: "CONFIRM",
     }));
@@ -138,8 +182,15 @@ export function DemandLeadActions({
       {status === "PENDING_ENTERPRISE_LINK" && <form onSubmit={linkEnterprise} className={formClass}>
         <h3 className="font-semibold">关联正式企业</h3>
         <p className="text-xs text-slate-500">只允许 NORMAL 企业；原始企业名称不会被覆盖。</p>
-        <input name="enterpriseId" required placeholder="正式 Enterprise ID" className={inputClass} />
-        <button disabled={pending} className={buttonClass}>确认关联</button>
+        <input
+          aria-label="企业名称搜索"
+          placeholder="输入企业名称搜索"
+          className={inputClass}
+          onChange={(event) => void searchEnterprises(event.target.value).catch((error) => setMessage(error instanceof Error ? error.message : "企业搜索失败"))}
+        />
+        {enterpriseOptions.length > 0 && <ul aria-label="企业搜索结果" className="divide-y rounded-xl border border-slate-200">{enterpriseOptions.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left text-sm hover:bg-slate-50" onClick={() => { setSelectedEnterprise(option); setEnterpriseOptions([]); }}>{option.name} · {option.responsibleArea.name}</button></li>)}</ul>}
+        {selectedEnterprise && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">已选择：{selectedEnterprise.name} · {selectedEnterprise.responsibleArea.name}</p>}
+        <button disabled={pending || !selectedEnterprise} className={buttonClass}>确认关联</button>
       </form>}
 
       {!terminal && <form onSubmit={supplement} className={formClass}>
@@ -173,7 +224,19 @@ export function DemandLeadActions({
       </form>}
 
       {!terminal && <div className="grid gap-4 md:grid-cols-2">
-        <form onSubmit={merge} className={formClass}><h3 className="font-semibold">合并到主线索</h3><input name="targetLeadId" required placeholder="主 Lead ID" className={inputClass} /><textarea name="reason" required maxLength={500} placeholder="合并原因" className={inputClass} /><button disabled={pending} className={buttonClass}>预览并确认合并</button></form>
+        <form onSubmit={merge} className={formClass}>
+          <h3 className="font-semibold">合并到主线索</h3>
+          <input
+            aria-label="主线索搜索"
+            placeholder="输入 XS 编号、企业名或标题搜索"
+            className={inputClass}
+            onChange={(event) => void searchLeads(event.target.value).catch((error) => setMessage(error instanceof Error ? error.message : "线索搜索失败"))}
+          />
+          {leadOptions.length > 0 && <ul aria-label="线索搜索结果" className="divide-y rounded-xl border border-slate-200">{leadOptions.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left text-sm hover:bg-slate-50" onClick={() => { setSelectedLead(option); setLeadOptions([]); }}><span className="font-medium">{option.businessNo} · {option.rawTitle}</span><span className="mt-1 block text-xs text-slate-500">{option.enterprise?.name ?? "未关联企业"} · {option.responsibleArea.name} · {option.status}</span></button></li>)}</ul>}
+          {selectedLead && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">已选择：{selectedLead.businessNo} · {selectedLead.rawTitle}</p>}
+          <textarea name="reason" required maxLength={500} placeholder="合并原因" className={inputClass} />
+          <button disabled={pending || !selectedLead} className={buttonClass}>预览并确认合并</button>
+        </form>
         <form onSubmit={close} className={formClass}><h3 className="font-semibold">关闭线索</h3><textarea name="reason" required maxLength={500} placeholder="关闭原因" className={inputClass} /><button disabled={pending} className={buttonClass}>关闭</button></form>
       </div>}
 

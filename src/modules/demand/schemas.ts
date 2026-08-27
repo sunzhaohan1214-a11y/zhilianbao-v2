@@ -130,6 +130,11 @@ export const demandLeadListQuerySchema = z.object({
   sourceType: optionalQueryString.pipe(z.enum(["ENTERPRISE_PUBLIC", "MEMBER_VISIT", "OTHER"]).optional()),
   areaId: optionalQueryString.pipe(z.uuid().optional()),
   keyword: optionalQueryString.pipe(z.string().trim().max(100).optional()),
+  excludeId: optionalQueryString.pipe(z.uuid().optional()),
+  actionableOnly: z.preprocess(
+    (value) => value === "true" ? true : value === "false" || value === undefined ? false : value,
+    z.boolean(),
+  ),
   page: optionalInteger(1, 1_000_000),
   pageSize: optionalInteger(20, 100),
 }).strict();
