@@ -1,0 +1,2 @@
+import type { NextRequest } from "next/server"; import { apiError, apiSuccess } from "@/lib/api/response"; import { talentRequestContext } from "@/lib/api/talent-route"; import { buildAuthRequestContext } from "@/lib/auth/request-context";
+export async function GET(request: NextRequest){const context=buildAuthRequestContext(request);try{const{actor,service}=await talentRequestContext(request);return apiSuccess(await service.stats({actor,context}),context.requestId);}catch(error){return apiError(error,context.requestId);}}
