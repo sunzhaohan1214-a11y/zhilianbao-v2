@@ -9,6 +9,7 @@ test.setTimeout(120_000);
 async function login(page: Page, user: { phone: string; password: string }) {
   await page.context().clearCookies();
   const response = await page.request.post("/api/v2/auth/login", {
+    headers: { origin: "http://127.0.0.1:3000" },
     data: { phone: user.phone, password: user.password },
   });
   expect(response.status()).toBe(200);
