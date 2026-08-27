@@ -86,9 +86,13 @@ test("public browser retry reuses attachment references after the successful res
   await page.waitForTimeout(900);
   await page.getByRole("button", { name: "提交需求线索" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
-  const replayed = page.waitForResponse((response) => response.url().endsWith("/api/v2/public/demand-leads") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "提交需求线索" }).click();
-  expect((await replayed).status()).toBe(201);
+  const retryButton = page.getByRole("button", { name: "提交需求线索" });
+  await expect(retryButton).toBeEnabled();
+  const [replayed] = await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith("/api/v2/public/demand-leads") && response.request().method() === "POST"),
+    retryButton.click(),
+  ]);
+  expect(replayed.status()).toBe(201);
   await expect(page.getByText(/参考编号 XS-/)).toBeVisible();
   expect(uploadIntentCount).toBe(1);
   expect(finalPostCount).toBe(2);
