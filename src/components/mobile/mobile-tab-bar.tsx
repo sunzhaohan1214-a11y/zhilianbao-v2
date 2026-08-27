@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export const mobileNavigation = [
   { href: "/", label: "首页" },
@@ -8,6 +11,8 @@ export const mobileNavigation = [
 ] as const;
 
 export function MobileTabBar() {
+  const pathname = usePathname();
+  if (pathname.startsWith("/resources/enterprises/")) return null;
   return (
     <nav
       aria-label="手机主导航"

@@ -1,12 +1,17 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 
 export function AdminShell({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <div className="min-h-dvh bg-slate-100 lg:grid lg:grid-cols-[240px_1fr]">
-      <aside className="border-b border-slate-200 bg-slate-950 px-6 py-6 text-white lg:border-b-0 lg:border-r">
-        <p className="text-xs font-medium tracking-[0.2em] text-blue-300">ZHILIANBAO</p>
+    <div className="min-h-dvh bg-slate-50 lg:grid lg:grid-cols-[240px_1fr]">
+      <aside className="border-b border-slate-200 bg-white px-6 py-6 text-slate-950 lg:border-b-0 lg:border-r">
+        <p className="text-xs font-medium tracking-[0.2em] text-blue-600">ZHILIANBAO</p>
         <p className="mt-2 text-xl font-semibold">PC 管理后台</p>
-        <p className="mt-8 text-sm text-slate-400">工程骨架</p>
+        <nav className="mt-8 space-y-1 text-sm">
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin">工作台</Link>
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/enterprises">企业管理</Link>
+          <Link className="block rounded-xl px-3 py-2 hover:bg-blue-50 hover:text-blue-700" href="/admin/enterprise-change-requests">企业申请审核</Link>
+        </nav>
       </aside>
       <main className="p-6 lg:p-10">{children}</main>
     </div>
