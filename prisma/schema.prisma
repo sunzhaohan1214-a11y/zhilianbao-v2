@@ -257,6 +257,7 @@ model Person {
   createdDemandLeads            DemandLead[]              @relation("DemandLeadCreator")
   demandLeadSupplements         DemandLeadSupplement[]
   createdDemands                Demand[]                  @relation("DemandCreator")
+  createdMapBoundaryVersions   MapBoundaryVersion[]      @relation("MapBoundaryCreator")
 
   @@index([personStatus])
   @@map("persons")
@@ -376,6 +377,7 @@ model AdministrativeArea {
   departmentRelations        DepartmentTownshipRelation[]
   enterprises                Enterprise[]
   proposedEnterpriseRequests EnterpriseChangeRequest[]
+  boundaryVersions           MapBoundaryVersion[]
   publicAttachments          Attachment[]                 @relation("PublicAttachmentArea")
   demandLeads                DemandLead[]
   demands                    Demand[]
@@ -399,6 +401,26 @@ model OrganizationAreaMapping {
   @@index([organizationId, effectiveAt, expiredAt])
   @@index([areaId, effectiveAt, expiredAt])
   @@map("organization_area_mappings")
+}
+
+model MapBoundaryVersion {
+  id                  String             @id @default(uuid()) @db.Char(36)
+  areaId              String             @map("area_id") @db.Char(36)
+  versionNo           Int                @map("version_no") @db.UnsignedInt
+  geoJson             Json               @map("geo_json")
+  checksum            String             @db.Char(64)
+  sourceFilename      String?            @map("source_filename") @db.VarChar(255)
+  isCurrent           Boolean            @default(false) @map("is_current")
+  changeReason        String             @map("change_reason") @db.VarChar(500)
+  createdByPersonId   String             @map("created_by_person_id") @db.Char(36)
+  createdAt           DateTime           @default(now()) @map("created_at") @db.DateTime(3)
+  area                AdministrativeArea @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  createdByPerson     Person             @relation("MapBoundaryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([areaId, versionNo])
+  @@index([areaId, isCurrent])
+  @@index([createdByPersonId, createdAt])
+  @@map("map_boundary_versions")
 }
 
 model Appointment {
