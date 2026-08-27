@@ -46,8 +46,8 @@ CREATE TABLE `demand_recommendation_items` (
 
   CONSTRAINT `demand_recommendation_items_rank_check` CHECK (`rank` BETWEEN 1 AND 3),
   CONSTRAINT `demand_recommendation_items_response_check` CHECK (
-    (`response_status` IS NULL AND `responded_at` IS NULL AND `responded_by_person_id` IS NULL)
-    OR (`response_status` IS NOT NULL AND `responded_at` IS NOT NULL AND `responded_by_person_id` IS NOT NULL)
+    (`response_status` IS NULL AND `responded_at` IS NULL)
+    OR (`response_status` IS NOT NULL AND `responded_at` IS NOT NULL)
   ),
   UNIQUE INDEX `demand_recommendation_items_run_id_rank_key` (`run_id`, `rank`),
   UNIQUE INDEX `demand_recommendation_items_run_id_person_id_key` (`run_id`, `person_id`),
