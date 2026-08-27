@@ -45,6 +45,7 @@ async function addTodo(
       actionUrl: todoType === "REIMBURSEMENT_REVISE" ? `/reimbursements/${reimbursementId}` : `/reimbursement-admin/${reimbursementId}`,
       dedupeKey: `${todoType}:${reimbursementId}:${personId}:${eventKey}`,
       eventKey,
+      reopenStale: true,
     });
   }
 }
