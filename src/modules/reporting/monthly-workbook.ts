@@ -1,5 +1,7 @@
 import ExcelJS from "exceljs";
+import { Prisma as PrismaRuntime } from "@/generated/prisma/client";
 import { escapeExcelFormula } from "@/modules/import-export/export-service";
+import { ReportingError } from "./errors";
 
 export const MONTHLY_REPORT_SHEETS = ["月度概览", "需求进展", "走访与行程", "人才对接", "成效跟踪"] as const;
 
@@ -24,6 +26,21 @@ export type MonthlyReportData = {
 };
 
 const COLORS = { navy: "1E3A5F", blue: "DCEAF7", pale: "F5F8FB", white: "FFFFFF", gray: "64748B" };
+const MONEY_FORMAT = "#,##0.00";
+
+export function decimalStringToSafeExcelNumber(value: string): number {
+  try {
+    const cents = new PrismaRuntime.Decimal(value).mul(100);
+    const centsNumber = cents.toNumber();
+    if (!cents.isInteger() || !Number.isSafeInteger(centsNumber) || !cents.equals(centsNumber)) {
+      throw new ReportingError("REPORT_EXCEL_MONEY_PRECISION_UNSAFE", "REPORT_EXCEL_MONEY_PRECISION_UNSAFE");
+    }
+    return centsNumber / 100;
+  } catch (error) {
+    if (error instanceof ReportingError) throw error;
+    throw new ReportingError("REPORT_EXCEL_MONEY_PRECISION_UNSAFE", "REPORT_EXCEL_MONEY_PRECISION_UNSAFE");
+  }
+}
 
 function safe(value: unknown): string | number | boolean | Date | null {
   if (value === null || value === undefined) return null;
@@ -50,7 +67,7 @@ function addObjectSheet(workbook: ExcelJS.Workbook, name: string, columns: Array
   sheet.columns = columns.map(({ header, key, width }) => ({ header, key, width }));
   for (const row of rows) {
     const added = sheet.addRow(Object.fromEntries(columns.map(({ key }) => [key, safe(row[key])])));
-    columns.forEach((column, index) => { if (column.money) added.getCell(index + 1).numFmt = "#,##0.00"; });
+    columns.forEach((column, index) => { if (column.money) added.getCell(index + 1).numFmt = MONEY_FORMAT; });
   }
   styleTable(sheet, columns.map(({ width }) => width));
   return sheet;
@@ -96,7 +113,14 @@ export async function buildMonthlyWorkbook(data: MonthlyReportData): Promise<Buf
     ["成效", "引进人才新增", data.overview.outcome.talentIntroduced, "APPROVED Round increment"],
     ["成效", "专利新增", data.overview.outcome.patent, "APPROVED Round increment"],
   ];
-  entries.forEach((entry) => overview.addRow(entry.map(safe)));
+  const moneyMetrics = new Set(["合同金额新增", "投资额新增", "政策资金新增", "降本新增"]);
+  entries.forEach((entry) => {
+    const row = overview.addRow(entry.map(safe));
+    if (entry[0] === "成效" && moneyMetrics.has(entry[1])) {
+      row.getCell(3).value = decimalStringToSafeExcelNumber(String(entry[2]));
+      row.getCell(3).numFmt = MONEY_FORMAT;
+    }
+  });
   overview.addRow([]);
   overview.addRow(["数据质量说明", "代码", "数量", "说明"]);
   data.warnings.forEach((warning) => overview.addRow(["数据质量说明", safe(warning.code), warning.count, safe(warning.message)]));
@@ -122,7 +146,10 @@ export async function buildMonthlyWorkbook(data: MonthlyReportData): Promise<Buf
     { header: "Round No", key: "roundNo", width: 12 }, { header: "trackingDate", key: "trackingDate", width: 16 }, { header: "trackingBatch", key: "trackingBatch", width: 20 },
     { header: "合同金额新增", key: "contractAmount", width: 18, money: true }, { header: "投资额新增", key: "investmentAmount", width: 18, money: true }, { header: "政策资金新增", key: "policyFund", width: 18, money: true }, { header: "降本新增", key: "costReduction", width: 18, money: true },
     { header: "引进人才新增", key: "talentIntroduced", width: 16 }, { header: "专利新增", key: "patent", width: 14 }, { header: "定性成效", key: "qualitativeResult", width: 42 }, { header: "企业反馈", key: "enterpriseFeedback", width: 42 }, { header: "审核时间", key: "reviewedAt", width: 22 },
-  ], data.rows.outcomes.map((row) => ({ ...row, contractAmount: Number(row.contractAmount), investmentAmount: Number(row.investmentAmount), policyFund: Number(row.policyFund), costReduction: Number(row.costReduction) })));
+  ], data.rows.outcomes.map((row) => ({ ...row,
+    contractAmount: decimalStringToSafeExcelNumber(String(row.contractAmount)), investmentAmount: decimalStringToSafeExcelNumber(String(row.investmentAmount)),
+    policyFund: decimalStringToSafeExcelNumber(String(row.policyFund)), costReduction: decimalStringToSafeExcelNumber(String(row.costReduction)),
+  })));
 
   if (workbook.worksheets.map(({ name }) => name).join("|") !== MONTHLY_REPORT_SHEETS.join("|")) throw new Error("MONTHLY_REPORT_SHEET_CONTRACT_BROKEN");
   return Buffer.from(await workbook.xlsx.writeBuffer());

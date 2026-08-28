@@ -18,7 +18,7 @@ const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 const REPORT_PAGE_SIZE = 500;
 
 type Query = { month: string; batchId?: string; areaId?: string };
-type WarningCode = "UNRESOLVED_BATCH_AT_ASOF" | "ENTERPRISE_STATUS_ASOF_LIMITED" | "ENTERPRISE_AREA_ASOF_MISSING" | "TALENT_AREA_ATTRIBUTION_MISSING" | "PRESENCE_AREA_ATTRIBUTION_MISSING" | "BATCH_AT_ASOF_INVALID";
+type WarningCode = "UNRESOLVED_BATCH_AT_ASOF" | "ENTERPRISE_STATUS_ASOF_LIMITED" | "ENTERPRISE_AREA_ASOF_MISSING" | "TALENT_AREA_ATTRIBUTION_MISSING" | "PRESENCE_AREA_ATTRIBUTION_MISSING" | "BATCH_AT_ASOF_INVALID" | "DEMAND_STATUS_ASOF_MISSING" | "DEMAND_RESPONSIBILITY_ASOF_MISSING";
 
 function date(value: Date | null | undefined): string | null { return value ? shanghaiDateKey(value) : null; }
 function dateTime(value: Date | null | undefined): string | null { return value ? value.toISOString() : null; }
@@ -27,6 +27,12 @@ function hashBytes(value: Buffer): string { return createHash("sha256").update(v
 function payload(query: Query): string { return JSON.stringify({ month: query.month, batchId: query.batchId ?? null, areaId: query.areaId ?? null }); }
 function selected(where: string[] | null, areaId: string): boolean { return where === null || where.includes(areaId); }
 function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
+
+export function getTripBusinessDate(nodes: readonly { id?: string; sequenceNo: number; plannedStartAt: Date }[]): Date | null {
+  return [...nodes]
+    .sort((left, right) => left.sequenceNo - right.sequenceNo || left.plannedStartAt.getTime() - right.plannedStartAt.getTime() || String(left.id ?? "").localeCompare(String(right.id ?? "")))
+    .at(0)?.plannedStartAt ?? null;
+}
 
 async function loadReportPages<T extends { id: string }>(load: (cursor?: string) => Promise<T[]>): Promise<T[]> {
   const result: T[] = [];
@@ -50,6 +56,8 @@ class Warnings {
       TALENT_AREA_ATTRIBUTION_MISSING: "人才新增缺少可靠镇区轮次归属，已从区域指标排除。",
       PRESENCE_AREA_ATTRIBUTION_MISSING: "来离宝记录缺少唯一有效任职/会员区域归属，已从区域指标排除。",
       BATCH_AT_ASOF_INVALID: "统计时点没有唯一有效批次；未猜测当前批次。",
+      DEMAND_STATUS_ASOF_MISSING: "已发布需求缺少统计时点前的可靠状态历史，未猜测月末状态；已从状态指标排除并保留明细提示。",
+      DEMAND_RESPONSIBILITY_ASOF_MISSING: "对接中需求缺少统计时点唯一可靠的负责人或镇区处理人，未猜测责任归属与久未更新状态。",
     };
     return [...this.counts].filter(([, count]) => count > 0).map(([code, count]) => ({ code, count, message: messages[code] }));
   }
@@ -152,8 +160,13 @@ export class ReportingService {
       if (!canDownloadMonthlyReport(actor)) throw new ReportingError("REPORT_PERMISSION_REVOKED", "导出创建人已失去月报下载权限");
       const currentScope = resolveMonthlyReportScope(actor);
       if (!scopeStillAllowed(this.snapshotScope(task.scopeSnapshot), currentScope)) throw new ReportingError("REPORT_PERMISSION_REVOKED", "导出创建人的当前数据范围已缩小");
-      const raw = asRecord(task.querySnapshot); if (!raw) throw new Error("REPORT_QUERY_SNAPSHOT_INVALID");
-      const query = monthlyReportExportSchema.parse({ month: raw.month, ...(raw.batchId ? { batchId: raw.batchId } : {}), ...(raw.areaId ? { areaId: raw.areaId } : {}) });
+      const raw = asRecord(task.querySnapshot); if (!raw) throw new ReportingError("REPORT_QUERY_SNAPSHOT_INVALID", "REPORT_QUERY_SNAPSHOT_INVALID");
+      let query: Query;
+      try {
+        query = monthlyReportExportSchema.parse({ month: raw.month, ...(raw.batchId ? { batchId: raw.batchId } : {}), ...(raw.areaId ? { areaId: raw.areaId } : {}) });
+      } catch {
+        throw new ReportingError("REPORT_QUERY_SNAPSHOT_INVALID", "REPORT_QUERY_SNAPSHOT_INVALID");
+      }
       const data = await this.collect(actor, query);
       const body = await buildMonthlyWorkbook(data);
       const storage = getAttachmentRuntime().storage;
@@ -237,6 +250,8 @@ export class ReportingService {
     const demandRows: MonthlyReportData["rows"]["demands"] = [];
     for (const demand of demands) {
       const status = statusAt(byDemand.get(demand.id) ?? [], period.asOf);
+      const statusMissing = status === null;
+      if (statusMissing) warnings.add("DEMAND_STATUS_ASOF_MISSING");
       const batchAt = resolveDemandBatchAt({ creationBatchId: demand.creationBatchId, ownerHistories: demand.ownerHistories.map((item) => ({ ...item, personName: item.person.name })),
         transferFacts: (auditsByDemand.get(demand.id) ?? []).map((item) => ({ occurredAt: item.createdAt, metadataJson: item.afterJson })), asOf: period.asOf });
       const matchesStockBatch = !query.batchId || batchAt === query.batchId;
@@ -249,13 +264,16 @@ export class ReportingService {
       const owner = ownerAt(demand.ownerHistories.map((item) => ({ ...item, personName: item.person.name })), period.asOf);
       const activeHandlers = demand.townshipHandlers.filter((item) => effective(item.effectiveAt, item.expiredAt, period.asOf));
       const handler = activeHandlers.length === 1 ? activeHandlers[0] : null;
-      const freshness = getDemandProgressFreshnessAt({ status, progresses: demand.progresses, responsibilityBaselines: [owner?.effectiveAt, handler?.effectiveAt].filter((item): item is Date => Boolean(item)), asOf: period.asOf });
+      const responsibilityMissing = status === "IN_PROGRESS" && !owner && !handler;
+      if (responsibilityMissing) warnings.add("DEMAND_RESPONSIBILITY_ASOF_MISSING");
+      const calculatedFreshness = getDemandProgressFreshnessAt({ status, progresses: demand.progresses, responsibilityBaselines: [owner?.effectiveAt, handler?.effectiveAt].filter((item): item is Date => Boolean(item)), asOf: period.asOf });
+      const freshness = responsibilityMissing ? { ...calculatedFreshness, stale: false } : calculatedFreshness;
       const plan = demand.outcomePlan ? outcomePlanAt({ ...demand.outcomePlan, approvedRounds: demand.outcomePlan.rounds, asOf: period.asOf }) : { status: "NOT_TRACKED" as const, nextDueDate: null };
       const due = (plan.status === "PENDING" || plan.status === "IN_PROGRESS") && Boolean(plan.nextDueDate && date(plan.nextDueDate)! <= period.asOfDate);
       if (freshness.stale && matchesStockBatch) staleCount += 1; if (due && matchesStockBatch) outcomeDueCount += 1;
-      if (added || completed || (status && STOCK_STATUSES.includes(status as typeof STOCK_STATUSES[number]) && matchesStockBatch)) demandRows.push({ businessNo: demand.businessNo, title: demand.title, enterprise: demand.enterprise.name,
-        area: demand.responsibleArea.name, demandType: demand.demandType, urgency: demand.urgency, added: added ? "是" : "否", completed: completed ? "是" : "否", statusAt: status,
-        stale: freshness.stale ? "是" : "否", outcomeDue: due ? "是" : "否", responsibility: owner ? `CURRENT_OWNER / ${owner.personName}` : handler ? `ALUMNI_TOWNSHIP / ${handler.person.name}` : "—",
+      if (statusMissing || added || completed || (status && STOCK_STATUSES.includes(status as typeof STOCK_STATUSES[number]) && matchesStockBatch)) demandRows.push({ businessNo: demand.businessNo, title: demand.title, enterprise: demand.enterprise.name,
+        area: demand.responsibleArea.name, demandType: demand.demandType, urgency: demand.urgency, added: added ? "是" : "否", completed: completed ? "是" : "否", statusAt: status ?? "UNRESOLVED",
+        stale: freshness.stale ? "是" : "否", outcomeDue: due ? "是" : "否", responsibility: responsibilityMissing ? "UNRESOLVED" : owner ? `CURRENT_OWNER / ${owner.personName}` : handler ? `ALUMNI_TOWNSHIP / ${handler.person.name}` : "—",
         lastProgressAt: date(freshness.latestProgressAt), completedAt: date(closeApprovedAt), creationBatch: demand.creationBatch.name, completionBatch: demand.completionBatch?.name ?? null });
     }
 
@@ -292,24 +310,41 @@ export class ReportingService {
       if (allowed && arrival) arrivalVisits += 1; if (allowed && present) presentPeople.add(presence.personId);
     }
 
-    const trips = await loadReportPages((cursor) => this.prisma.trip.findMany({ where: { nodes: { some: { plannedStartAt: { gte: period.monthStart, lt: period.monthEndExclusive } } }, OR: [{ canceledAt: null }, { canceledAt: { gt: period.asOf } }] }, orderBy: { id: "asc" }, take: REPORT_PAGE_SIZE, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), include: {
+    const trips = await loadReportPages((cursor) => this.prisma.trip.findMany({ where: { AND: [
+      { OR: [{ canceledAt: null }, { canceledAt: { gt: period.asOf } }] },
+      { OR: [
+        { nodes: { some: { plannedStartAt: { gte: period.monthStart, lt: period.monthEndExclusive } } } },
+        { visits: { some: { visitedAt: { gte: period.monthStart, lt: period.monthEndExclusive } } } },
+        { demandLeads: { some: { sourceType: "MEMBER_VISIT", sourceAt: { gte: period.monthStart, lt: period.monthEndExclusive } } } },
+      ] },
+    ] }, orderBy: { id: "asc" }, take: REPORT_PAGE_SIZE, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}), include: {
       participants: { include: { person: { select: { name: true } } } }, nodes: { include: { enterprise: { include: { responsibleArea: { select: { id: true, name: true } } } } }, orderBy: { sequenceNo: "asc" } },
-      visits: { where: { visitedAt: { gte: period.monthStart, lt: period.monthEndExclusive } }, include: { enterprise: { include: { responsibleArea: { select: { id: true, name: true } } } }, demandLeads: { where: { sourceType: "MEMBER_VISIT", sourceAt: { gte: period.monthStart, lt: period.monthEndExclusive } } } } }, result: true,
+      visits: { where: { visitedAt: { gte: period.monthStart, lt: period.monthEndExclusive } }, include: { enterprise: { include: { responsibleArea: { select: { id: true, name: true } } } } } },
+      demandLeads: { where: { sourceType: "MEMBER_VISIT", sourceAt: { gte: period.monthStart, lt: period.monthEndExclusive } }, select: { id: true, responsibleAreaId: true } },
     } }));
     const tripIds = new Set<string>(); const participantRelations = new Set<string>(); const participantPeople = new Set<string>(); const visitedEnterprises = new Set<string>(); let leadCount = 0;
     const tripRows: MonthlyReportData["rows"]["trips"] = [];
     for (const trip of trips) {
-      const tripAt = trip.nodes[0]?.plannedStartAt; if (!tripAt) continue;
+      const tripAt = getTripBusinessDate(trip.nodes); if (!tripAt) continue;
+      const tripInPeriod = inPeriod(tripAt, period);
       const visits = trip.visits.filter((visit) => selected(areaIds, visit.enterprise.responsibleAreaId));
-      const nodes = areaIds === null ? trip.nodes : trip.nodes.filter((node) => node.enterprise && areaIds.includes(node.enterprise.responsibleAreaId));
-      if (areaIds !== null && visits.length === 0 && nodes.length === 0) continue;
-      tripIds.add(trip.id);
-      const participants = trip.participants.filter((item) => item.joinedAt <= tripAt && (item.leftAt === null || item.leftAt > tripAt));
-      participants.forEach((item) => { participantRelations.add(item.id); participantPeople.add(item.personId); });
-      visits.forEach((visit) => { visitedEnterprises.add(visit.enterpriseId); leadCount += visit.demandLeads.length; });
+      const leads = trip.demandLeads.filter((lead) => selected(areaIds, lead.responsibleAreaId));
+      const nodesInPeriod = trip.nodes.filter((node) => inPeriod(node.plannedStartAt, period));
+      const nodes = areaIds === null ? nodesInPeriod : nodesInPeriod.filter((node) => node.enterprise && areaIds.includes(node.enterprise.responsibleAreaId));
+      const tripVisibleInScope = areaIds === null || visits.length > 0 || nodes.length > 0;
+      if (tripInPeriod && tripVisibleInScope) {
+        tripIds.add(trip.id);
+        const participants = trip.participants.filter((item) => item.joinedAt <= tripAt && (item.leftAt === null || item.leftAt > tripAt));
+        participants.forEach((item) => { participantRelations.add(item.id); participantPeople.add(item.personId); });
+      }
+      visits.forEach((visit) => visitedEnterprises.add(visit.enterpriseId));
+      leadCount += leads.length;
+      if ((!tripInPeriod || !tripVisibleInScope) && visits.length === 0) continue;
+      const participants = tripInPeriod && tripVisibleInScope ? trip.participants.filter((item) => item.joinedAt <= tripAt && (item.leftAt === null || item.leftAt > tripAt)) : [];
+      const enterpriseNames = visits.length > 0 ? visits.map((visit) => visit.enterprise.name) : nodes.map((node) => node.enterprise?.name ?? node.locationName);
       tripRows.push({ date: date(tripAt), trip: `${trip.id} / ${trip.title}`, participants: participants.map((item) => item.person.name).join("、"),
-        enterprises: nodes.map((node) => node.enterprise?.name ?? node.locationName).join("、"), areas: [...new Set(visits.map((visit) => visit.enterprise.responsibleArea.name))].join("、"),
-        result: areaIds === null ? trip.result?.resultSummary ?? null : visits.map((visit) => visit.visitSummary).filter(Boolean).join("；"), leadCount: visits.reduce((sum, visit) => sum + visit.demandLeads.length, 0) });
+        enterprises: [...new Set(enterpriseNames)].join("、"), areas: [...new Set(visits.map((visit) => visit.enterprise.responsibleArea.name))].join("、"),
+        result: visits.map((visit) => visit.visitSummary).filter(Boolean).join("；") || null, leadCount: leads.length });
     }
 
     const talents = await loadReportPages((cursor) => this.prisma.talent.findMany({ where: { OR: [

@@ -8,8 +8,9 @@ export class MonthlyReportExportJobHandler implements JobHandler<"MONTHLY_REPORT
     try {
       await this.service.processExport(payload.exportTaskId);
     } catch (error) {
-      if (error instanceof ReportingError && error.code === "REPORT_PERMISSION_REVOKED") {
-        throw new PermanentJobError(error.code, error.message, { cause: error });
+      const code = error instanceof ReportingError ? error.code : error instanceof Error ? error.message : null;
+      if (code && ["REPORT_PERMISSION_REVOKED", "REPORT_EXCEL_MONEY_PRECISION_UNSAFE", "REPORT_QUERY_SNAPSHOT_INVALID"].includes(code)) {
+        throw new PermanentJobError(code, error instanceof Error ? error.message : code, { cause: error });
       }
       throw new RetryableJobError("MONTHLY_REPORT_EXPORT_TRANSIENT", "月度工作台账导出暂时失败", { cause: error });
     }

@@ -12,6 +12,7 @@ const prisma = getPrismaClient();
 const service = new ReportingService();
 const ids = { people: [] as string[], accounts: [] as string[], batches: [] as string[], demands: [] as string[], attachments: [] as string[], areas: [] as string[], organizations: [] as string[], enterprises: [] as string[], trips: [] as string[], talents: [] as string[] };
 let actor: PermissionActor; let areaId: string; let organizationId: string; let enterpriseId: string; let contactId: string; let batchA: string; let batchB: string; let batchC: string; let demandId: string;
+let firstEnterpriseName: string; let secondEnterpriseName: string;
 
 async function createDemand(input: { businessNo: string; title: string; publishedAt: Date; ownerAt: Date; lastProgressAt?: Date }) {
   const demand = await prisma.demand.create({ data: { businessNo: input.businessNo, enterpriseId, responsibleAreaId: areaId, selectedContactId: contactId, title: input.title, originalDescription: "结构化月报历史时点测试",
@@ -46,11 +47,20 @@ beforeAll(async () => {
   await prisma.roleAssignment.create({ data: { personId: person.id, roleCode: "ADMIN", effectiveAt: new Date("2025-01-01") } });
   actor = { personId: person.id, accountId: account.id, accountStatus: "NORMAL", permissionVersion: account.permissionVersion, effectiveRoles: ["ADMIN"], capabilities: resolveCapabilities(["ADMIN"], new Set()), specialPermissions: new Set(), selfPersonId: person.id,
     townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true, hasGlobalOperational: true, hasSystem: false, currentBatchMember: false, configurationIssues: [] };
-  const enterprise = await prisma.enterprise.create({ data: { name: `M3-004企业-${randomUUID()}`, responsibleAreaId: areaId, address: "宝应县测试地址", mainProducts: "电力装备", createdByPersonId: person.id, createdAt: new Date("2026-01-01") } }); enterpriseId = enterprise.id; ids.enterprises.push(enterprise.id);
+  const enterprise = await prisma.enterprise.create({ data: { name: `M3-004企业-${randomUUID()}`, responsibleAreaId: areaId, address: "宝应县测试地址", mainProducts: "电力装备", createdByPersonId: person.id, createdAt: new Date("2026-01-01") } }); enterpriseId = enterprise.id; firstEnterpriseName = enterprise.name; ids.enterprises.push(enterprise.id);
   await prisma.enterpriseVersion.create({ data: { enterpriseId, versionNo: 1, snapshotJson: { id: enterpriseId, name: enterprise.name, responsibleAreaId: areaId, status: "NORMAL" }, changeType: "CREATE", changedByPersonId: person.id, createdAt: new Date("2026-01-01") } });
   const contact = await prisma.enterpriseContact.create({ data: { enterpriseId, name: "安全联系人", phone: "13800000000", isPrimary: true, createdByPersonId: person.id } }); contactId = contact.id; await prisma.enterprise.update({ where: { id: enterpriseId }, data: { primaryContactId: contactId } });
   const main = await createDemand({ businessNo: `M3004${randomUUID().replaceAll("-", "").slice(0, 10)}`, title: "=HYPERLINK(\"unsafe\")", publishedAt: new Date("2026-06-05T09:00:00+08:00"), ownerAt: new Date("2026-06-10T09:00:00+08:00"), lastProgressAt: new Date("2026-06-20T09:00:00+08:00") }); demandId = main.id;
   await createDemand({ businessNo: `M3004${randomUUID().replaceAll("-", "").slice(0, 10)}`, title: "历史久未更新需求", publishedAt: new Date("2026-05-01T09:00:00+08:00"), ownerAt: new Date("2026-05-01T09:01:00+08:00"), lastProgressAt: new Date("2026-05-20T09:00:00+08:00") });
+  const missingStatus = await prisma.demand.create({ data: { businessNo: `M3004${randomUUID().replaceAll("-", "").slice(0, 10)}`, enterpriseId, responsibleAreaId: areaId, selectedContactId: contactId, title: "缺少历史状态需求", originalDescription: "缺少统计时点前状态历史",
+    demandType: "TECHNICAL", urgency: "NORMAL", status: "PENDING_CLAIM", creationBatchId: batchA, currentFollowBatchId: batchA, firstPublishedAt: new Date("2026-05-05T09:00:00+08:00"), createdByPersonId: actor.personId } });
+  const missingResponsibility = await prisma.demand.create({ data: { businessNo: `M3004${randomUUID().replaceAll("-", "").slice(0, 10)}`, enterpriseId, responsibleAreaId: areaId, selectedContactId: contactId, title: "缺少历史责任需求", originalDescription: "状态可靠但责任历史缺失",
+    demandType: "TECHNICAL", urgency: "NORMAL", status: "IN_PROGRESS", creationBatchId: batchA, currentFollowBatchId: batchA, firstPublishedAt: new Date("2026-05-06T09:00:00+08:00"), createdByPersonId: actor.personId } });
+  ids.demands.push(missingStatus.id, missingResponsibility.id);
+  await prisma.stateTransitionHistory.createMany({ data: [
+    { entityType: "DEMAND", entityId: missingResponsibility.id, toState: "PENDING_CLAIM", actionCode: "DEMAND_PUBLISHED", actorPersonId: actor.personId, createdAt: new Date("2026-05-06T09:00:00+08:00") },
+    { entityType: "DEMAND", entityId: missingResponsibility.id, fromState: "PENDING_CLAIM", toState: "IN_PROGRESS", actionCode: "DEMAND_CLAIMED", actorPersonId: actor.personId, createdAt: new Date("2026-05-07T09:00:00+08:00") },
+  ] });
   const plan = await prisma.demandOutcomePlan.create({ data: { demandId, trackingMode: "TRACKING", status: "IN_PROGRESS", firstTrackingDate: new Date("2026-06-01"), nextTrackingDate: new Date("2026-08-01"), dueVersion: 3, decidedByPersonId: person.id, decidedAt: new Date("2026-05-20") } });
   await prisma.demandOutcomeRound.createMany({ data: [
     { demandId, outcomePlanId: plan.id, roundNo: 1, trackingDate: new Date("2026-06-15"), trackingBatchId: batchB, contractAmountIncrement: "100.20", investmentAmountIncrement: "20.00", policyFundIncrement: "0", costReductionIncrement: "0", talentIntroducedIncrement: 1, patentIncrement: 0, qualitativeResult: "六月正式成效", endTracking: false, nextTrackingDate: new Date("2026-07-15"), reviewStatus: "APPROVED", createdByPersonId: person.id, reviewedByPersonId: person.id, reviewedAt: new Date("2026-06-16"), activeKey: null },
@@ -76,22 +86,22 @@ beforeAll(async () => {
     { personId: person.id, arrivalAt: new Date("2026-06-29T09:00:00+08:00"), expectedDepartureAt: new Date("2026-07-03T18:00:00+08:00"), sourceSystem: "V1", sourceRecordId: randomUUID(), createdAt: new Date("2026-06-01") },
   ] });
 
-  const secondEnterprise = await prisma.enterprise.create({ data: { name: `M3-004企业乙-${randomUUID()}`, responsibleAreaId: secondArea.id, address: "宝应县测试地址乙", mainProducts: "智能装备", createdByPersonId: person.id, createdAt: new Date("2026-01-01") } }); ids.enterprises.push(secondEnterprise.id);
+  const secondEnterprise = await prisma.enterprise.create({ data: { name: `M3-004企业乙-${randomUUID()}`, responsibleAreaId: secondArea.id, address: "宝应县测试地址乙", mainProducts: "智能装备", createdByPersonId: person.id, createdAt: new Date("2026-01-01") } }); secondEnterpriseName = secondEnterprise.name; ids.enterprises.push(secondEnterprise.id);
   await prisma.enterpriseVersion.createMany({ data: [{ enterpriseId: secondEnterprise.id, versionNo: 1, snapshotJson: { id: secondEnterprise.id, name: secondEnterprise.name, responsibleAreaId: secondArea.id, status: "NORMAL" }, changeType: "CREATE", changedByPersonId: person.id, createdAt: new Date("2026-01-01") }] });
-  const trip = await prisma.trip.create({ data: { title: "六月跨镇区走访", purpose: "统计口径验证", createdByPersonId: person.id } }); ids.trips.push(trip.id);
+  const trip = await prisma.trip.create({ data: { title: "跨月跨镇区走访", purpose: "统计口径验证", createdByPersonId: person.id } }); ids.trips.push(trip.id);
   const [nodeA, nodeB] = await Promise.all([
-    prisma.tripNode.create({ data: { tripId: trip.id, sequenceNo: 1, plannedStartAt: new Date("2026-06-18T09:00:00+08:00"), enterpriseId, locationName: "企业甲", content: "走访甲" } }),
-    prisma.tripNode.create({ data: { tripId: trip.id, sequenceNo: 2, plannedStartAt: new Date("2026-06-18T14:00:00+08:00"), enterpriseId: secondEnterprise.id, locationName: "企业乙", content: "走访乙" } }),
+    prisma.tripNode.create({ data: { tripId: trip.id, sequenceNo: 1, plannedStartAt: new Date("2026-06-30T09:00:00+08:00"), enterpriseId, locationName: "企业甲", content: "走访甲" } }),
+    prisma.tripNode.create({ data: { tripId: trip.id, sequenceNo: 2, plannedStartAt: new Date("2026-07-01T09:00:00+08:00"), enterpriseId: secondEnterprise.id, locationName: "企业乙", content: "走访乙" } }),
   ]);
   await prisma.tripParticipant.createMany({ data: [person.id, secondPerson.id, thirdPerson.id].map((personId, index) => ({ tripId: trip.id, personId, isCreator: index === 0, joinedAt: new Date("2026-06-01T00:00:00+08:00"), addedByPersonId: person.id })) });
-  const result = await prisma.tripResult.create({ data: { tripId: trip.id, resultSummary: "跨镇区完整结果", submittedByPersonId: person.id, submittedAt: new Date("2026-06-18T18:00:00+08:00") } });
+  const result = await prisma.tripResult.create({ data: { tripId: trip.id, resultSummary: "跨月跨镇区完整结果", submittedByPersonId: person.id, submittedAt: new Date("2026-07-01T18:00:00+08:00") } });
   const [visitA, visitB] = await Promise.all([
-    prisma.enterpriseVisit.create({ data: { tripId: trip.id, tripNodeId: nodeA.id, enterpriseId, visitedAt: new Date("2026-06-18T09:00:00+08:00"), visitSummary: "甲镇区结果", createdFromTripResultId: result.id } }),
-    prisma.enterpriseVisit.create({ data: { tripId: trip.id, tripNodeId: nodeB.id, enterpriseId: secondEnterprise.id, visitedAt: new Date("2026-06-18T14:00:00+08:00"), visitSummary: "乙镇区结果", createdFromTripResultId: result.id } }),
+    prisma.enterpriseVisit.create({ data: { tripId: trip.id, tripNodeId: nodeA.id, enterpriseId, visitedAt: new Date("2026-06-30T09:00:00+08:00"), visitSummary: "甲镇区结果", createdFromTripResultId: result.id } }),
+    prisma.enterpriseVisit.create({ data: { tripId: trip.id, tripNodeId: nodeB.id, enterpriseId: secondEnterprise.id, visitedAt: new Date("2026-07-01T09:00:00+08:00"), visitSummary: "乙镇区结果", createdFromTripResultId: result.id } }),
   ]);
   await prisma.demandLead.createMany({ data: [
-    { businessNo: `XL${randomUUID().replaceAll("-", "").slice(0, 12)}`, sourceType: "MEMBER_VISIT", responsibleAreaId: areaId, enterpriseId, rawTitle: "甲线索", rawContent: "甲走访线索", sourcePersonId: person.id, sourceAt: new Date("2026-06-18T10:00:00+08:00"), tripId: trip.id, visitId: visitA.id, status: "PENDING_TOWNSHIP_VERIFY", createdByPersonId: person.id },
-    { businessNo: `XL${randomUUID().replaceAll("-", "").slice(0, 12)}`, sourceType: "MEMBER_VISIT", responsibleAreaId: secondArea.id, enterpriseId: secondEnterprise.id, rawTitle: "乙线索", rawContent: "乙走访线索", sourcePersonId: secondPerson.id, sourceAt: new Date("2026-06-18T15:00:00+08:00"), tripId: trip.id, visitId: visitB.id, status: "PENDING_TOWNSHIP_VERIFY", createdByPersonId: secondPerson.id },
+    { businessNo: `XL${randomUUID().replaceAll("-", "").slice(0, 12)}`, sourceType: "MEMBER_VISIT", responsibleAreaId: areaId, enterpriseId, rawTitle: "甲线索", rawContent: "甲走访线索", sourcePersonId: person.id, sourceAt: new Date("2026-06-30T10:00:00+08:00"), tripId: trip.id, visitId: visitA.id, status: "PENDING_TOWNSHIP_VERIFY", createdByPersonId: person.id },
+    { businessNo: `XL${randomUUID().replaceAll("-", "").slice(0, 12)}`, sourceType: "MEMBER_VISIT", responsibleAreaId: secondArea.id, enterpriseId: secondEnterprise.id, rawTitle: "乙线索", rawContent: "乙走访线索", sourcePersonId: secondPerson.id, sourceAt: new Date("2026-07-01T10:00:00+08:00"), tripId: trip.id, visitId: visitB.id, status: "PENDING_TOWNSHIP_VERIFY", createdByPersonId: secondPerson.id },
   ] });
 
   const [domesticTalent, overseasTalent] = await Promise.all([
@@ -133,25 +143,51 @@ describe("C-M3-004 real MySQL historical reporting", () => {
     const juneC = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId, batchId: batchC } }); expect(juneC.overview.outcome.contractAmount).toBe("0.00");
   });
 
-  it("dedupes Presence people and applies safe Trip and Talent area slices", async () => {
+  it("warns and preserves published demands when historical status or responsibility is unresolved", async () => {
+    const report = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId }, now: new Date("2026-08-28T12:00:00+08:00") });
+    expect(report.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "DEMAND_STATUS_ASOF_MISSING", count: 1 }),
+      expect.objectContaining({ code: "DEMAND_RESPONSIBILITY_ASOF_MISSING", count: 1 }),
+    ]));
+    const missingStatus = report.rows.demands.find((row) => row.title === "缺少历史状态需求");
+    expect(missingStatus).toMatchObject({ statusAt: "UNRESOLVED", added: "否", completed: "否" });
+    expect(report.overview.demand.stock.PENDING_CLAIM).toBe(0);
+    const missingResponsibility = report.rows.demands.find((row) => row.title === "缺少历史责任需求");
+    expect(missingResponsibility).toMatchObject({ statusAt: "IN_PROGRESS", responsibility: "UNRESOLVED", stale: "否" });
+  });
+
+  it("counts a cross-month Trip once while keeping Visit and DemandLead month slices independent", async () => {
     const county = await service.previewMonthlyReport({ actor, query: { month: "2026-06", batchId: batchB }, now: new Date("2026-08-28T12:00:00+08:00") });
     expect(county.overview.resources.arrivalVisits).toBe(3); expect(county.overview.resources.presentPeople).toBe(2);
-    expect(county.overview.trips).toEqual({ tripCount: 1, participantVisits: 3, distinctParticipants: 3, distinctEnterprises: 2, leadCount: 2 });
+    expect(county.overview.trips).toEqual({ tripCount: 1, participantVisits: 3, distinctParticipants: 3, distinctEnterprises: 1, leadCount: 1 });
     expect(county.overview.talent).toEqual({ added: 1, completedRounds: 1, inProgressRounds: 1, domestic: 1, overseas: 0 });
     const area = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId, batchId: batchB }, now: new Date("2026-08-28T12:00:00+08:00") });
     expect(area.overview.trips.distinctEnterprises).toBe(1); expect(area.overview.trips.leadCount).toBe(1);
     expect(area.rows.trips[0]?.enterprises).toMatch(/^M3-004企业-/); expect(area.rows.trips[0]?.enterprises).not.toContain("、"); expect(area.rows.trips[0]?.result).toBe("甲镇区结果");
+    const july = await service.previewMonthlyReport({ actor, query: { month: "2026-07", batchId: batchC }, now: new Date("2026-08-28T12:00:00+08:00") });
+    expect(july.overview.trips).toEqual({ tripCount: 0, participantVisits: 0, distinctParticipants: 0, distinctEnterprises: 1, leadCount: 1 });
+    expect(july.rows.trips[0]).toMatchObject({ date: "2026-06-30", enterprises: secondEnterpriseName, result: "乙镇区结果", leadCount: 1 });
+    expect(july.rows.trips[0]?.enterprises).not.toContain(firstEnterpriseName);
   });
 
-  it("creates one private idempotent output with exactly five safe sheets", async () => {
-    const created = await service.createMonthlyExport({ actor, body: { month: "2026-06", areaId, batchId: batchB }, idempotencyKey: "m3-004-database-worker" });
-    const replay = await service.createMonthlyExport({ actor, body: { month: "2026-06", areaId, batchId: batchB }, idempotencyKey: "m3-004-database-worker" }); expect(replay.id).toBe(created.id);
+  it("reopens one private idempotent July output with five safe sheets and numeric money cells", async () => {
+    const created = await service.createMonthlyExport({ actor, body: { month: "2026-07", batchId: batchC }, idempotencyKey: "m3-004-database-worker" });
+    const replay = await service.createMonthlyExport({ actor, body: { month: "2026-07", batchId: batchC }, idempotencyKey: "m3-004-database-worker" }); expect(replay.id).toBe(created.id);
     await Promise.all([service.processExport(created.id), service.processExport(created.id)]); await service.processExport(created.id);
     const task = await prisma.monthlyReportExportTask.findUniqueOrThrow({ where: { id: created.id } }); expect(task.status).toBe("SUCCEEDED"); expect(task.outputAttachmentId).toBeTruthy();
     expect(await prisma.attachmentLink.count({ where: { entityType: "MONTHLY_REPORT_EXPORT_TASK", entityId: task.id, relationType: "OUTPUT" } })).toBe(1);
     const attachment = await prisma.attachment.findUniqueOrThrow({ where: { id: task.outputAttachmentId! } }); const bytes = requireTestStorageAdapter().getObjectForTest(attachment.objectKey!); expect(bytes).toBeTruthy();
     const workbook = new ExcelJS.Workbook(); await workbook.xlsx.load(bytes! as never); expect(workbook.worksheets.map(({ name }) => name)).toEqual(MONTHLY_REPORT_SHEETS); expect(workbook.worksheets).toHaveLength(5);
     expect(workbook.getWorksheet("需求进展")?.getColumn(2).values).toContain("'=HYPERLINK(\"unsafe\")");
+    const overview = workbook.getWorksheet("月度概览")!;
+    for (const metric of ["合同金额新增", "投资额新增", "政策资金新增", "降本新增"]) {
+      const row = overview.getColumn(2).values.findIndex((value) => value === metric);
+      expect(typeof overview.getCell(row, 3).value).toBe("number"); expect(overview.getCell(row, 3).numFmt).toBe("#,##0.00");
+    }
+    const outcome = workbook.getWorksheet("成效跟踪")!;
+    for (const column of ["H", "I", "J", "K"]) { expect(typeof outcome.getCell(`${column}2`).value).toBe("number"); expect(outcome.getCell(`${column}2`).numFmt).toBe("#,##0.00"); }
+    const tripEnterprises = workbook.getWorksheet("走访与行程")?.getCell("D2").value;
+    expect(tripEnterprises).toBe(secondEnterpriseName); expect(String(tripEnterprises)).not.toContain(firstEnterpriseName);
     const allText = workbook.worksheets.flatMap((sheet) => sheet.getSheetValues()).flat(3).map(String).join("|"); expect(allText).not.toContain("报销"); expect(allText).not.toContain("办事求助");
     const access = await getAttachmentRuntime().service.access({ actor, attachmentId: task.outputAttachmentId!, action: "DOWNLOAD", context: { ip: "127.0.0.1", userAgent: "vitest", deviceId: "db", deviceName: "database", requestId: randomUUID() } }); expect(access.url).toContain("memory.invalid");
   });
