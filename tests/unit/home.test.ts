@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RoleCode } from "@/generated/prisma/client";
 import {
   homeRoleLabels,
+  isOutcomeFillTodoActionable,
   resolveHomeTodoPriority,
   sortHomeTodos,
   staleCutoffAt,
@@ -70,5 +71,21 @@ describe("A-M1-008 home contracts", () => {
       { locationName: "B", enterprise: { name: "乙企业" } },
       { locationName: "C", enterprise: { name: "丙企业" } },
     ])).toBe("走访 甲企业、乙企业 等 3 家企业");
+  });
+
+  it.each([
+    [null, true],
+    ["DRAFT", true],
+    ["PENDING_REVIEW", false],
+    ["RETURNED", false],
+  ] as const)("shows OUTCOME_FILL only for no active round or an active DRAFT round (%s)", (activeRoundReviewStatus, expected) => {
+    expect(isOutcomeFillTodoActionable({
+      demandStatus: "COMPLETED",
+      planStatus: "IN_PROGRESS",
+      dueAt: new Date("2026-08-28T00:00:00.000Z"),
+      now: new Date("2026-08-28T12:00:00.000Z"),
+      activeRoundReviewStatus,
+      responsibleTownship: true,
+    })).toBe(expected);
   });
 });

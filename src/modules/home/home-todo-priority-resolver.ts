@@ -1,4 +1,5 @@
 import type { DemandUrgency, HelpUrgency } from "@/generated/prisma/client";
+import { shanghaiNaturalDayNumber } from "@/modules/demand/demand-responsibility";
 import type { HomeTodo } from "./types";
 
 export type HomeTodoCandidate = Omit<HomeTodo, "priority"> & {
@@ -27,6 +28,23 @@ export const HOME_TODO_LABELS: Readonly<Record<string, string>> = {
   REIMBURSEMENT_REVISE: "修改退回报销",
   REIMBURSEMENT_SUBMIT_FINANCE: "提交纸质报销材料",
 };
+
+export function isOutcomeFillTodoActionable(input: {
+  demandStatus: string;
+  planStatus: string | null;
+  dueAt: Date | null;
+  now: Date;
+  activeRoundReviewStatus: string | null;
+  responsibleTownship: boolean;
+}): boolean {
+  const fillableRound = input.activeRoundReviewStatus === null || input.activeRoundReviewStatus === "DRAFT";
+  return input.demandStatus === "COMPLETED"
+    && (input.planStatus === "PENDING" || input.planStatus === "IN_PROGRESS")
+    && input.dueAt !== null
+    && shanghaiNaturalDayNumber(input.dueAt) <= shanghaiNaturalDayNumber(input.now)
+    && fillableRound
+    && input.responsibleTownship;
+}
 
 export function resolveHomeTodoPriority(candidate: HomeTodoCandidate): HomeTodo {
   const priority = candidate.demandUrgency === "URGENT" || candidate.helpUrgency === "URGENT"

@@ -196,4 +196,97 @@ describe("A-M1-008 real MySQL home aggregation", () => {
     const adminActor: PermissionActor = { ...actor, effectiveRoles: ["ADMIN"], capabilities: resolveCapabilities(["ADMIN"], new Set()), hasGlobalOperational: true };
     expect((await home.overview({ actor: adminActor, now })).teamOverview).toBeNull();
   });
+
+  it("hides an OPEN OUTCOME_FILL Todo once its active round is no longer fillable", async () => {
+    const staff = await prisma.person.create({ data: { name: `A-M1-008 成效属地 ${randomUUID()}` } });
+    const account = await prisma.account.create({ data: {
+      personId: staff.id,
+      phone: `198${Date.now().toString().slice(-8)}`,
+      passwordHash: "database-test-only",
+      status: "NORMAL",
+      confidentialityConfirmedAt: now,
+    } });
+    const townshipActor: PermissionActor = {
+      personId: staff.id,
+      accountId: account.id,
+      accountStatus: "NORMAL",
+      permissionVersion: BigInt(1),
+      effectiveRoles: ["TOWNSHIP_STAFF"],
+      capabilities: resolveCapabilities(["TOWNSHIP_STAFF"], new Set()),
+      specialPermissions: new Set(),
+      selfPersonId: staff.id,
+      townshipAreaIds: [areaId],
+      departmentAreaIds: [],
+      hasGlobalPublished: true,
+      hasGlobalOperational: false,
+      hasSystem: false,
+      currentBatchMember: false,
+      configurationIssues: [],
+    };
+    const completedDemand = await prisma.demand.create({ data: {
+      businessNo: businessNo(),
+      enterpriseId,
+      responsibleAreaId: areaId,
+      selectedContactId: contactId,
+      title: `A-M1-008 成效待办 ${randomUUID()}`,
+      originalDescription: "验证 Worker stale 前的首页只读防线。",
+      demandType: "TECHNICAL",
+      urgency: "NORMAL",
+      status: "COMPLETED",
+      creationBatchId: batchId,
+      currentFollowBatchId: batchId,
+      firstPublishedAt: new Date("2099-08-01T00:00:00.000Z"),
+      completedAt: new Date("2099-08-20T00:00:00.000Z"),
+      completionBatchId: batchId,
+      createdByPersonId: creatorId,
+    } });
+    const plan = await prisma.demandOutcomePlan.create({ data: {
+      demandId: completedDemand.id,
+      trackingMode: "TRACKING",
+      status: "PENDING",
+      firstTrackingDate: new Date("2099-08-27T00:00:00.000Z"),
+      nextTrackingDate: new Date("2099-08-27T00:00:00.000Z"),
+      dueVersion: 1,
+      decidedByPersonId: creatorId,
+    } });
+    const todo = await prisma.todo.create({ data: {
+      personId: staff.id,
+      todoType: "OUTCOME_FILL",
+      module: "DEMAND",
+      aggregateType: "DEMAND",
+      aggregateId: completedDemand.id,
+      actionUrl: `/demands/${completedDemand.id}`,
+      dedupeKey: `home-outcome-fill-${randomUUID()}`,
+    } });
+
+    expect((await home.overview({ actor: townshipActor, now })).todos).toEqual([
+      expect.objectContaining({ id: todo.id, type: "OUTCOME_FILL" }),
+    ]);
+
+    const round = await prisma.demandOutcomeRound.create({ data: {
+      demandId: completedDemand.id,
+      outcomePlanId: plan.id,
+      roundNo: 1,
+      trackingDate: new Date("2099-08-27T00:00:00.000Z"),
+      trackingBatchId: batchId,
+      nextTrackingDate: new Date("2099-09-27T00:00:00.000Z"),
+      endTracking: false,
+      reviewStatus: "PENDING_REVIEW",
+      createdByPersonId: staff.id,
+      submittedByPersonId: staff.id,
+      submittedAt: now,
+      activeKey: 1,
+    } });
+    expect((await home.overview({ actor: townshipActor, now })).todos).toEqual([]);
+    expect(await prisma.todo.findUniqueOrThrow({ where: { id: todo.id } })).toMatchObject({ status: "OPEN", staleAt: null });
+
+    await prisma.demandOutcomeRound.update({ where: { id: round.id }, data: {
+      reviewStatus: "RETURNED",
+      reviewedByPersonId: creatorId,
+      reviewedAt: now,
+      returnReason: "需补充核验材料",
+    } });
+    expect((await home.overview({ actor: townshipActor, now })).todos).toEqual([]);
+    expect(await prisma.todo.findUniqueOrThrow({ where: { id: todo.id } })).toMatchObject({ status: "OPEN", staleAt: null });
+  });
 });

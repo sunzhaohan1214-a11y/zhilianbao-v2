@@ -4,7 +4,6 @@ import { AnnouncementService } from "@/modules/announcement";
 import {
   demandProgressStaleCutoff,
   isDemandProgressStale,
-  shanghaiNaturalDayNumber,
 } from "@/modules/demand/demand-responsibility";
 import { NotificationService } from "@/modules/notification";
 import { authorizeActor } from "@/modules/permissions/authorization";
@@ -12,7 +11,7 @@ import type { PermissionActor } from "@/modules/permissions/types";
 import { PresenceService } from "@/modules/presence";
 import { effectiveTripEnd } from "@/modules/trip/status";
 import { TripService } from "@/modules/trip/trip-service";
-import { HOME_TODO_LABELS, resolveHomeTodoPriority, sortHomeTodos } from "./home-todo-priority-resolver";
+import { HOME_TODO_LABELS, isOutcomeFillTodoActionable, resolveHomeTodoPriority, sortHomeTodos } from "./home-todo-priority-resolver";
 import type { HomeDemand, HomeOverview, HomeRoleLabel, HomeTeamOverview, HomeTodo } from "./types";
 
 const TODO_SCAN_LIMIT = 50;
@@ -30,10 +29,6 @@ function isAdministrator(actor: PermissionActor) {
 
 function isResponsibleTownship(actor: PermissionActor, areaId: string) {
   return actor.effectiveRoles.includes("TOWNSHIP_STAFF") && actor.townshipAreaIds.includes(areaId);
-}
-
-function dateIsDue(value: Date | null, now: Date) {
-  return value !== null && shanghaiNaturalDayNumber(value) <= shanghaiNaturalDayNumber(now);
 }
 
 export class HomeService {
@@ -287,7 +282,14 @@ export class HomeService {
         else if (todo.todoType === "DEMAND_ALUMNI_RESPONSE") valid = demand.status === "PENDING_CLAIM" && demand.recommendationRuns.some((run) => run.stage === "ALUMNI" && run.items.some(({ responseStatus }) => responseStatus === null));
         else if (todo.todoType === "OUTCOME_FILL") {
           dueAt = demand.outcomePlan?.nextTrackingDate ?? null;
-          valid = demand.status === "COMPLETED" && Boolean(demand.outcomePlan) && ["PENDING", "IN_PROGRESS"].includes(demand.outcomePlan!.status) && dateIsDue(dueAt, now) && isResponsibleTownship(actor, demand.responsibleAreaId);
+          valid = isOutcomeFillTodoActionable({
+            demandStatus: demand.status,
+            planStatus: demand.outcomePlan?.status ?? null,
+            dueAt,
+            now,
+            activeRoundReviewStatus: outcomeRound?.reviewStatus ?? null,
+            responsibleTownship: isResponsibleTownship(actor, demand.responsibleAreaId),
+          });
         } else if (todo.todoType === "OUTCOME_REVIEW") valid = demand.status === "COMPLETED" && outcomeRound?.reviewStatus === "PENDING_REVIEW" && isAdministrator(actor);
         else if (todo.todoType === "OUTCOME_REVISE") valid = demand.status === "COMPLETED" && outcomeRound?.reviewStatus === "RETURNED" && isResponsibleTownship(actor, demand.responsibleAreaId);
       } else if (help) {
