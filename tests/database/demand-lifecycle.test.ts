@@ -143,7 +143,7 @@ describe("M1-006 real MySQL demand lifecycle", () => {
     const idempotencyKey = randomUUID();
     const progressBody = { currentProgress: "已完成企业访谈", nextStep: "安排专家对接", attachmentIds: [evidence.id] };
     const progresses = await Promise.all(Array.from({ length: 20 }, () => lifecycle.addProgress({ actor: owner.actor, demandId: demand.id, idempotencyKey, body: progressBody })));
-    expect(new Set(progresses.map((item) => JSON.stringify(item))).size).toBe(1);
+    for (const progress of progresses) expect(progress).toEqual(progresses[0]);
     expect(await prisma.demandProgress.count({ where: { demandId: demand.id } })).toBe(1);
     expect((await getDemandProgressFreshness(demand.id)).stale).toBe(false);
     expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: "DEMAND_PROGRESS_ADDED" } })).toBe(1);
