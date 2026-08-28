@@ -12,6 +12,10 @@ export const OUTBOX_EVENT_TYPES = [
   "DEMAND_REVIEW_RETURNED",
   "DEMAND_PUBLISHED",
   "DEMAND_CLAIMED",
+  "DEMAND_RECOMMENDED_CURRENT",
+  "DEMAND_RECOMMENDED_ALUMNI",
+  "DEMAND_ALUMNI_RESPONSE_RECORDED",
+  "DEMAND_ALUMNI_HELP_ACTIVATED",
   "COLLABORATION_APPLIED",
   "COLLABORATION_INVITED",
   "COLLABORATION_APPROVED",
@@ -81,6 +85,16 @@ function reimbursementPayloadSchema() {
   }).strict();
 }
 
+function recommendationPayloadSchema() {
+  return z.object({
+    aggregateId: z.uuid(),
+    recipientIds: recipientIdsSchema,
+    todoRecipientIds: recipientIdsSchema,
+    staleTodoRecipientIds: recipientIdsSchema,
+    eventKey: z.string().min(1).max(120),
+  }).strict();
+}
+
 export const outboxPayloadSchemas = {
   TEST_ENTITY_CHANGED: z.object({ entityId: z.uuid() }).strict(),
   ATTACHMENT_UPLOADED: z.object({ attachmentId: z.uuid() }).strict(),
@@ -93,6 +107,19 @@ export const outboxPayloadSchemas = {
   DEMAND_REVIEW_RETURNED: businessPayloadSchema(),
   DEMAND_PUBLISHED: businessPayloadSchema(),
   DEMAND_CLAIMED: businessPayloadSchema(),
+  DEMAND_RECOMMENDED_CURRENT: recommendationPayloadSchema(),
+  DEMAND_RECOMMENDED_ALUMNI: recommendationPayloadSchema(),
+  DEMAND_ALUMNI_RESPONSE_RECORDED: z.object({
+    aggregateId: z.uuid(),
+    respondentPersonId: z.uuid(),
+    eventKey: z.string().min(1).max(120),
+  }).strict(),
+  DEMAND_ALUMNI_HELP_ACTIVATED: z.object({
+    aggregateId: z.uuid(),
+    handlerPersonId: z.uuid(),
+    platformHelperPersonId: z.uuid().optional(),
+    eventKey: z.string().min(1).max(120),
+  }).strict(),
   COLLABORATION_APPLIED: businessPayloadSchema(),
   COLLABORATION_INVITED: businessPayloadSchema(),
   COLLABORATION_APPROVED: businessPayloadSchema(),

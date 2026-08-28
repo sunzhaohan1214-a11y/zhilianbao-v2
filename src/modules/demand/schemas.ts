@@ -191,6 +191,28 @@ export const applyDemandCollaborationSchema = z.object({}).strict();
 export const demandCollaborationPersonSchema = z.object({ personId: z.uuid() }).strict();
 export const endDemandCollaborationSchema = z.object({ reason: plainText(500) }).strict();
 
+export const runDemandRecommendationSchema = z.object({
+  stage: z.enum(["CURRENT", "ALUMNI"]),
+}).strict();
+
+export const manualAddDemandRecommendationSchema = z.object({
+  stage: z.enum(["CURRENT", "ALUMNI"]),
+  personId: z.uuid(),
+  reason: plainText(500),
+  replaceItemId: z.uuid().nullable().default(null),
+}).strict();
+
+export const respondDemandRecommendationSchema = z.object({
+  response: z.enum(["WILLING", "DECLINE"]),
+  responseNote: optionalPlainText(500),
+}).strict();
+
+export const activateDemandAlumniHelpSchema = z.object({
+  recommendationItemId: z.uuid(),
+  townshipHandlerPersonId: z.uuid(),
+  reason: plainText(500),
+}).strict();
+
 export const demandListQuerySchema = z.object({
   status: optionalQueryString.pipe(z.enum([
     "DRAFT", "PENDING_REVIEW", "RETURNED", "PENDING_CLAIM", "IN_PROGRESS",
