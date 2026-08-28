@@ -53,6 +53,34 @@ export async function seedAuthFixtures() {
   if (!/test/i.test(databaseUrl)) throw new Error("E2E auth fixtures require an explicitly named test database");
   const prisma = getPrismaClient();
   const users = Object.values(e2eUsers);
+  const importBatches = await prisma.importBatch.findMany({
+    where: { createdByPersonId: { in: users.map(({ personId }) => personId) } },
+    select: { id: true, sourceAttachmentId: true },
+  });
+  const importBatchIds = importBatches.map(({ id }) => id);
+  const importAttachmentIds = importBatches.map(({ sourceAttachmentId }) => sourceAttachmentId);
+  const importedPersonIds = (await prisma.importApplySnapshot.findMany({
+    where: { batchId: { in: importBatchIds }, entityType: "PERSON", createdEntityId: { not: null } },
+    select: { createdEntityId: true },
+  })).flatMap(({ createdEntityId }) => createdEntityId ? [createdEntityId] : [])
+    .filter((personId) => !users.some((user) => user.personId === personId));
+  await prisma.importApplySnapshot.deleteMany({ where: { batchId: { in: importBatchIds } } });
+  await prisma.importCommandIdempotency.deleteMany({ where: { batchId: { in: importBatchIds } } });
+  await prisma.importRow.deleteMany({ where: { batchId: { in: importBatchIds } } });
+  await prisma.attachmentLink.deleteMany({ where: { entityType: "IMPORT_BATCH", entityId: { in: importBatchIds } } });
+  await prisma.importBatch.deleteMany({ where: { id: { in: importBatchIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: importAttachmentIds } } });
+  await prisma.jobTask.deleteMany({ where: { idempotencyKey: { in: importAttachmentIds.map((id) => `attachment-scan:${id}`) } } });
+  await prisma.attachment.deleteMany({ where: { id: { in: importAttachmentIds } } });
+  await prisma.memberCapabilityIndustry.deleteMany({ where: { personId: { in: importedPersonIds } } });
+  await prisma.memberPreferredDemandType.deleteMany({ where: { personId: { in: importedPersonIds } } });
+  await prisma.memberCapabilityProfile.deleteMany({ where: { personId: { in: importedPersonIds } } });
+  await prisma.roleAssignment.deleteMany({ where: { personId: { in: importedPersonIds } } });
+  await prisma.batchMembership.deleteMany({ where: { personId: { in: importedPersonIds } } });
+  const importedAccountIds = (await prisma.account.findMany({ where: { personId: { in: importedPersonIds } }, select: { id: true } })).map(({ id }) => id);
+  await prisma.auditLog.deleteMany({ where: { OR: [{ actorPersonId: { in: importedPersonIds } }, { actorAccountId: { in: importedAccountIds } }] } });
+  await prisma.account.deleteMany({ where: { personId: { in: importedPersonIds } } });
+  await prisma.person.deleteMany({ where: { id: { in: importedPersonIds } } });
   const helpIds = (await prisma.helpRequest.findMany({ where: { submitterPersonId: { in: users.map(({ personId }) => personId) } }, select: { id: true } })).map(({ id }) => id);
   const helpProgressIds = (await prisma.helpProgress.findMany({ where: { helpRequestId: { in: helpIds } }, select: { id: true } })).map(({ id }) => id);
   const helpAttachmentIds = (await prisma.attachmentLink.findMany({ where: { OR: [{ entityType: "HELP_REQUEST", entityId: { in: helpIds } }, { entityType: "HELP_PROGRESS", entityId: { in: helpProgressIds } }] }, select: { attachmentId: true } })).map(({ attachmentId }) => attachmentId);

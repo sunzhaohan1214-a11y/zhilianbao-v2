@@ -6,9 +6,27 @@ import { writeFoundationAudit, type MutationContext } from "./audit";
 import { FoundationError } from "./errors";
 import { classifyMember, roleLabel } from "./rules";
 import { capabilityProfileSchema } from "./schemas";
+import { provisionAccountInTransaction } from "@/modules/identity/account-service";
 
 type ServiceInput = { actor: PermissionActor; context?: MutationContext };
 type MemberKind = "current" | "alumni";
+
+export type MemberImportWrite = {
+  personId?: string;
+  name: string;
+  phone: string;
+  batchId: string;
+  memberKind: "CURRENT" | "HISTORICAL_ALUMNI";
+  dispatchOrganizationId?: string;
+  postOrganizationId?: string;
+  positionTitle?: string;
+  startDate: Date;
+  endDate?: Date;
+  professionalDirection?: string;
+  coordinatableResources?: string;
+  createAccount: boolean;
+  preparedPasswordHash?: string;
+};
 
 const memberInclude = {
   account: { select: { phone: true, status: true } },
@@ -84,6 +102,63 @@ export class MemberService {
     const batches = await this.prisma.batch.findMany({ where: { isCurrent: true, status: "ACTIVE" }, select: { id: true } });
     if (batches.length > 1) throw new FoundationError("BATCH_STATE_CONFLICT", "当前批次配置不唯一");
     return batches[0]?.id ?? null;
+  }
+
+  async applyImportInTransaction(
+    tx: Prisma.TransactionClient,
+    input: ServiceInput & { member: MemberImportWrite; reason: string },
+  ) {
+    await authorizeActor({ actor: input.actor, action: "member.manage", resource: { resourceType: "member", requiredScope: "GLOBAL_OPERATIONAL" } });
+    const value = input.member;
+    const batches = await tx.$queryRaw<Array<{ id: string; status: "PLANNED" | "ACTIVE" | "CLOSED" }>>`SELECT id, status FROM batches WHERE id = ${value.batchId} FOR UPDATE`;
+    if (batches.length !== 1) throw new FoundationError("BATCH_STATE_CONFLICT", "导入目标批次不存在");
+    if (value.memberKind === "CURRENT" && batches[0].status !== "ACTIVE") throw new FoundationError("BATCH_STATE_CONFLICT", "在任成员不能导入到非活动批次");
+    let person = value.personId ? await tx.person.findUnique({ where: { id: value.personId }, include: { account: true } }) : null;
+    if (value.personId && !person) throw new FoundationError("MEMBER_NOT_FOUND", "匹配的人员不存在");
+    if (person) {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM persons WHERE id = ${person.id} FOR UPDATE`;
+      if (locked.length !== 1) throw new FoundationError("MEMBER_NOT_FOUND", "匹配的人员不存在");
+      person = await tx.person.findUnique({ where: { id: person.id }, include: { account: true } });
+    } else {
+      person = await tx.person.create({ data: { name: value.name, contactPhone: value.phone } , include: { account: true } });
+      await writeFoundationAudit(tx, { ...input, actionCode: "MEMBER_PERSON_CREATED", entityType: "PERSON", entityId: person.id, after: { name: value.name, source: "IMPORT" } });
+    }
+    if (!person) throw new FoundationError("MEMBER_NOT_FOUND", "人员不存在");
+    if (person.personStatus !== "ACTIVE") throw new FoundationError("MEMBER_STATE_CONFLICT", "已归档人员不能通过导入写入成员身份");
+    if (person.account && person.account.phone !== value.phone) {
+      throw new FoundationError("MEMBER_STATE_CONFLICT", "已有账号手机号不能通过导入修改");
+    }
+    if (!person.account && value.createAccount) {
+      if (value.memberKind !== "CURRENT" || !value.preparedPasswordHash) throw new FoundationError("MEMBER_STATE_CONFLICT", "当前导入行不能创建账号");
+      await provisionAccountInTransaction(tx, { personId: person.id, phone: value.phone, passwordHash: value.preparedPasswordHash, forcePasswordChange: true, actorPersonId: input.actor.personId, requestId: input.context?.requestId });
+    }
+    await tx.batchMembership.upsert({
+      where: { personId_batchId: { personId: person.id, batchId: value.batchId } },
+      create: {
+        personId: person.id, batchId: value.batchId, dispatchOrganizationId: value.dispatchOrganizationId,
+        postOrganizationId: value.postOrganizationId, positionTitle: value.positionTitle,
+        startDate: value.startDate, endDate: value.endDate, status: value.memberKind === "CURRENT" ? "ACTIVE" : "COMPLETED",
+      },
+      update: {
+        dispatchOrganizationId: value.dispatchOrganizationId, postOrganizationId: value.postOrganizationId,
+        positionTitle: value.positionTitle, startDate: value.startDate, endDate: value.endDate,
+        status: value.memberKind === "CURRENT" ? "ACTIVE" : "COMPLETED",
+      },
+    });
+    if (value.memberKind === "CURRENT") {
+      const now = new Date();
+      const activeRole = await tx.roleAssignment.findFirst({ where: { personId: person.id, roleCode: "MEMBER_CURRENT", effectiveAt: { lte: now }, OR: [{ expiredAt: null }, { expiredAt: { gt: now } }] } });
+      if (!activeRole) await tx.roleAssignment.create({ data: { personId: person.id, roleCode: "MEMBER_CURRENT", effectiveAt: value.startDate, grantedByPersonId: input.actor.personId, reason: input.reason } });
+    }
+    if (value.professionalDirection || value.coordinatableResources) {
+      await tx.memberCapabilityProfile.upsert({
+        where: { personId: person.id },
+        create: { personId: person.id, professionalDirection: value.professionalDirection, coordinatableResources: value.coordinatableResources, updatedByPersonId: input.actor.personId },
+        update: { professionalDirection: value.professionalDirection, coordinatableResources: value.coordinatableResources, updatedByPersonId: input.actor.personId },
+      });
+    }
+    await writeFoundationAudit(tx, { ...input, actionCode: "MEMBER_IMPORTED", entityType: "PERSON", entityId: person.id, after: { batchId: value.batchId, memberKind: value.memberKind, accountCreated: !person.account && value.createAccount } });
+    return person;
   }
 
   async list(input: ServiceInput & { query: { kind: MemberKind; keyword?: string; page: number; pageSize: number } }) {

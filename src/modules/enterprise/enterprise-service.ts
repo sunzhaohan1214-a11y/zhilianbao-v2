@@ -173,6 +173,26 @@ export class EnterpriseService {
     }
   }
 
+  async createFromImportInTransaction(
+    tx: EnterpriseTransaction,
+    input: ServiceInput & { enterprise: unknown; reason: string },
+  ) {
+    await authorizeActor({ actor: input.actor, action: "enterprise.create_formal", resource: {
+      resourceType: "enterprise", requiredScope: "GLOBAL_OPERATIONAL",
+    } });
+    return this.createFormalInTransaction(tx, enterpriseCoreSchema.parse(input.enterprise), input, "CREATE", input.reason);
+  }
+
+  async updateFromImportInTransaction(
+    tx: EnterpriseTransaction,
+    input: ServiceInput & { enterpriseId: string; changes: unknown; reason: string },
+  ) {
+    await authorizeActor({ actor: input.actor, action: "enterprise.edit_formal", resource: {
+      resourceType: "enterprise", requiredScope: "GLOBAL_OPERATIONAL",
+    } });
+    return this.applyCorrection(tx, input.enterpriseId, enterpriseFormalChangesSchema.parse(input.changes), input, input.reason, "FORMAL_CORRECTION");
+  }
+
   async list(input: ServiceInput & {
     query: { keyword?: string; areaId?: string; tagId?: string; status?: "NORMAL" | "DISABLED" | "MERGED"; contactPhone?: string; page: number; pageSize: number };
   }) {
@@ -394,6 +414,29 @@ export class EnterpriseService {
       requiredScope: actor.hasGlobalOperational ? "GLOBAL_OPERATIONAL" : "TOWNSHIP",
       areaId,
     } });
+  }
+
+  async createContactFromImportInTransaction(
+    tx: EnterpriseTransaction,
+    input: ServiceInput & { enterpriseId: string; contact: { name: string; positionTitle?: string; phone: string; setPrimary: boolean } },
+  ) {
+    await this.repository.lockEnterprise(tx, input.enterpriseId);
+    const enterprise = await tx.enterprise.findUnique({ where: { id: input.enterpriseId } });
+    if (!enterprise) throw new EnterpriseError("ENTERPRISE_NOT_FOUND", "企业不存在");
+    if (enterprise.status === "MERGED") throw new EnterpriseError("ENTERPRISE_STATE_CONFLICT", "已合并企业为只读记录");
+    await this.authorizeContactManage(input.actor, enterprise.responsibleAreaId);
+    const contact = await tx.enterpriseContact.create({ data: {
+      enterpriseId: enterprise.id, name: input.contact.name, positionTitle: normalizeOptional(input.contact.positionTitle),
+      phone: input.contact.phone, isPrimary: input.contact.setPrimary, createdByPersonId: input.actor.personId,
+    } });
+    if (input.contact.setPrimary) {
+      await tx.enterpriseContact.updateMany({ where: { enterpriseId: enterprise.id, id: { not: contact.id } }, data: { isPrimary: false } });
+      await tx.enterprise.update({ where: { id: enterprise.id }, data: { primaryContactId: contact.id } });
+    }
+    await writeEnterpriseAudit(tx, { ...input, actionCode: "ENTERPRISE_CONTACT_CREATED", entityType: "ENTERPRISE_CONTACT", entityId: contact.id, after: {
+      enterpriseId: enterprise.id, name: contact.name, positionTitle: contact.positionTitle, phone: `${contact.phone.slice(0, 3)}****${contact.phone.slice(-4)}`, isPrimary: contact.isPrimary, status: contact.status,
+    } });
+    return contact;
   }
 
   async createContact(input: ServiceInput & { enterpriseId: string; contact: { name: string; positionTitle?: string; phone: string; setPrimary: boolean } }) {

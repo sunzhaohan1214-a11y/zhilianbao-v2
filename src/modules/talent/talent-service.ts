@@ -300,6 +300,26 @@ export class TalentService {
     });
   }
 
+  async createFromImportInTransaction(
+    tx: TalentTransaction,
+    input: ServiceInput & { talent: unknown; reason: string },
+  ) {
+    await authorizeActor({ actor: input.actor, action: "talent.edit_formal", resource: {
+      resourceType: "talent", requiredScope: "GLOBAL_OPERATIONAL",
+    } });
+    return this.createFormalInTransaction(tx, talentCoreSchema.parse(input.talent), input, "CREATE", input.reason);
+  }
+
+  async updateFromImportInTransaction(
+    tx: TalentTransaction,
+    input: ServiceInput & { talentId: string; changes: unknown; reason: string },
+  ) {
+    await authorizeActor({ actor: input.actor, action: "talent.edit_formal", resource: {
+      resourceType: "talent", requiredScope: "GLOBAL_OPERATIONAL",
+    } });
+    return this.applyCorrection(tx, input.talentId, talentChangesSchema.parse(input.changes), input, input.reason, "FORMAL_CORRECTION");
+  }
+
   async list(
     input: ServiceInput & {
       query: {

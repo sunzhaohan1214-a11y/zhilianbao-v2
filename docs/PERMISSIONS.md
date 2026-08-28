@@ -1792,4 +1792,10 @@ TEST_PLAN.md
 
 ---
 
+## 29. M3-005 Import / Export 权限落地
+
+- `import.execute + GLOBAL_OPERATIONAL` 仍仅由当前有效 `ADMIN/SUPER_ADMIN` 执行，历史创建人失去管理员身份后不能访问源文件或批次。
+- 企业导出：管理员全县；`TOWNSHIP_STAFF` 当前本镇；`DEPARTMENT_STAFF` 当前有效负责镇区；普通成员拒绝。
+- 人才批量导出仅当前有效管理员。创建和下载响应均执行服务端权限判断。
+
 **PERMISSIONS.md v1.3 END**

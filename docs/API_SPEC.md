@@ -692,4 +692,23 @@ pageSize=20
 11. 不以 200 + `"success":false` 隐藏真实HTTP错误；
 12. 不做全量数据返回后前端过滤权限。
 
+## 25. M3-005 Import / Export API
+
+```text
+POST /api/v2/admin/imports
+GET  /api/v2/admin/imports
+GET  /api/v2/admin/imports/:id
+POST /api/v2/admin/imports/:id/sheet
+POST /api/v2/admin/imports/:id/mapping
+POST /api/v2/admin/imports/:id/rows/:rowId/resolve
+POST /api/v2/admin/imports/:id/confirm
+POST /api/v2/admin/imports/:id/cancel
+GET  /api/v2/admin/imports/:id/result.xlsx
+GET  /api/v2/admin/imports/templates/:type
+POST /api/v2/enterprises/export
+POST /api/v2/admin/talents/export
+```
+
+Confirm 必须同时提供 `Idempotency-Key`、`confirm=true` 和 `expectedPreviewVersion`。同步导出上限 5000 行，二进制响应不得缓存。
+
 **API_SPEC.md v1.1 END**

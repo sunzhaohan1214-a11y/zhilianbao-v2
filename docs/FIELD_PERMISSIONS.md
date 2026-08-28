@@ -252,4 +252,10 @@ AI建议不能直接W效力关系。
 
 产品版本规则即使 SUPER 也不能在后台自由修改。
 
+## M3-005 批量字段边界
+
+- Import Field Registry 不提供管理员、超级管理员、团长、部长、敏感权限、账号状态或业务状态 canonical target。
+- 企业匹配后只更新正式管理端允许编辑字段；团员重导不得更新账号密码或状态；人才不导入结构化本人电话/邮箱。
+- Export 使用显式字段白名单，不包含附件 URL、Resume、Session、Audit 全量 JSON 或 Import staging。
+
 **FIELD_PERMISSIONS.md v1.1 END**
