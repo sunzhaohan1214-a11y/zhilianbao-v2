@@ -3,12 +3,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { BatchService, MemberService, OrganizationService } from "@/modules/member-foundation";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
+import { BackupService } from "@/modules/system/backup-service";
+import { FakeBackupProvider } from "@/modules/system/backup-provider";
 
 const prisma = getPrismaClient();
 const personIds: string[] = []; const batchIds: string[] = []; const organizationIds: string[] = [];
 const unregisteredFoundationEvents = ["CURRENT_BATCH_CHANGED", "GROUP_LEADER_CHANGED", "BATCH_MEMBERSHIP_CHANGED", "MEMBER_CAPABILITY_UPDATED", "APPOINTMENT_CHANGED"];
 let actor: PermissionActor;
 let suiteStartedAt: Date;
+function batchService() { return new BatchService(prisma, new BackupService(prisma, new FakeBackupProvider())); }
 function phone() { return `136${Math.floor(10_000_000 + Math.random() * 89_999_999)}`; }
 async function person(name: string, withAccount = false) {
   const value = await prisma.person.create({ data: { name: `B-M2-001 ${name} ${randomUUID()}`, contactPhone: withAccount ? null : "0514-88888888" } }); personIds.push(value.id);
@@ -47,7 +50,7 @@ afterAll(async () => {
 describe("B-M2-001 real MySQL invariants", () => {
   it("serializes competing activations and leaves exactly one current ACTIVE batch", async () => {
     await prisma.batch.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
-    const old = await batch("old", true); const first = await batch("first"); const second = await batch("second"); const service = new BatchService(prisma);
+    const old = await batch("old", true); const first = await batch("first"); const second = await batch("second"); const service = batchService();
     const previews = await Promise.all([service.activationPreview({ actor, batchId: first.id }), service.activationPreview({ actor, batchId: second.id })]);
     const outcomes = await Promise.allSettled([
       service.activate({ actor, batchId: first.id, command: { confirmation: "ACTIVATE", confirm: true, reason: "TEST competing activation", expectedCurrentBatchId: old.id, previewToken: previews[0].previewToken }, idempotencyKey: randomUUID() }),
@@ -119,4 +122,6 @@ describe("B-M2-001 real MySQL invariants", () => {
     await new OrganizationService(prisma).createAppointment({ actor, appointment: { personId: actor.personId, organizationId: organization.id, positionTitle: "复核员", effectiveAt: new Date("2026-01-01"), isPrimary: false } });
     expect(await prisma.outboxEvent.count({ where: { eventType: { in: unregisteredFoundationEvents }, occurredAt: { gte: suiteStartedAt } } })).toBe(0);
   });
+  it("keeps the current batch unchanged when the required pre-backup fails", async () => { await prisma.batch.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } }); const current = await batch("prebackup-current", true); const target = await batch("prebackup-target"); const service = new BatchService(prisma, new BackupService(prisma, new FakeBackupProvider({ failCreate: true }))); const preview = await service.activationPreview({ actor, batchId: target.id }); await expect(service.activate({ actor, batchId: target.id, command: { confirmation: "ACTIVATE", confirm: true, reason: "TEST prebackup fail", expectedCurrentBatchId: current.id, previewToken: preview.previewToken }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "BACKUP_PROVIDER_UNAVAILABLE" }); expect(await prisma.batch.findUniqueOrThrow({ where: { id: current.id } })).toMatchObject({ isCurrent: true, status: "ACTIVE" }); expect(await prisma.batch.findUniqueOrThrow({ where: { id: target.id } })).toMatchObject({ isCurrent: false, status: "PLANNED" }); });
+
 });

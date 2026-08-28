@@ -73,9 +73,7 @@ export class ImportService {
   private readonly enterprise = new EnterpriseService();
   private readonly member = new MemberService();
   private readonly talent = new TalentService();
-  private readonly backups = new BackupService();
-
-  constructor(private readonly repository = new ImportRepository()) {}
+  constructor(private readonly repository = new ImportRepository(), private readonly backups = new BackupService(repository.prisma)) {}
 
   private logBatch(event: string, value: { batchId: string; importType: string; status: string; rowCount?: number; createdCount?: number; updatedCount?: number; linkedCount?: number; skippedCount?: number; duration?: number }) {
     console.info(JSON.stringify({ event, ...value }));

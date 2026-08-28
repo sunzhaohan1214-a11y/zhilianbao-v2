@@ -545,6 +545,6 @@ M1-008 home
 
 ## M3-007 status
 
-System settings/versioning, Asia/Shanghai work calendar, capability-driven AdminShell, high-risk overview, batch/import pre-backup, map activation preview, AI/OCR config lifecycle and evaluation gate, health/storage aggregation, full redacted audit, backup catalog/provider abstraction, restore/maintenance orchestration and UI/API are implemented. Production providers remain fail-closed and no real restore was executed. M3-008 real provider integration, evaluation completion, post-restore hardening and controlled restore drill are not started.
+System settings/versioning, Asia/Shanghai work calendar, capability-driven AdminShell, high-risk overview, batch/import pre-backup, map activation preview, AI/OCR config lifecycle and evaluation gate, health/storage aggregation, full redacted audit, backup catalog/provider abstraction, restore/maintenance orchestration and UI/API are implemented. Pre-merge recovery hardening adds explicit fake-provider gating, normalized environment and exact-schema restore guards, rechecked Provider preview, real post-restore validation, reentrant crash recovery/finalization, Provider-only catalog ingest, evidence-based compliance, complete restore UI actions, read-only `NOT_WIRED` SLA settings, and expanded Batch/Map impact previews. Production providers remain fail-closed; no real provider is configured, no real restore was executed, no migration was added, and M3-008 is not started.
 
 **IMPLEMENTATION_PLAN.md v1.2 END**

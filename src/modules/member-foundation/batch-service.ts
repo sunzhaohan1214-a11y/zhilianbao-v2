@@ -50,20 +50,34 @@ export class BatchService {
 
   async activationPreview(input: ServiceInput & { batchId: string }) {
     await authorizeActor({ actor: input.actor, action: "member.batch.manage", resource: { resourceType: "batch", requiredScope: "SYSTEM" } });
-    const [target, current] = await Promise.all([
+    const now = new Date(); const [target, current] = await Promise.all([
       this.prisma.batch.findUnique({ where: { id: input.batchId }, include: { _count: { select: { memberships: true } } } }),
-      this.prisma.batch.findMany({ where: { isCurrent: true }, select: { id: true, name: true, status: true } }),
+      this.prisma.batch.findMany({ where: { isCurrent: true }, include: { _count: { select: { memberships: true } } } }),
     ]);
     if (!target) throw new FoundationError("BATCH_NOT_FOUND", "批次不存在");
     if (target.status === "CLOSED") throw new FoundationError("BATCH_STATE_CONFLICT", "已关闭批次不能激活");
     if (current.length > 1) throw new FoundationError("BATCH_STATE_CONFLICT", "当前批次配置不唯一");
+    const currentId = current[0]?.id ?? null; const activeRelationWhere = { effectiveAt: { lte: now }, OR: [{ expiredAt: null }, { expiredAt: { gt: now } }] };
+    const [currentLeaders, targetLeaders, currentMinisters, targetMinisters, currentOwnerInProgress, crossBatchDemands, backupHealth] = await Promise.all([
+      currentId ? this.prisma.groupLeaderAssignment.count({ where: { batchId: currentId, ...activeRelationWhere } }) : 0,
+      this.prisma.groupLeaderAssignment.count({ where: { batchId: target.id, ...activeRelationWhere } }),
+      currentId ? this.prisma.roleAssignment.count({ where: { roleCode: "MINISTER", ...activeRelationWhere, person: { batchMemberships: { some: { batchId: currentId, status: "ACTIVE", startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] } } } } }) : 0,
+      this.prisma.roleAssignment.count({ where: { roleCode: "MINISTER", ...activeRelationWhere, person: { batchMemberships: { some: { batchId: target.id, status: "ACTIVE", startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] } } } } }),
+      currentId ? this.prisma.demand.count({ where: { status: "IN_PROGRESS", currentOwnerPerson: { batchMemberships: { some: { batchId: currentId, status: "ACTIVE" } } } } }) : 0,
+      currentId ? this.prisma.demand.count({ where: { status: "IN_PROGRESS", currentOwnerPerson: { batchMemberships: { some: { batchId: currentId, status: "ACTIVE" } }, NOT: { batchMemberships: { some: { batchId: target.id, status: "ACTIVE" } } } } } }) : 0,
+      this.backups.health(),
+    ]);
+    const backupReadiness = { provider: backupHealth.provider.provider, status: backupHealth.provider.status, ready: backupHealth.provider.ready };
     const payload = {
       target: { id: target.id, name: target.name, membershipCount: target._count.memberships },
-      current: current[0] ?? null,
-      expectedCurrentBatchId: current[0]?.id ?? null,
+      current: current[0] ? { id: current[0].id, name: current[0].name, status: current[0].status, membershipCount: current[0]._count.memberships } : null,
+      expectedCurrentBatchId: currentId,
+      relationSummary: { current: { groupLeaderCount: currentLeaders, ministerCount: currentMinisters }, target: { groupLeaderCount: targetLeaders, ministerCount: targetMinisters } },
+      demandImpact: { currentOwnerInProgressCount: currentOwnerInProgress, crossBatchDemandCount: crossBatchDemands, warning: crossBatchDemands > 0 ? "存在当前负责人不属于目标批次的进行中需求，需要人工安排交接。" : null },
+      backupReadiness,
       warning: "切换后原团长权限立即失效，团员权限缓存将刷新。",
     };
-    return { ...payload, backupReadiness: await this.backups.health(), previewToken: stableHash(payload) };
+    return { ...payload, previewToken: stableHash(payload) };
   }
 
   async activate(input: ServiceInput & { batchId: string; command: unknown; idempotencyKey: string | null }) {

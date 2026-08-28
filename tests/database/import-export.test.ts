@@ -6,12 +6,15 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { DataExportService } from "@/modules/import-export/export-service";
 import { ImportService } from "@/modules/import-export/import-service";
+import { ImportRepository } from "@/modules/import-export/repository";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
+import { BackupService } from "@/modules/system/backup-service";
+import { FakeBackupProvider } from "@/modules/system/backup-provider";
 
 process.env.APP_ENV = "test";
 
 const prisma = getPrismaClient();
-const importService = new ImportService();
+const importService = new ImportService(new ImportRepository(prisma), new BackupService(prisma, new FakeBackupProvider()));
 const exportService = new DataExportService();
 const personIds: string[] = []; const accountIds: string[] = []; const areaIds: string[] = []; const batchIds: string[] = []; const attachmentIds: string[] = [];
 const importedPhones: string[] = []; const enterpriseIds: string[] = [];
@@ -218,4 +221,6 @@ describe("M3-005 scoped export", () => {
     const names: string[] = []; sheet.eachRow((row, number) => { if (number > 1) names.push(String(row.getCell(1).value ?? "")); });
     expect(names).toContain("M3范围内企业"); expect(names).not.toContain("M3范围外企业");
   });
+  it("keeps a preview-ready import at zero business mutation when pre-backup fails", async () => { const body = await workbook(["企业名称", "统一社会信用代码", "负责区域", "地址", "主营产品"], [[`TEST prebackup enterprise ${randomUUID()}`, `PB${randomUUID().replaceAll("-", "").slice(0, 16)}`, areaA, "TEST address", "TEST product"]]); const batch = await createBatch("ENTERPRISE", body, "prebackup-failure.xlsx"); const before = await prisma.enterprise.count(); const failing = new ImportService(new ImportRepository(prisma), new BackupService(prisma, new FakeBackupProvider({ failCreate: true }))); await expect(failing.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST prebackup failure", expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "BACKUP_PROVIDER_UNAVAILABLE" }); expect(await prisma.enterprise.count()).toBe(before); expect(await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({ status: "PREVIEW_READY", appliedAt: null }); });
+
 });

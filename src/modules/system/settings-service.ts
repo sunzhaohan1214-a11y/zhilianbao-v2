@@ -19,7 +19,7 @@ export class SettingsService {
     const rows = new Map((await this.prisma.systemSetting.findMany()).map((row) => [row.key, row]));
     return Object.entries(SYSTEM_SETTING_REGISTRY).map(([key, definition]) => {
       const row = rows.get(key);
-      return { key, value: row?.valueJson ?? definition.default, valueType: definition.type, version: row?.version ?? 0, initialized: Boolean(row), editable: definition.editable && input.actor.capabilities.has("system.high_privilege_manage"), riskLevel: definition.riskLevel, description: definition.description };
+      return { key, value: row?.valueJson ?? definition.default, valueType: definition.type, version: row?.version ?? 0, initialized: Boolean(row), editable: definition.editable && input.actor.capabilities.has("system.high_privilege_manage"), runtimeStatus: "runtimeStatus" in definition ? definition.runtimeStatus : "WIRED", riskLevel: definition.riskLevel, description: definition.description };
     });
   }
 

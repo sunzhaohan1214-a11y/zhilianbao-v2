@@ -2840,6 +2840,6 @@ DATA_DICTIONARY.md
 
 ## M3-007 System governance model
 
-`SystemSetting` is the current typed value and optimistic version; `SystemSettingVersion` is append-only history. `WorkCalendarOverride` stores an explicit Asia/Shanghai natural-date override. `SystemCommandIdempotency` is isolated from business command tables. `AIServiceConfig`/`Version` store provider metadata and `secretRef` names only. `BackupRecord` stores cloud snapshot metadata only. `RestoreRequest` owns the preview-to-validation lifecycle and a nullable unique `activeKey`; `SystemMaintenanceEvent` records deployment-layer maintenance transitions but is not the write lock itself.
+`SystemSetting` is the current typed value and optimistic version; `SystemSettingVersion` is append-only history. `WorkCalendarOverride` stores an explicit Asia/Shanghai natural-date override. `SystemCommandIdempotency` is isolated from business command tables. `AIServiceConfig`/`Version` store provider metadata and `secretRef` names only. `BackupRecord` stores cloud snapshot metadata only, including normalized source environment, Provider identity, schema/app versions, retention evidence and retry error codes. Provider-only catalog rows use nullable creator and reason `PROVIDER_CATALOG_SYNC`. `RestoreRequest` owns the immutable preview-to-validation lifecycle, active lock, Provider operation and validation diagnostics; `SystemMaintenanceEvent` records deployment-layer maintenance transitions but is not the write lock itself. No additional safety migration is required.
 
 **DATA_MODEL.md v1.3 END**

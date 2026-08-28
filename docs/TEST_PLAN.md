@@ -521,6 +521,6 @@ P3 UI/文案/低频问题
 
 ## M3-007 coverage
 
-Unit coverage verifies typed setting defaults, fixed timezone workday rules, canonical preview hashes, audit redaction, AI capability/secret-ref validation, provider fail-closed behavior and TEST fakes. Real-MySQL coverage verifies concurrent setting version control, calendar override/version/audit, backup idempotency/provider-once, map stale preview, batch pre-backup concurrency and import pre-backup. Critical E2E must distinguish SUPER and ADMIN menus/denials and must never run a destructive real restore.
+Unit coverage verifies typed setting defaults, fixed timezone workday rules, canonical preview hashes, audit redaction, AI capability/secret-ref validation, explicit fake-provider double gating, provider fail-closed behavior, reentrant maintenance and compliance UNKNOWN semantics. Real-MySQL coverage verifies concurrent setting/calendar controls; backup and restore crash-resume with fixed Provider keys; cross-environment/schema/readiness rejection; actual migration, Job, Outbox and attachment-object validation; Provider-only catalog ingest; non-green compliance without evidence; and zero-mutation batch/import behavior when pre-backup fails. Critical E2E distinguishes SUPER and ADMIN navigation/routes/APIs and exercises only the explicitly enabled fake restore lifecycle; it never executes a real restore.
 
 **TEST_PLAN.md v1.2 END**

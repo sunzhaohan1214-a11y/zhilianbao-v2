@@ -53,8 +53,9 @@ export class MapService {
     await authorizeActor({ actor: input.actor, action: "enterprise.map.manage", resource: { resourceType: "map-boundary", requiredScope: "GLOBAL_OPERATIONAL" } });
     const target = await this.prisma.mapBoundaryVersion.findUnique({ where: { id: input.boundaryId }, select: boundarySelect });
     if (!target) throw new MapError("MAP_BOUNDARY_NOT_FOUND", "边界版本不存在", 404);
-    const current = await this.prisma.mapBoundaryVersion.findFirst({ where: { areaId: target.areaId, isCurrent: true }, select: boundarySelect });
-    const payload = { target: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, checksum: target.checksum }, current: current ? { id: current.id, versionNo: current.versionNo, checksum: current.checksum } : null, impact: { currentBoundaryWillChange: current?.id !== target.id, oldVersionRetained: true, coordinateAuthorityUnchanged: true } };
+    const [current, enterpriseCount] = await Promise.all([this.prisma.mapBoundaryVersion.findFirst({ where: { areaId: target.areaId, isCurrent: true }, select: boundarySelect }), this.prisma.enterprise.count({ where: { responsibleAreaId: target.areaId, status: "NORMAL" } })]);
+    const validated = parseAndValidateGeoJson(target.geoJson); const featureCount = validated.geoJson.type === "FeatureCollection" ? validated.geoJson.features.length : 1;
+    const payload = { target: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, checksum: target.checksum }, current: current ? { id: current.id, versionNo: current.versionNo, checksum: current.checksum } : null, impact: { currentBoundaryWillChange: current?.id !== target.id, oldVersionRetained: true, coordinateAuthorityUnchanged: true, targetGeoJsonFeatureCount: featureCount, targetGeoJsonBytes: validated.bytes, enterpriseCountInArea: enterpriseCount, noCurrentBoundaryWarning: current ? null : "当前区域尚无有效边界；本次将建立首个 current 边界。" } };
     return { ...payload, expectedCurrentBoundaryId: current?.id ?? null, expectedTargetVersion: target.versionNo, previewToken: stableHash(payload) };
   }
 
@@ -70,7 +71,8 @@ export class MapService {
       assertActiveAreaForBoundaryActivation(locked[0]);
       const current = await tx.$queryRaw<Array<{ id: string; version_no: number; checksum: string }>>`SELECT id, version_no, checksum FROM map_boundary_versions WHERE area_id = ${target.areaId} AND is_current = TRUE FOR UPDATE`;
       if (current.length > 1 || (current[0]?.id ?? null) !== command.expectedCurrentBoundaryId || target.versionNo !== command.expectedTargetVersion) throw new MapError("MAP_BOUNDARY_PREVIEW_STALE", "边界版本状态已变化，请重新预览", 409);
-      const previewPayload = { target: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, checksum: target.checksum }, current: current[0] ? { id: current[0].id, versionNo: current[0].version_no, checksum: current[0].checksum } : null, impact: { currentBoundaryWillChange: current[0]?.id !== target.id, oldVersionRetained: true, coordinateAuthorityUnchanged: true } };
+      const validated = parseAndValidateGeoJson(target.geoJson); const featureCount = validated.geoJson.type === "FeatureCollection" ? validated.geoJson.features.length : 1; const enterpriseCount = await tx.enterprise.count({ where: { responsibleAreaId: target.areaId, status: "NORMAL" } });
+      const previewPayload = { target: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, checksum: target.checksum }, current: current[0] ? { id: current[0].id, versionNo: current[0].version_no, checksum: current[0].checksum } : null, impact: { currentBoundaryWillChange: current[0]?.id !== target.id, oldVersionRetained: true, coordinateAuthorityUnchanged: true, targetGeoJsonFeatureCount: featureCount, targetGeoJsonBytes: validated.bytes, enterpriseCountInArea: enterpriseCount, noCurrentBoundaryWarning: current[0] ? null : "当前区域尚无有效边界；本次将建立首个 current 边界。" } };
       if (stableHash(previewPayload) !== command.previewToken) throw new MapError("MAP_BOUNDARY_PREVIEW_STALE", "边界影响预览已失效", 409);
       await tx.mapBoundaryVersion.updateMany({ where: { areaId: target.areaId, isCurrent: true }, data: { isCurrent: false } });
       await tx.mapBoundaryVersion.update({ where: { id: target.id }, data: { isCurrent: true } });

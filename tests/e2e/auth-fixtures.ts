@@ -53,6 +53,15 @@ export async function seedAuthFixtures() {
   if (!/test/i.test(databaseUrl)) throw new Error("E2E auth fixtures require an explicitly named test database");
   const prisma = getPrismaClient();
   const users = Object.values(e2eUsers);
+  const systemPersonIds = users.map(({ personId }) => personId);
+  const restoreIds = (await prisma.restoreRequest.findMany({ where: { requestedByPersonId: { in: systemPersonIds } }, select: { id: true } })).map(({ id }) => id);
+  await prisma.systemMaintenanceEvent.deleteMany({ where: { OR: [{ restoreId: { in: restoreIds } }, { actorPersonId: { in: systemPersonIds } }] } });
+  await prisma.restoreRequest.deleteMany({ where: { id: { in: restoreIds } } });
+  await prisma.backupRecord.deleteMany({ where: { OR: [{ createdByPersonId: { in: systemPersonIds } }, { provider: "fake" }] } });
+  await prisma.systemCommandIdempotency.deleteMany({ where: { actorPersonId: { in: systemPersonIds } } });
+  await prisma.systemSettingVersion.deleteMany({ where: { changedByPersonId: { in: systemPersonIds } } });
+  await prisma.systemSetting.deleteMany({ where: { updatedByPersonId: { in: systemPersonIds } } });
+  await prisma.workCalendarOverride.deleteMany({ where: { updatedByPersonId: { in: systemPersonIds } } });
   const importBatches = await prisma.importBatch.findMany({
     where: { createdByPersonId: { in: users.map(({ personId }) => personId) } },
     select: { id: true, sourceAttachmentId: true },
