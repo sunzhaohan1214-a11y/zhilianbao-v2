@@ -276,7 +276,7 @@ APPROVED/REJECTED => active_key IS NULL AND reviewed_at IS NOT NULL
 
 ## 10.2 M1-007 Demand Outcome
 
-迁移 `20260901100000_m1_demand_outcome` 为 expand-only，只新增 `demand_outcome_plans`、`demand_outcome_rounds`、索引、CHECK 与 RESTRICT FK。
+迁移 `20260901113000_m1_demand_outcome` 为 expand-only，只新增 `demand_outcome_plans`、`demand_outcome_rounds`、索引、CHECK 与 RESTRICT FK。
 
 Plan 使用 `UNIQUE(demand_id)`。CHECK 锁定 NONE/NOT_TRACKED 的空日期形态、TRACKING 活动态的日期与 `due_version>=1`、ENDED 的 `next_tracking_date=NULL + ended_at`。办结 APPROVE 在锁定 Demand 的事务内同时写 COMPLETED、CloseReview、Plan、首个 Due Job、Audit/Transition/Outbox；任一失败整体回滚。历史补建同样锁 Demand。
 
