@@ -241,7 +241,7 @@ test("stale reminder closes after progress and alumni township can finish withou
   page = authenticated.page;
   await page.goto(`/admin/demands/${alumniDemand.id}`);
   await page.locator('textarea[name="townshipVerificationResult"]').fill("属地已核实往届资源实际落地");
-  await page.getByLabel("需要跟踪").check();
+  await page.getByRole("radio", { name: "需要跟踪", exact: true }).check();
   await page.locator('input[name="firstTrackingDate"]').fill(shanghaiDateString(new Date()));
   await page.getByRole("button", { name: "确认办结并建立成效计划" }).click();
   await expect(page.getByText("需求已办结", { exact: true })).toBeVisible();

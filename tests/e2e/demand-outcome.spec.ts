@@ -101,7 +101,7 @@ test("completed demand follows the tracked outcome lifecycle and exposes only ap
   page = authenticated.page;
   await page.goto(`/admin/demands/${demand.id}`);
   await page.locator('textarea[name="townshipVerificationResult"]').fill("已向企业核验办结事实");
-  await page.getByLabel("需要跟踪").check();
+  await page.getByRole("radio", { name: "需要跟踪", exact: true }).check();
   await page.locator('input[name="firstTrackingDate"]').fill(today);
   await page.getByRole("button", { name: "确认办结并建立成效计划" }).click();
   await expect(page.getByText("待首次跟踪", { exact: true })).toBeVisible();
