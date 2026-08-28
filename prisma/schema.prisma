@@ -2730,7 +2730,7 @@ model MonthlyReportExportTask {
   updatedAt            DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
   batch                Batch?                    @relation(fields: [batchId], references: [id], onDelete: Restrict)
   createdByPerson      Person                    @relation("MonthlyReportExportCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
-  outputAttachment     Attachment?               @relation("MonthlyReportExportOutput", fields: [outputAttachmentId], references: [id], onDelete: Restrict)
+  outputAttachment     Attachment?               @relation("MonthlyReportExportOutput", fields: [outputAttachmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([createdByPersonId, idempotencyKeyHash], map: "monthly_report_export_actor_key")
   @@index([createdByPersonId, createdAt])

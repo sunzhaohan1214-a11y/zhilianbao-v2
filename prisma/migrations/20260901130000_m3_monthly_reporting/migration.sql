@@ -40,5 +40,5 @@ CREATE TABLE `monthly_report_export_tasks` (
   CONSTRAINT `monthly_report_export_tasks_created_by_person_id_fkey`
     FOREIGN KEY (`created_by_person_id`) REFERENCES `persons`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `monthly_report_export_tasks_output_attachment_id_fkey`
-    FOREIGN KEY (`output_attachment_id`) REFERENCES `attachments`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+    FOREIGN KEY (`output_attachment_id`) REFERENCES `attachments`(`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
