@@ -135,7 +135,8 @@ test("owner exit review and SUPER transfer use the guarded responsibility workfl
   await page.goto(`/admin/demands/${exitDemand.id}`);
   await page.locator('textarea[name="reviewReason"]').fill("当前事项即将完成，暂不同意退出");
   await page.getByRole("button", { name: "拒绝退出" }).click();
-  await expect(page.getByText("REJECTED", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
+  expect(await prisma.demandOwnerExitRequest.count({ where: { demandId: exitDemand.id, status: "REJECTED", activeKey: null } })).toBe(1);
   expect(await prisma.demand.findUniqueOrThrow({ where: { id: exitDemand.id } })).toMatchObject({ status: "IN_PROGRESS", currentOwnerPersonId: e2eUsers.normal.personId });
   await authenticated.context.close();
 
@@ -144,6 +145,7 @@ test("owner exit review and SUPER transfer use the guarded responsibility workfl
   await page.goto(`/demands/${exitDemand.id}`);
   await page.locator("form").filter({ hasText: "申请退出主责" }).locator('textarea[name="reason"]').fill("工作已正式交接，再次申请退出");
   await page.getByRole("button", { name: "提交退出申请" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await authenticated.context.close();
 
   authenticated = await login(browser, e2eUsers.admin);
@@ -191,6 +193,7 @@ test("stale reminder closes after progress and alumni township can finish withou
   await page.locator('textarea[name="currentProgress"]').fill("收到提醒后已完成新一轮沟通");
   await page.locator('textarea[name="nextStep"]').fill("推进专家现场诊断");
   await page.getByRole("button", { name: "提交进展" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await deliverLifecycleEvents(staleDemand.id);
   expect(await prisma.todo.findFirstOrThrow({ where: { aggregateId: staleDemand.id, personId: e2eUsers.normal.personId, todoType: "DEMAND_UPDATE_STALE" } })).toMatchObject({ status: "STALE" });
   await authenticated.context.close();
@@ -220,6 +223,7 @@ test("stale reminder closes after progress and alumni township can finish withou
   await page.locator('textarea[name="currentProgress"]').fill("已提供产业资源清单");
   await page.locator('textarea[name="nextStep"]').fill("由属地确认落地结果");
   await page.getByRole("button", { name: "提交进展" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await authenticated.context.close();
 
   authenticated = await login(browser, e2eUsers.township);
@@ -228,6 +232,7 @@ test("stale reminder closes after progress and alumni township can finish withou
   await page.locator('textarea[name="solution"]').fill("往届资源对接已经完成");
   await page.locator('textarea[name="connectedResources"]').fill("产业专家与高校团队");
   await page.getByRole("button", { name: "提交属地审核" }).click();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
   await authenticated.context.close();
 
   authenticated = await login(browser, e2eUsers.admin);
