@@ -169,7 +169,9 @@ describe("M1-003 Formal Demand contracts", () => {
     } })).resolves.toMatchObject({ allowed: true });
   });
 
-  it("does not add consumerless demand lifecycle outbox events", () => {
-    expect(OUTBOX_EVENT_TYPES).toEqual(["TEST_ENTITY_CHANGED", "ATTACHMENT_UPLOADED"]);
+  it("declares the Demand lifecycle events consumed by the notification worker", () => {
+    expect(OUTBOX_EVENT_TYPES).toEqual(expect.arrayContaining([
+      "DEMAND_SUBMITTED_REVIEW", "DEMAND_REVIEW_RETURNED", "DEMAND_PUBLISHED",
+    ]));
   });
 });

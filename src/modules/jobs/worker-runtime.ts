@@ -4,11 +4,17 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attachment-uploaded-handler";
+import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/announcement-notification-handler";
+import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-notification-handler";
+import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
+import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
+import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
 import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
 import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation-handler";
+import { TripResultDueJobHandler } from "./handlers/trip-result-due-handler";
 import { JobHandlerRegistry } from "./handler-registry";
 import { JobRepository } from "./job-repository";
 import { JobRunner, type WorkerLogger } from "./job-runner";
@@ -59,10 +65,30 @@ export class WorkerRuntime {
     jobHandlers.register("ATTACHMENT_SCAN", new AttachmentScanJobHandler(attachment.scanService));
     jobHandlers.register("ATTACHMENT_TEMP_CLEANUP", new AttachmentCleanupJobHandler(attachment.cleanupService));
     jobHandlers.register("DEMAND_RECOMMENDATION_RUN", new DemandRecommendationJobHandler());
+    jobHandlers.register("TRIP_RESULT_DUE", new TripResultDueJobHandler());
     this.runner = dependencies?.runner ?? new JobRunner(this.jobs, jobHandlers, config.heartbeatMs, logger);
 
     const outboxHandlers = new OutboxHandlerRegistry();
     outboxHandlers.register("ATTACHMENT_UPLOADED", new AttachmentUploadedOutboxHandler(this.jobs));
+    for (const eventType of ["ANNOUNCEMENT_PUBLISHED", "ANNOUNCEMENT_UPDATED", "ANNOUNCEMENT_AUDIENCE_ADDED", "ANNOUNCEMENT_AUDIENCE_REMOVED", "ANNOUNCEMENT_WITHDRAWN"] as const) {
+      outboxHandlers.register(eventType, new AnnouncementNotificationHandler(eventType));
+    }
+    for (const eventType of ["DEMAND_SUBMITTED_REVIEW", "DEMAND_REVIEW_RETURNED", "DEMAND_PUBLISHED", "HELP_TRANSFERRED_ORG", "HELP_ASSIGNED_PERSON", "HELP_CLAIMED", "HELP_COMPLETED", "HELP_REOPENED", "HELP_REASSIGNED", "HELP_WITHDRAWN"] as const) {
+      outboxHandlers.register(eventType, new BusinessNotificationHandler(eventType));
+    }
+    for (const eventType of ["DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED", "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] as const) {
+      outboxHandlers.register(eventType, new DemandParticipationNotificationHandler(eventType));
+    }
+    for (const eventType of ["DEMAND_RECOMMENDED_CURRENT", "DEMAND_RECOMMENDED_ALUMNI"] as const) {
+      outboxHandlers.register(eventType, new DemandRecommendationNotificationHandler(eventType));
+    }
+    outboxHandlers.register("DEMAND_ALUMNI_RESPONSE_RECORDED", new DemandAlumniResponseNotificationHandler());
+    outboxHandlers.register("DEMAND_ALUMNI_HELP_ACTIVATED", new DemandAlumniHelpActivatedNotificationHandler());
+    outboxHandlers.register("TRIP_PARTICIPANT_ADDED", new TripParticipantAddedHandler());
+    outboxHandlers.register("TRIP_UPDATED", new TripLifecycleHandler("TRIP_UPDATED"));
+    outboxHandlers.register("TRIP_RESULT_DUE_SCHEDULED", new TripResultDueScheduledHandler(this.jobs));
+    outboxHandlers.register("TRIP_CANCELED", new TripLifecycleHandler("TRIP_CANCELED"));
+    outboxHandlers.register("TRIP_RESULT_SUBMITTED", new TripLifecycleHandler("TRIP_RESULT_SUBMITTED"));
     this.outbox = dependencies?.outbox ?? new OutboxConsumer(outboxHandlers, config.outboxMaxAttempts, logger);
   }
 

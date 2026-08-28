@@ -6,6 +6,7 @@ import {
   getClaimDeadline,
   getDemandClaimPeriodDays,
   isAlumniFallbackEligible,
+  isResponsibleTownshipStaff,
   sortAndLimitCandidatePool,
   toSanitizedDemandMatchInput,
   type RecommendationCandidateFacts,
@@ -69,11 +70,46 @@ describe("M1-005 demand recommendation rules", () => {
     expect(deterministicRuleFallback([candidate(30, 100, false)])).toEqual([]);
   });
 
-  it("sanitizes the provider payload and never includes contact or reimbursement data", () => {
-    const serialized = JSON.stringify(aiInput());
-    expect(serialized).not.toMatch(/phone|手机号|reimbursement|报销|contactPhone/i);
+  it("recursively redacts free-text PII only from the provider DTO", async () => {
+    const phone = "13812345678";
+    const identity = "32010219900101123X";
+    const email = "member@example.com";
+    const piiDemand: RecommendationDemandFacts = {
+      ...demand,
+      title: `联系人 ${phone}`,
+      originalDescription: `身份证 ${identity}，邮箱 ${email}`,
+      enterpriseEvidence: { mainProducts: `控制器 ${phone}`, industries: [`智能制造 ${email}`] },
+    };
+    const piiCandidate: RecommendationCandidateFacts = {
+      ...candidate(),
+      professionalDirection: `工业自动化 ${identity}`,
+      industries: [`智能制造 ${email}`],
+      coordinatableResources: `专家电话 ${phone}`,
+      personalIntroduction: `联系 ${email}`,
+      evidence: [{
+        key: "INDUSTRY",
+        sourceEntityType: "MEMBER_CAPABILITY_PROFILE",
+        sourceEntityId: candidate().candidateId,
+        field: "industries",
+        snapshotValue: [`智能制造 ${phone}`, identity, email],
+      }],
+    };
+    const persistableEvidence = structuredClone(piiCandidate.evidence);
+    const provider = new FakeDemandMatchProvider([{ recommendations: [] }]);
+    await new AIService(provider).rankDemandCandidates(toSanitizedDemandMatchInput(piiDemand, [piiCandidate]));
+    const serialized = JSON.stringify(provider.requests);
+    expect(serialized).not.toContain(phone);
+    expect(serialized).not.toContain(identity);
+    expect(serialized).not.toContain(email);
+    expect(serialized).toContain("[REDACTED_PHONE]");
+    expect(serialized).toContain("[REDACTED_ID]");
+    expect(serialized).toContain("[REDACTED_EMAIL]");
+    expect(serialized).not.toMatch(/手机号|reimbursement|报销|contactPhone/i);
     expect(serialized).toContain("professionalDirection");
     expect(serialized).toContain("currentOwnedDemandCount");
+    expect(piiCandidate.evidence).toEqual(persistableEvidence);
+    expect(JSON.stringify(piiCandidate.evidence)).toContain(phone);
+    expect(JSON.stringify(piiDemand)).toContain(identity);
   });
 
   it("validates candidate IDs, registered evidence, uniqueness, suitability evidence, and percentage-free reasons", () => {
@@ -103,6 +139,13 @@ describe("M1-005 demand recommendation rules", () => {
     expect(parseJobPayload("DEMAND_RECOMMENDATION_RUN", { runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" })).toEqual({ runId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     expect(resolveCapabilities(["ADMIN"], new Set()).has("demand.recommendation.manage")).toBe(true);
     expect(resolveCapabilities(["TOWNSHIP_STAFF"], new Set()).has("demand.recommendation.manage")).toBe(false);
+  });
+
+  it("requires both an effective township role and the responsible area for full visibility", () => {
+    const actor = { effectiveRoles: ["TOWNSHIP_STAFF"], townshipAreaIds: ["area-a"] };
+    expect(isResponsibleTownshipStaff(actor as never, "area-a")).toBe(true);
+    expect(isResponsibleTownshipStaff({ ...actor, effectiveRoles: [] } as never, "area-a")).toBe(false);
+    expect(isResponsibleTownshipStaff(actor as never, "area-b")).toBe(false);
   });
 
   it("reuses the same live current-member predicate used by claim", () => {

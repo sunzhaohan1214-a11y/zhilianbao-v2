@@ -3,6 +3,8 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { AIService, FakeDemandMatchProvider } from "@/modules/ai";
 import { DemandRecommendationService } from "@/modules/demand";
+import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
+import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 test.describe.configure({ mode: "serial" });
@@ -59,6 +61,23 @@ function provider(personIds: string[]) {
   return new FakeDemandMatchProvider((request) => ({ recommendations: personIds.filter((id) => request.input.candidates.some(({ candidateId }) => candidateId === id)).map((candidateId) => ({ candidateId, reason: "专业方向与需求一致，且有真实能力画像依据。", evidenceKeys: ["PREFERRED_DEMAND_TYPE"] })).slice(0, 3) }));
 }
 
+async function dispatchRecommendationNotifications(demandId: string) {
+  const prisma = getPrismaClient();
+  const registry = new OutboxHandlerRegistry();
+  registry.register("DEMAND_RECOMMENDED_CURRENT", new DemandRecommendationNotificationHandler("DEMAND_RECOMMENDED_CURRENT"));
+  registry.register("DEMAND_RECOMMENDED_ALUMNI", new DemandRecommendationNotificationHandler("DEMAND_RECOMMENDED_ALUMNI"));
+  registry.register("DEMAND_ALUMNI_RESPONSE_RECORDED", new DemandAlumniResponseNotificationHandler());
+  registry.register("DEMAND_ALUMNI_HELP_ACTIVATED", new DemandAlumniHelpActivatedNotificationHandler());
+  const events = await prisma.outboxEvent.findMany({
+    where: { aggregateId: demandId, eventType: { in: ["DEMAND_RECOMMENDED_CURRENT", "DEMAND_RECOMMENDED_ALUMNI", "DEMAND_ALUMNI_RESPONSE_RECORDED", "DEMAND_ALUMNI_HELP_ACTIVATED"] }, publishedAt: null },
+    orderBy: { occurredAt: "asc" },
+  });
+  for (const event of events) await prisma.$transaction(async (tx) => {
+    await registry.dispatch(event, tx);
+    await tx.outboxEvent.update({ where: { id: event.id }, data: { publishedAt: new Date() } });
+  });
+}
+
 test.beforeEach(async () => { await seedAuthFixtures(); });
 
 test("CURRENT recommendation is role-filtered, decline excludes rerun, and another member can still claim", async ({ browser }) => {
@@ -69,6 +88,7 @@ test("CURRENT recommendation is role-filtered, decline excludes rerun, and anoth
   const requested = await post(page, `/api/v2/demands/${item.id}/recommendations/run`, { stage: "CURRENT" }, { "Idempotency-Key": randomUUID() });
   expect(requested.status).toBe(202);
   await new DemandRecommendationService().executeRun(requested.payload.data.runId, new AIService(provider([e2eUsers.minister.personId])));
+  await dispatchRecommendationNotifications(item.id);
   await page.goto(`/admin/demands/${item.id}`);
   await expect(page.getByRole("heading", { name: "智能推荐" })).toBeVisible();
   await expect(page.getByText("E2E minister", { exact: true })).toBeVisible();
@@ -85,6 +105,10 @@ test("CURRENT recommendation is role-filtered, decline excludes rerun, and anoth
   page = authenticated.page;
   const own = await get(page, `/api/v2/demands/${item.id}/recommendations`);
   expect(own.payload.data.items).toHaveLength(1);
+  const currentMessages = await get(page, "/api/v2/messages?module=DEMAND&pageSize=100");
+  expect(currentMessages.payload.data.items.filter((entry: { aggregateId: string; messageType: string }) => entry.aggregateId === item.id && entry.messageType === "DEMAND_RECOMMENDED_CURRENT")).toHaveLength(1);
+  const currentTodos = await get(page, "/api/v2/todos?module=DEMAND&pageSize=100");
+  expect(currentTodos.payload.data.items.filter((entry: { aggregateId: string }) => entry.aggregateId === item.id)).toHaveLength(0);
   await page.goto(`/demands/${item.id}`);
   await expect(page.getByRole("button", { name: "暂不参与" })).toBeVisible();
   expect((await post(page, `/api/v2/demands/${item.id}/recommendations/${own.payload.data.items[0].id}/respond`, { response: "DECLINE" })).status).toBe(200);
@@ -116,13 +140,18 @@ test("ALUMNI platform and historical responses lead to a formal helper plus town
   const requested = await post(page, `/api/v2/demands/${item.id}/recommendations/run`, { stage: "ALUMNI" }, { "Idempotency-Key": randomUUID() });
   expect(requested.status).toBe(202);
   await new DemandRecommendationService().executeRun(requested.payload.data.runId, new AIService(provider([e2eUsers.alumni.personId, historical.id])));
+  await dispatchRecommendationNotifications(item.id);
   await authenticated.context.close();
 
   authenticated = await login(browser, e2eUsers.alumni);
   page = authenticated.page;
   const alumniView = await get(page, `/api/v2/demands/${item.id}/recommendations`);
   expect(alumniView.payload.data.items).toHaveLength(1);
+  expect((await get(page, "/api/v2/messages?module=DEMAND&pageSize=100")).payload.data.items.filter((entry: { aggregateId: string; messageType: string }) => entry.aggregateId === item.id && entry.messageType === "DEMAND_RECOMMENDED_ALUMNI")).toHaveLength(1);
+  expect((await get(page, "/api/v2/todos?module=DEMAND&pageSize=100")).payload.data.items.filter((entry: { aggregateId: string; todoType: string }) => entry.aggregateId === item.id && entry.todoType === "DEMAND_ALUMNI_RESPONSE")).toHaveLength(1);
   expect((await post(page, `/api/v2/demands/${item.id}/recommendations/${alumniView.payload.data.items[0].id}/respond`, { response: "WILLING" })).status).toBe(200);
+  await dispatchRecommendationNotifications(item.id);
+  expect((await get(page, "/api/v2/todos?module=DEMAND&pageSize=100")).payload.data.items.filter((entry: { aggregateId: string }) => entry.aggregateId === item.id)).toHaveLength(0);
   await authenticated.context.close();
 
   authenticated = await login(browser, e2eUsers.township);
@@ -138,6 +167,7 @@ test("ALUMNI platform and historical responses lead to a formal helper plus town
   const adminView = await get(page, `/api/v2/demands/${item.id}/recommendations`);
   const willing = adminView.payload.data.items.find((entry: { person: { id: string } }) => entry.person.id === e2eUsers.alumni.personId);
   expect((await post(page, `/api/v2/demands/${item.id}/alumni-help/activate`, { recommendationItemId: willing.id, townshipHandlerPersonId: e2eUsers.township.personId, reason: "E2E 已确认往届协助意愿" })).status).toBe(200);
+  await dispatchRecommendationNotifications(item.id);
   const after = await get(page, `/api/v2/demands/${item.id}/recommendations`);
   expect(after.payload.data.responsibility).toMatchObject({ mode: "ALUMNI_TOWNSHIP", townshipHandlerPersonId: e2eUsers.township.personId });
   expect(await prisma.demand.findUniqueOrThrow({ where: { id: item.id } })).toMatchObject({ status: "IN_PROGRESS", currentOwnerPersonId: null });

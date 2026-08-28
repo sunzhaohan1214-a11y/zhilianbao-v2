@@ -249,6 +249,9 @@ Playwright。
 - 推荐本人 / 负责镇区 / 管理员 / 无关人员可见性；
 - CURRENT decline 后重跑排除，且其他在任人员仍可 claim；
 - 0 人或 30 天往届门槛、两类往届响应、激活事务与 claim 竞态；
+- Provider 自由文本手机号、身份证和 email 脱敏，且正式 evidence snapshot 不被改写；
+- 负责镇区完整可见、历史代录与 handler 均要求有效 `TOWNSHIP_STAFF` 角色及属地关系；
+- CURRENT 推荐 Message 且 Todo=0；ALUMNI_PLATFORM Message + 响应 Todo；历史往届无站内通知；响应完成、重跑 stale 与 Worker 重试 exactly-once；
 - 政策依据页；
 - 人才不抽结构化电话；
 - 打车票不自动差旅交通；

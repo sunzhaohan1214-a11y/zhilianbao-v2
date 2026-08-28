@@ -8,6 +8,7 @@ import type {
 import { DEMAND_MATCH_PROMPT_V1 } from "@/ai/prompts/demand-match/v1";
 import { AIService, type DemandMatchEvidence } from "@/modules/ai";
 import { JobRepository } from "@/modules/jobs/job-repository";
+import { OutboxRepository } from "@/modules/outbox/outbox-repository";
 import { evaluateCurrentMemberSnapshot, getCurrentMemberEligibility } from "@/modules/member-foundation/current-member-eligibility";
 import { isEffectiveWindow } from "@/modules/member-foundation/rules";
 import { authorizeActor } from "@/modules/permissions/authorization";
@@ -59,6 +60,10 @@ function sha256(value: string): string {
 
 function isAdministrator(actor: PermissionActor): boolean {
   return actor.effectiveRoles.some((role) => role === "ADMIN" || role === "SUPER_ADMIN");
+}
+
+export function isResponsibleTownshipStaff(actor: PermissionActor, areaId: string): boolean {
+  return actor.effectiveRoles.includes("TOWNSHIP_STAFF") && actor.townshipAreaIds.includes(areaId);
 }
 
 function accountIsUsable(account: { status: string; forcePasswordChange: boolean; confidentialityConfirmedAt: Date | null } | null): boolean {
@@ -136,6 +141,8 @@ function parseEvidenceSnapshot(value: Prisma.JsonValue): { evidence: DemandMatch
 }
 
 export class DemandRecommendationService {
+  private readonly outbox = new OutboxRepository();
+
   constructor(
     private readonly repository = new DemandRecommendationRepository(),
     private readonly jobs = new JobRepository(),
@@ -393,6 +400,10 @@ export class DemandRecommendationService {
       if (run.stage === "ALUMNI" && !await this.fallbackEligibilityInTransaction(tx, demand)) {
         throw new RecommendationExecutionError("ALUMNI_FALLBACK_NOT_ELIGIBLE", "Alumni fallback gate changed while recommendation was running");
       }
+      const previousRun = await tx.demandRecommendationRun.findFirst({
+        where: { demandId: run.demandId, stage: run.stage, currentKey: 1, id: { not: run.id } },
+        include: { items: { select: { personId: true, candidateKind: true } } },
+      });
       const validRecommendations: PersistableRecommendation[] = [];
       for (const recommendation of input.recommendations.slice(0, 3)) {
         if (run.stage === "CURRENT") {
@@ -441,6 +452,28 @@ export class DemandRecommendationService {
         durationMs: input.durationMs,
         errorCategory: input.errorCategory,
       } });
+      const previousPersonIds = new Set(previousRun?.items.map(({ personId }) => personId) ?? []);
+      const newlyRecommended = validRecommendations.filter(({ personId }) => !previousPersonIds.has(personId));
+      const currentPlatformIds = new Set(validRecommendations.flatMap(({ personId, candidateKind }) => candidateKind === "ALUMNI_PLATFORM" ? [personId] : []));
+      const stalePlatformIds = previousRun?.items.flatMap(({ personId, candidateKind }) => candidateKind === "ALUMNI_PLATFORM" && !currentPlatformIds.has(personId) ? [personId] : []) ?? [];
+      const recipientIds = newlyRecommended.flatMap(({ personId, candidateKind }) => run.stage === "CURRENT" || candidateKind === "ALUMNI_PLATFORM" ? [personId] : []);
+      if (recipientIds.length > 0 || stalePlatformIds.length > 0) {
+        const eventType = run.stage === "CURRENT" ? "DEMAND_RECOMMENDED_CURRENT" : "DEMAND_RECOMMENDED_ALUMNI";
+        await this.outbox.append({
+          eventType,
+          aggregateType: "DEMAND",
+          aggregateId: run.demandId,
+          payload: {
+            aggregateId: run.demandId,
+            recipientIds,
+            todoRecipientIds: run.stage === "ALUMNI" ? recipientIds : [],
+            staleTodoRecipientIds: stalePlatformIds,
+            eventKey: `recommendation-run:${run.id}`,
+          },
+          dedupeKey: `demand-recommendation-notification:${run.id}`,
+          occurredAt: snapshotAt,
+        }, tx);
+      }
     });
   }
 
@@ -500,7 +533,7 @@ export class DemandRecommendationService {
     }));
     if (!demand || !DEMAND_PUBLISHED_STATUSES.has(demand.status)) throw new DemandError("DEMAND_RECOMMENDATION_NOT_VISIBLE", "推荐不存在或当前账号不可见");
     await authorizeActor({ actor: input.actor, action: "demand.view", resource: { resourceType: "demand", requiredScope: "GLOBAL_PUBLISHED" } });
-    const fullViewer = isAdministrator(input.actor) || input.actor.townshipAreaIds.includes(demand.responsibleAreaId);
+    const fullViewer = isAdministrator(input.actor) || isResponsibleTownshipStaff(input.actor, demand.responsibleAreaId);
     const currentRuns = await this.repository.transaction((tx) => tx.demandRecommendationRun.findMany({
       where: { demandId: demand.id, currentKey: 1 },
       orderBy: [{ stage: "asc" }, { createdAt: "desc" }],
@@ -571,11 +604,19 @@ export class DemandRecommendationService {
 
   async respond(input: ServiceInput & { demandId: string; itemId: string; body: unknown }) {
     const command = respondDemandRecommendationSchema.parse(input.body);
+    const demandAccess = await this.repository.transaction((tx) => tx.demand.findUnique({
+      where: { id: input.demandId },
+      select: { responsibleAreaId: true },
+    }));
+    if (!demandAccess) throw new DemandError("DEMAND_RECOMMENDATION_ITEM_NOT_FOUND", "推荐项不存在");
+    const fullViewer = isAdministrator(input.actor) || isResponsibleTownshipStaff(input.actor, demandAccess.responsibleAreaId);
     const located = await this.repository.transaction((tx) => tx.demandRecommendationItem.findUnique({
       where: { id: input.itemId },
-      select: { run: { select: { demandId: true } } },
+      select: { personId: true, run: { select: { demandId: true } } },
     }));
-    if (!located || located.run.demandId !== input.demandId) throw new DemandError("DEMAND_RECOMMENDATION_ITEM_NOT_FOUND", "推荐项不存在");
+    if (!located || located.run.demandId !== input.demandId || !fullViewer && located.personId !== input.actor.personId) {
+      throw new DemandError("DEMAND_RECOMMENDATION_ITEM_NOT_FOUND", "推荐项不存在");
+    }
     return this.repository.transaction(async (tx) => {
       if (!await this.repository.lockDemand(tx, input.demandId)) throw new DemandError("DEMAND_RECOMMENDATION_ITEM_NOT_FOUND", "推荐项不存在");
       if (!await this.repository.lockItem(tx, input.itemId)) throw new DemandError("DEMAND_RECOMMENDATION_ITEM_NOT_FOUND", "推荐项不存在");
@@ -592,14 +633,14 @@ export class DemandRecommendationService {
       if (item.run.demandId !== demand.id || item.run.currentKey !== 1 || !responseStateValid) {
         throw new DemandError("DEMAND_RECOMMENDATION_RESPONSE_INVALID", "该推荐项当前不可响应");
       }
-      const fullViewer = isAdministrator(input.actor) || input.actor.townshipAreaIds.includes(demand.responsibleAreaId);
+      const transactionFullViewer = isAdministrator(input.actor) || isResponsibleTownshipStaff(input.actor, demand.responsibleAreaId);
       if (item.candidateKind === "CURRENT") {
         if (item.personId !== input.actor.personId || command.response !== "DECLINE") {
           throw new DemandError("DEMAND_RECOMMENDATION_RESPONSE_INVALID", "在任推荐仅本人可选择暂不参与");
         }
       } else if (item.candidateKind === "ALUMNI_PLATFORM") {
         if (item.personId !== input.actor.personId) throw new DemandError("DEMAND_RECOMMENDATION_RESPONSE_INVALID", "平台内往届推荐仅本人可响应");
-      } else if (!fullViewer || !command.responseNote) {
+      } else if (!transactionFullViewer || !command.responseNote) {
         throw new DemandError("DEMAND_RECOMMENDATION_RESPONSE_INVALID", "历史往届反馈必须由管理员或负责镇区登记并填写线下联系说明");
       }
       if (item.responseStatus) {
@@ -621,6 +662,20 @@ export class DemandRecommendationService {
         reason: command.responseNote,
         context: input.context,
       });
+      if (item.candidateKind === "ALUMNI_PLATFORM") {
+        await this.outbox.append({
+          eventType: "DEMAND_ALUMNI_RESPONSE_RECORDED",
+          aggregateType: "DEMAND",
+          aggregateId: demand.id,
+          payload: {
+            aggregateId: demand.id,
+            respondentPersonId: item.personId,
+            eventKey: `alumni-response:${item.id}`,
+          },
+          dedupeKey: `demand-alumni-response-recorded:${item.id}`,
+          occurredAt: updated.respondedAt ?? new Date(),
+        }, tx);
+      }
       return { itemId: updated.id, responseStatus: updated.responseStatus, respondedAt: updated.respondedAt };
     });
   }
@@ -712,6 +767,26 @@ export class DemandRecommendationService {
         data: { currentKey: null },
       });
       await tx.demandRecommendationRun.update({ where: { id: run.id }, data: { currentKey: 1 } });
+      const currentPlatformIds = new Set(ordered.flatMap(({ personId, candidateKind }) => candidateKind === "ALUMNI_PLATFORM" ? [personId] : []));
+      const stalePlatformIds = currentItems.flatMap(({ personId, candidateKind }) => candidateKind === "ALUMNI_PLATFORM" && !currentPlatformIds.has(personId) ? [personId] : []);
+      const recipientIds = command.stage === "CURRENT" || candidate.candidateKind === "ALUMNI_PLATFORM" ? [candidate.candidateId] : [];
+      if (recipientIds.length > 0 || stalePlatformIds.length > 0) {
+        const eventType = command.stage === "CURRENT" ? "DEMAND_RECOMMENDED_CURRENT" : "DEMAND_RECOMMENDED_ALUMNI";
+        await this.outbox.append({
+          eventType,
+          aggregateType: "DEMAND",
+          aggregateId: demand.id,
+          payload: {
+            aggregateId: demand.id,
+            recipientIds,
+            todoRecipientIds: command.stage === "ALUMNI" ? recipientIds : [],
+            staleTodoRecipientIds: stalePlatformIds,
+            eventKey: `recommendation-run:${run.id}`,
+          },
+          dedupeKey: `demand-recommendation-notification:${run.id}`,
+          occurredAt: now,
+        }, tx);
+      }
       await writeDemandAudit(tx, {
         actor: input.actor,
         actionCode: command.replaceItemId ? "DEMAND_RECOMMENDATION_MANUAL_REPLACED" : "DEMAND_RECOMMENDATION_MANUAL_ADDED",
@@ -735,6 +810,7 @@ export class DemandRecommendationService {
         name: true,
         personStatus: true,
         account: { select: { status: true, forcePasswordChange: true, confidentialityConfirmedAt: true } },
+        roleAssignments: { select: { roleCode: true, effectiveAt: true, expiredAt: true } },
         appointments: {
           where: { effectiveAt: { lte: now }, OR: [{ expiredAt: null }, { expiredAt: { gt: now } }] },
           select: {
@@ -754,7 +830,7 @@ export class DemandRecommendationService {
       },
     });
     const appointment = person?.appointments.find(({ organization }) => organization.type === "TOWNSHIP_ORG" && organization.status === "ACTIVE" && organization.areaMappings.length > 0);
-    if (!person || person.personStatus !== "ACTIVE" || !accountIsUsable(person.account) || !appointment) {
+    if (!person || person.personStatus !== "ACTIVE" || !accountIsUsable(person.account) || !hasEffectiveRole(person.roleAssignments, "TOWNSHIP_STAFF", now) || !appointment) {
       throw new DemandError("DEMAND_TOWNSHIP_HANDLER_INVALID", "所选人员不是该负责区域当前有效的镇区工作人员");
     }
     return { personId: person.id, personName: person.name, organizationId: appointment.organization.id };
@@ -766,6 +842,11 @@ export class DemandRecommendationService {
       where: {
         personStatus: "ACTIVE",
         account: { is: { status: "NORMAL", forcePasswordChange: false, confidentialityConfirmedAt: { not: null } } },
+        roleAssignments: { some: {
+          roleCode: "TOWNSHIP_STAFF",
+          effectiveAt: { lte: now },
+          OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
+        } },
         appointments: { some: {
           effectiveAt: { lte: now },
           OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
@@ -856,6 +937,19 @@ export class DemandRecommendationService {
         metadata: { helperId: helper.id, townshipHandlerPersonId: handler.personId },
         context: input.context,
       });
+      await this.outbox.append({
+        eventType: "DEMAND_ALUMNI_HELP_ACTIVATED",
+        aggregateType: "DEMAND",
+        aggregateId: demand.id,
+        payload: {
+          aggregateId: demand.id,
+          handlerPersonId: currentHandler.personId,
+          ...(item.candidateKind === "ALUMNI_PLATFORM" ? { platformHelperPersonId: item.personId } : {}),
+          eventKey: `alumni-help:${helper.id}`,
+        },
+        dedupeKey: `demand-alumni-help-activated:${helper.id}`,
+        occurredAt: now,
+      }, tx);
       return { helperId: helper.id, townshipHandlerId: currentHandler.id, demandId: demand.id, status: updated.status, currentOwnerPersonId: updated.currentOwnerPersonId };
     });
   }

@@ -4,11 +4,14 @@ import type { RoleCode } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { AIService, FakeDemandMatchProvider } from "@/modules/ai";
 import { DemandRecommendationService, FormalDemandService } from "@/modules/demand";
+import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
+import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 
 const prisma = getPrismaClient();
 const service = new DemandRecommendationService();
 const formalService = new FormalDemandService();
+const recommendationOutboxTypes = ["DEMAND_RECOMMENDED_CURRENT", "DEMAND_RECOMMENDED_ALUMNI", "DEMAND_ALUMNI_RESPONSE_RECORDED", "DEMAND_ALUMNI_HELP_ACTIVATED"] as const;
 const previousCurrentBatchIds: string[] = [];
 let batchId: string;
 let oldBatchId: string;
@@ -17,6 +20,7 @@ let enterpriseId: string;
 let contactId: string;
 let creatorId: string;
 let phoneSequence = 17100000000;
+const testDemandIds: string[] = [];
 
 function permissionActor(personId: string, accountId: string, roles: RoleCode[], override: Partial<PermissionActor> = {}): PermissionActor {
   return {
@@ -77,7 +81,7 @@ async function historicalPerson() {
 }
 
 async function publishedDemand(firstPublishedAt = new Date()) {
-  return prisma.demand.create({ data: {
+  const created = await prisma.demand.create({ data: {
     businessNo: `XQ2026${randomUUID().replaceAll("-", "").slice(0, 10)}`,
     enterpriseId,
     responsibleAreaId: areaId,
@@ -92,6 +96,8 @@ async function publishedDemand(firstPublishedAt = new Date()) {
     firstPublishedAt,
     createdByPersonId: creatorId,
   } });
+  testDemandIds.push(created.id);
+  return created;
 }
 
 function providerFor(personIds: string[]) {
@@ -102,6 +108,30 @@ function providerFor(personIds: string[]) {
       evidenceKeys: ["PREFERRED_DEMAND_TYPE"],
     })),
   }));
+}
+
+function recommendationOutboxRegistry() {
+  const registry = new OutboxHandlerRegistry();
+  registry.register("DEMAND_RECOMMENDED_CURRENT", new DemandRecommendationNotificationHandler("DEMAND_RECOMMENDED_CURRENT"));
+  registry.register("DEMAND_RECOMMENDED_ALUMNI", new DemandRecommendationNotificationHandler("DEMAND_RECOMMENDED_ALUMNI"));
+  registry.register("DEMAND_ALUMNI_RESPONSE_RECORDED", new DemandAlumniResponseNotificationHandler());
+  registry.register("DEMAND_ALUMNI_HELP_ACTIVATED", new DemandAlumniHelpActivatedNotificationHandler());
+  return registry;
+}
+
+async function consumeRecommendationOutbox(demandId: string, replay = false) {
+  const registry = recommendationOutboxRegistry();
+  const events = await prisma.outboxEvent.findMany({
+    where: { aggregateId: demandId, eventType: { in: [...recommendationOutboxTypes] } },
+    orderBy: { occurredAt: "asc" },
+  });
+  for (const event of events) {
+    if (event.publishedAt && !replay) continue;
+    await prisma.$transaction(async (tx) => {
+      await registry.dispatch(event, tx);
+      await tx.outboxEvent.update({ where: { id: event.id }, data: { publishedAt: new Date() } });
+    });
+  }
 }
 
 beforeAll(async () => {
@@ -125,6 +155,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.todo.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: testDemandIds } } });
+  await prisma.message.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: testDemandIds } } });
+  await prisma.outboxEvent.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: testDemandIds } } });
   await prisma.jobTask.deleteMany({ where: { jobType: "DEMAND_RECOMMENDATION_RUN" } });
   await prisma.batch.updateMany({ where: { id: batchId }, data: { isCurrent: false } });
   if (previousCurrentBatchIds.length) await prisma.batch.updateMany({ where: { id: { in: previousCurrentBatchIds } }, data: { isCurrent: true } });
@@ -151,6 +184,10 @@ describe("M1-005 real MySQL recommendation", () => {
     const first = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT" }, idempotencyKey: randomUUID() });
     const fake = providerFor([eligible.person.id, disabled.person.id]);
     await service.executeRun(first.runId, new AIService(fake));
+    await service.executeRun(first.runId, new AIService(providerFor([eligible.person.id])));
+    expect(await prisma.demandRecommendationItem.count({ where: { runId: first.runId } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: "DEMAND_RECOMMENDED_CURRENT" } })).toBe(1);
+    await consumeRecommendationOutbox(demand.id);
     expect(fake.requests[0].input.candidates.map(({ candidateId }) => candidateId)).toContain(eligible.person.id);
     expect(fake.requests[0].input.candidates.map(({ candidateId }) => candidateId)).not.toContain(disabled.person.id);
     for (const excluded of [ministerOnly.person.id, leaderOnly.person.id, adminOnly.person.id, alumniOnly.person.id, expiredRole.person.id, expiredMembership.person.id]) {
@@ -160,49 +197,96 @@ describe("M1-005 real MySQL recommendation", () => {
     expect(adminView.items.map(({ person }) => person.id)).toEqual([eligible.person.id]);
     expect((await service.getRecommendations({ actor: eligible.actor, demandId: demand.id })).items).toHaveLength(1);
     expect((await service.getRecommendations({ actor: ordinary.actor, demandId: demand.id })).items).toEqual([]);
+    expect(await prisma.message.count({ where: { personId: eligible.person.id, messageType: "DEMAND_RECOMMENDED_CURRENT", aggregateId: demand.id } })).toBe(1);
+    expect(await prisma.todo.count({ where: { personId: eligible.person.id, aggregateId: demand.id } })).toBe(0);
 
     const firstItem = adminView.items[0];
     await service.respond({ actor: eligible.actor, demandId: demand.id, itemId: firstItem.id, body: { response: "DECLINE" } });
     const second = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT" }, idempotencyKey: randomUUID() });
     const secondFake = providerFor([eligible.person.id]);
     await service.executeRun(second.runId, new AIService(secondFake));
+    await consumeRecommendationOutbox(demand.id);
     expect(secondFake.requests[0].input.candidates.map(({ candidateId }) => candidateId)).not.toContain(eligible.person.id);
     expect(await prisma.demandRecommendationRun.count({ where: { demandId: demand.id, stage: "CURRENT", currentKey: 1 } })).toBe(1);
     expect((await prisma.demandRecommendationRun.findUniqueOrThrow({ where: { id: first.runId } })).currentKey).toBeNull();
+    expect(await prisma.message.count({ where: { personId: eligible.person.id, messageType: "DEMAND_RECOMMENDED_CURRENT", aggregateId: demand.id } })).toBe(1);
 
     await expect(formalService.claim({ actor: ordinary.actor, demandId: demand.id, body: {}, idempotencyKey: randomUUID() })).resolves.toMatchObject({ status: "IN_PROGRESS" });
     expect(await prisma.demand.findUniqueOrThrow({ where: { id: demand.id } })).toMatchObject({ currentOwnerPersonId: ordinary.person.id, status: "IN_PROGRESS" });
   }, 30_000);
 
   it("supports zero-result alumni fallback, both alumni kinds, offline response, and formal activation without creating an owner", async () => {
-    const [admin, platform, handler] = await Promise.all([
+    const [admin, platform, replacementPlatform, handler, appointmentOnly, expiredTownship] = await Promise.all([
       accountPerson(["ADMIN"]),
       accountPerson(["MEMBER_ALUMNI_PLATFORM"], { oldMembership: true, profile: true }),
+      accountPerson(["MEMBER_ALUMNI_PLATFORM"], { oldMembership: true, profile: true }),
       accountPerson(["TOWNSHIP_STAFF"]),
+      accountPerson(["DEPARTMENT_STAFF"]),
+      accountPerson(["TOWNSHIP_STAFF", "DEPARTMENT_STAFF"]),
     ]);
     const historical = await historicalPerson();
     const organization = await prisma.organization.create({ data: { name: `M1-005 镇区单位 ${randomUUID()}`, type: "TOWNSHIP_ORG" } });
     await prisma.organizationAreaMapping.create({ data: { organizationId: organization.id, areaId, effectiveAt: new Date("2026-01-01") } });
-    await prisma.appointment.create({ data: { personId: handler.person.id, organizationId: organization.id, positionTitle: "经办人", effectiveAt: new Date("2026-01-01") } });
+    await prisma.appointment.createMany({ data: [
+      { personId: handler.person.id, organizationId: organization.id, positionTitle: "经办人", effectiveAt: new Date("2026-01-01") },
+      { personId: appointmentOnly.person.id, organizationId: organization.id, positionTitle: "只有任职", effectiveAt: new Date("2026-01-01") },
+      { personId: expiredTownship.person.id, organizationId: organization.id, positionTitle: "角色已过期", effectiveAt: new Date("2026-01-01") },
+    ] });
+    await prisma.roleAssignment.updateMany({ where: { personId: expiredTownship.person.id, roleCode: "TOWNSHIP_STAFF" }, data: { expiredAt: new Date("2026-01-02") } });
     handler.actor.townshipAreaIds = [areaId];
+    appointmentOnly.actor.townshipAreaIds = [areaId];
+    expiredTownship.actor.townshipAreaIds = [areaId];
+    expiredTownship.actor.effectiveRoles = ["DEPARTMENT_STAFF"];
+    expiredTownship.actor.capabilities = resolveCapabilities(["DEPARTMENT_STAFF"], new Set());
     const demand = await publishedDemand();
     await prisma.demandRecommendationRun.create({ data: { demandId: demand.id, stage: "CURRENT", status: "SUCCEEDED", triggerType: "ADMIN", rulesVersion: "test", currentKey: 1, finishedAt: new Date() } });
 
     const alumniRun = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "ALUMNI" }, idempotencyKey: randomUUID() });
     await service.executeRun(alumniRun.runId, new AIService(providerFor([platform.person.id, historical.id])));
-    const adminView = await service.getRecommendations({ actor: admin.actor, demandId: demand.id });
+    await consumeRecommendationOutbox(demand.id);
+    let adminView = await service.getRecommendations({ actor: admin.actor, demandId: demand.id });
     expect(adminView.items.map(({ candidateKind }) => candidateKind).sort()).toEqual(["ALUMNI_HISTORICAL", "ALUMNI_PLATFORM"]);
-    const platformItem = adminView.items.find(({ person }) => person.id === platform.person.id)!;
-    const historicalItem = adminView.items.find(({ person }) => person.id === historical.id)!;
-    await service.respond({ actor: platform.actor, demandId: demand.id, itemId: platformItem.id, body: { response: "WILLING" } });
+    let platformItem = adminView.items.find(({ person }) => person.id === platform.person.id)!;
+    let historicalItem = adminView.items.find(({ person }) => person.id === historical.id)!;
+    expect(adminView.townshipHandlerOptions.map(({ id }) => id)).toContain(handler.person.id);
+    expect(adminView.townshipHandlerOptions.map(({ id }) => id)).not.toContain(appointmentOnly.person.id);
+    expect(adminView.townshipHandlerOptions.map(({ id }) => id)).not.toContain(expiredTownship.person.id);
+    expect((await service.getRecommendations({ actor: appointmentOnly.actor, demandId: demand.id })).items).toEqual([]);
+    expect((await service.getRecommendations({ actor: expiredTownship.actor, demandId: demand.id })).items).toEqual([]);
+    expect((await service.getRecommendations({ actor: handler.actor, demandId: demand.id })).items).toHaveLength(2);
+    await expect(service.respond({ actor: appointmentOnly.actor, demandId: demand.id, itemId: historicalItem.id, body: { response: "DECLINE", responseNote: "不得泄露推荐项" } })).rejects.toMatchObject({ code: "DEMAND_RECOMMENDATION_ITEM_NOT_FOUND" });
+    await expect(service.respond({ actor: expiredTownship.actor, demandId: demand.id, itemId: historicalItem.id, body: { response: "DECLINE", responseNote: "不得泄露推荐项" } })).rejects.toMatchObject({ code: "DEMAND_RECOMMENDATION_ITEM_NOT_FOUND" });
+    expect(await prisma.message.count({ where: { personId: platform.person.id, messageType: "DEMAND_RECOMMENDED_ALUMNI", aggregateId: demand.id } })).toBe(1);
+    expect(await prisma.todo.count({ where: { personId: platform.person.id, todoType: "DEMAND_ALUMNI_RESPONSE", aggregateId: demand.id, status: "OPEN" } })).toBe(1);
+    expect(await prisma.message.count({ where: { personId: historical.id, aggregateId: demand.id } })).toBe(0);
+    expect(await prisma.todo.count({ where: { personId: historical.id, aggregateId: demand.id } })).toBe(0);
+    const replacementRun = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "ALUMNI" }, idempotencyKey: randomUUID() });
+    await service.executeRun(replacementRun.runId, new AIService(providerFor([replacementPlatform.person.id, historical.id])));
+    await consumeRecommendationOutbox(demand.id);
+    expect(await prisma.todo.count({ where: { personId: platform.person.id, todoType: "DEMAND_ALUMNI_RESPONSE", aggregateId: demand.id, status: "STALE" } })).toBe(1);
+    expect(await prisma.todo.count({ where: { personId: replacementPlatform.person.id, todoType: "DEMAND_ALUMNI_RESPONSE", aggregateId: demand.id, status: "OPEN" } })).toBe(1);
+    adminView = await service.getRecommendations({ actor: admin.actor, demandId: demand.id });
+    platformItem = adminView.items.find(({ person }) => person.id === replacementPlatform.person.id)!;
+    historicalItem = adminView.items.find(({ person }) => person.id === historical.id)!;
+    await service.respond({ actor: replacementPlatform.actor, demandId: demand.id, itemId: platformItem.id, body: { response: "WILLING" } });
+    await consumeRecommendationOutbox(demand.id);
+    expect(await prisma.todo.count({ where: { personId: replacementPlatform.person.id, todoType: "DEMAND_ALUMNI_RESPONSE", aggregateId: demand.id, status: "COMPLETED" } })).toBe(1);
     await service.respond({ actor: handler.actor, demandId: demand.id, itemId: historicalItem.id, body: { response: "DECLINE", responseNote: "电话联系后表示近期无法参与" } });
     await expect(service.activateAlumniHelp({ actor: admin.actor, demandId: demand.id, body: { recommendationItemId: platformItem.id, townshipHandlerPersonId: admin.person.id, reason: "验证无效经办人不可激活" } })).rejects.toMatchObject({ code: "DEMAND_TOWNSHIP_HANDLER_INVALID" });
+    await expect(service.activateAlumniHelp({ actor: admin.actor, demandId: demand.id, body: { recommendationItemId: platformItem.id, townshipHandlerPersonId: appointmentOnly.person.id, reason: "只有任职没有角色" } })).rejects.toMatchObject({ code: "DEMAND_TOWNSHIP_HANDLER_INVALID" });
+    await expect(service.activateAlumniHelp({ actor: admin.actor, demandId: demand.id, body: { recommendationItemId: platformItem.id, townshipHandlerPersonId: expiredTownship.person.id, reason: "角色已经过期" } })).rejects.toMatchObject({ code: "DEMAND_TOWNSHIP_HANDLER_INVALID" });
     await service.activateAlumniHelp({ actor: admin.actor, demandId: demand.id, body: { recommendationItemId: platformItem.id, townshipHandlerPersonId: handler.person.id, reason: "往届本人已明确表达协助意愿" } });
+    await service.activateAlumniHelp({ actor: admin.actor, demandId: demand.id, body: { recommendationItemId: platformItem.id, townshipHandlerPersonId: handler.person.id, reason: "重复请求必须幂等" } });
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: "DEMAND_ALUMNI_HELP_ACTIVATED" } })).toBe(1);
+    await consumeRecommendationOutbox(demand.id);
+    await consumeRecommendationOutbox(demand.id, true);
     expect(await prisma.demand.findUniqueOrThrow({ where: { id: demand.id } })).toMatchObject({ status: "IN_PROGRESS", currentOwnerPersonId: null });
     expect(await prisma.demandOwnerHistory.count({ where: { demandId: demand.id } })).toBe(0);
     expect(await prisma.demandAlumniHelper.count({ where: { demandId: demand.id, activeKey: 1 } })).toBe(1);
     expect(await prisma.demandTownshipHandler.count({ where: { demandId: demand.id, activeKey: 1 } })).toBe(1);
-    await expect(service.getCurrentDemandResponsibility(demand.id)).resolves.toEqual({ mode: "ALUMNI_TOWNSHIP", townshipHandlerPersonId: handler.person.id, alumniHelperPersonIds: [platform.person.id] });
+    expect(await prisma.message.count({ where: { personId: handler.person.id, messageType: "DEMAND_ALUMNI_HELP_ACTIVATED", aggregateId: demand.id } })).toBe(1);
+    expect(await prisma.message.count({ where: { personId: replacementPlatform.person.id, messageType: "DEMAND_ALUMNI_HELP_ACTIVATED", aggregateId: demand.id } })).toBe(1);
+    await expect(service.getCurrentDemandResponsibility(demand.id)).resolves.toEqual({ mode: "ALUMNI_TOWNSHIP", townshipHandlerPersonId: handler.person.id, alumniHelperPersonIds: [replacementPlatform.person.id] });
   }, 30_000);
 
   it("requires explicit replacement at three and retains prior recommendation history", async () => {
@@ -212,6 +296,7 @@ describe("M1-005 real MySQL recommendation", () => {
     const demand = await publishedDemand();
     const first = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT" }, idempotencyKey: randomUUID() });
     await service.executeRun(first.runId, new AIService(providerFor(candidates.slice(0, 3).map(({ person }) => person.id))));
+    await consumeRecommendationOutbox(demand.id);
     const before = await service.getRecommendations({ actor: admin.actor, demandId: demand.id });
     expect(before.items).toHaveLength(3);
     const manualBody = { stage: "CURRENT", personId: candidates[3].person.id, reason: "管理员根据线下已核实专长人工推荐", replaceItemId: before.items[0].id };
@@ -219,11 +304,17 @@ describe("M1-005 real MySQL recommendation", () => {
     await expect(service.manualAdd({ actor: candidates[0].actor, demandId: demand.id, body: manualBody })).rejects.toMatchObject({ code: "FORBIDDEN_CAPABILITY" });
     await expect(service.manualAdd({ actor: admin.actor, demandId: demand.id, body: { ...manualBody, personId: admin.person.id } })).rejects.toMatchObject({ code: "DEMAND_RECOMMENDATION_STAGE_INVALID" });
     await expect(service.manualAdd({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT", personId: candidates[3].person.id, reason: "管理员根据线下已核实专长人工推荐", replaceItemId: null } })).rejects.toMatchObject({ code: "DEMAND_RECOMMENDATION_MANUAL_REPLACE_REQUIRED" });
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: "DEMAND_RECOMMENDED_CURRENT" } })).toBe(1);
     const result = await service.manualAdd({ actor: admin.actor, demandId: demand.id, body: manualBody });
+    await consumeRecommendationOutbox(demand.id);
     expect(result.itemCount).toBe(3);
     expect(await prisma.demandRecommendationRun.count({ where: { demandId: demand.id } })).toBe(2);
     expect(await prisma.demandRecommendationItem.count({ where: { runId: first.runId } })).toBe(3);
     expect(await prisma.demandRecommendationRun.count({ where: { demandId: demand.id, stage: "CURRENT", currentKey: 1 } })).toBe(1);
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: demand.id, eventType: "DEMAND_RECOMMENDED_CURRENT" } })).toBe(2);
+    for (const person of candidates) {
+      expect(await prisma.message.count({ where: { personId: person.person.id, messageType: "DEMAND_RECOMMENDED_CURRENT", aggregateId: demand.id } })).toBe(1);
+    }
   }, 30_000);
 
   it("serializes two successful runs and the claim-versus-alumni-activation race", async () => {
@@ -245,6 +336,7 @@ describe("M1-005 real MySQL recommendation", () => {
     ]);
     expect(await prisma.demandRecommendationRun.count({ where: { demandId: concurrentDemand.id, stage: "CURRENT", currentKey: 1 } })).toBe(1);
     expect(await prisma.demandRecommendationRun.count({ where: { id: { in: [runA.runId, runB.runId] }, status: "SUCCEEDED" } })).toBe(2);
+    expect(await prisma.outboxEvent.count({ where: { aggregateId: concurrentDemand.id, eventType: "DEMAND_RECOMMENDED_CURRENT" } })).toBe(1);
 
     const organization = await prisma.organization.create({ data: { name: `M1-005 竞态镇区单位 ${randomUUID()}`, type: "TOWNSHIP_ORG" } });
     await prisma.organizationAreaMapping.create({ data: { organizationId: organization.id, areaId, effectiveAt: new Date("2026-01-01") } });
@@ -266,6 +358,11 @@ describe("M1-005 real MySQL recommendation", () => {
     const handlerCount = await prisma.demandTownshipHandler.count({ where: { demandId: racedDemand.id, activeKey: 1 } });
     expect(state.status).toBe("IN_PROGRESS");
     expect([state.currentOwnerPersonId !== null && ownerCount === 1 && helperCount === 0 && handlerCount === 0, state.currentOwnerPersonId === null && ownerCount === 0 && helperCount === 1 && handlerCount === 1]).toContain(true);
+    const [claimNotificationCount, activationNotificationCount] = await Promise.all([
+      prisma.outboxEvent.count({ where: { aggregateId: racedDemand.id, eventType: "DEMAND_CLAIMED" } }),
+      prisma.outboxEvent.count({ where: { aggregateId: racedDemand.id, eventType: "DEMAND_ALUMNI_HELP_ACTIVATED" } }),
+    ]);
+    expect(state.currentOwnerPersonId ? [claimNotificationCount, activationNotificationCount] : [activationNotificationCount, claimNotificationCount]).toEqual([1, 0]);
   }, 30_000);
 
   it("fails safely with zero or multiple current batches and keeps the prior current result visible", async () => {
@@ -302,20 +399,35 @@ describe("M1-005 real MySQL recommendation", () => {
 
   it("repairs illegal provider output once, persists an evidence-backed fallback, and sends no sensitive fields", async () => {
     const admin = await accountPerson(["ADMIN"]);
-    await Promise.all(Array.from({ length: 5 }, () => accountPerson(["MEMBER_CURRENT"], { current: true, profile: true })));
+    const candidates = await Promise.all(Array.from({ length: 5 }, () => accountPerson(["MEMBER_CURRENT"], { current: true, profile: true })));
     const demand = await publishedDemand();
+    const phone = "13912345678";
+    const identity = "32010219900101123X";
+    const email = "mysql-pii@example.com";
+    const piiText = `智能制造 ${phone} ${identity} ${email}`;
+    await prisma.demand.update({ where: { id: demand.id }, data: { originalDescription: piiText } });
+    await prisma.memberCapabilityProfile.update({ where: { personId: candidates[0].person.id }, data: { professionalDirection: piiText, coordinatableResources: piiText } });
     const run = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT" }, idempotencyKey: randomUUID() });
     const invalid = { recommendations: [{ candidateId: randomUUID(), reason: "伪造的候选人不应被接受。", evidenceKeys: ["INDUSTRY"] }] };
     const fake = new FakeDemandMatchProvider([invalid, invalid]);
     await service.executeRun(run.runId, new AIService(fake));
     expect(fake.requests.map(({ attempt }) => attempt)).toEqual(["INITIAL", "REPAIR"]);
     expect(fake.requests[0].input.candidates.length).toBeGreaterThanOrEqual(5);
-    expect(JSON.stringify(fake.requests[0].input)).not.toMatch(/phone|contactPhone|help|reimbursement|手机号|报销/i);
+    const providerPayload = JSON.stringify(fake.requests[0].input);
+    expect(providerPayload).not.toContain(phone);
+    expect(providerPayload).not.toContain(identity);
+    expect(providerPayload).not.toContain(email);
+    expect(providerPayload).toContain("[REDACTED_PHONE]");
+    expect(providerPayload).not.toMatch(/contactPhone|help|reimbursement|手机号|报销/i);
     expect(await prisma.demandRecommendationRun.findUniqueOrThrow({ where: { id: run.runId } })).toMatchObject({ status: "FALLBACK_SUCCEEDED", errorCategory: "AI_OUTPUT_INVALID", currentKey: 1 });
     const items = await prisma.demandRecommendationItem.findMany({ where: { runId: run.runId }, orderBy: { rank: "asc" } });
     expect(items.length).toBeGreaterThan(0);
     expect(items.length).toBeLessThanOrEqual(3);
     expect(items.every((item) => item.source === "RULE_FALLBACK" && !/%|匹配度\s*\d/i.test(item.reason))).toBe(true);
     expect(items.every((item) => Array.isArray((item.evidenceSnapshotJson as { evidence?: unknown }).evidence))).toBe(true);
+    const persistedEvidence = JSON.stringify(items.map(({ evidenceSnapshotJson }) => evidenceSnapshotJson));
+    expect(persistedEvidence).toContain(phone);
+    expect(persistedEvidence).toContain(identity);
+    expect(persistedEvidence).toContain(email);
   }, 30_000);
 });

@@ -125,11 +125,31 @@ export function deterministicRuleFallback(candidates: readonly RecommendationCan
     }));
 }
 
+const AI_EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+const AI_ID_PATTERN = /(?<!\d)(?:\d{17}[\dXx]|\d{15})(?![\dXx])/g;
+const AI_PHONE_PATTERN = /(?<!\d)1[3-9]\d{9}(?!\d)/g;
+
+export function sanitizeAiText(value: string): string {
+  return value
+    .replace(AI_EMAIL_PATTERN, "[REDACTED_EMAIL]")
+    .replace(AI_ID_PATTERN, "[REDACTED_ID]")
+    .replace(AI_PHONE_PATTERN, "[REDACTED_PHONE]");
+}
+
+export function sanitizeAiValue<T>(value: T): T {
+  if (typeof value === "string") return sanitizeAiText(value) as T;
+  if (Array.isArray(value)) return value.map((item) => sanitizeAiValue(item)) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeAiValue(item)])) as T;
+  }
+  return value;
+}
+
 export function toSanitizedDemandMatchInput(
   demand: RecommendationDemandFacts,
   candidates: readonly RecommendationCandidateFacts[],
 ): DemandMatchInput {
-  return {
+  const providerInput: DemandMatchInput = {
     demand: structuredClone(demand),
     candidates: candidates.map(({ candidateId, professionalDirection, industries, coordinatableResources, preferredDemandTypes, personalIntroduction, currentOwnedDemandCount, recentActivity, evidence }) => ({
       candidateId,
@@ -143,4 +163,5 @@ export function toSanitizedDemandMatchInput(
       evidence: structuredClone(evidence),
     })),
   };
+  return sanitizeAiValue(providerInput);
 }
