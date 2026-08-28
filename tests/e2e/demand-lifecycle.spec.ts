@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser } from "@playwright/test";
 import { getPrismaClient } from "@/lib/db/prisma";
+import { shanghaiDateString } from "@/modules/demand";
 import { DEMAND_LIFECYCLE_NOTIFICATION_EVENTS, DemandProgressCloseNotificationHandler } from "@/modules/outbox/handlers/demand-progress-close-notification-handler";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { e2eUsers, enterpriseE2e, seedAuthFixtures } from "./auth-fixtures";
@@ -109,7 +110,8 @@ test("owner progress and close review are available in both mobile and admin det
   page = authenticated.page;
   await page.goto(`/admin/demands/${demand.id}`);
   await page.locator('textarea[name="townshipVerificationResult"]').fill("已联系企业核验，方案和资源均已落地");
-  await page.getByRole("button", { name: "确认办结" }).click();
+  await page.getByLabel("不跟踪").check();
+  await page.getByRole("button", { name: "确认办结并建立成效计划" }).click();
   await expect(page.getByText("需求已办结", { exact: true })).toBeVisible();
   await expect(page.getByText("已办结", { exact: true }).first()).toBeVisible();
   expect(await prisma.demandProgress.count({ where: { demandId: demand.id } })).toBe(2);
@@ -239,9 +241,23 @@ test("stale reminder closes after progress and alumni township can finish withou
   page = authenticated.page;
   await page.goto(`/admin/demands/${alumniDemand.id}`);
   await page.locator('textarea[name="townshipVerificationResult"]').fill("属地已核实往届资源实际落地");
-  await page.getByRole("button", { name: "确认办结" }).click();
+  await page.getByLabel("需要跟踪").check();
+  await page.locator('input[name="firstTrackingDate"]').fill(shanghaiDateString(new Date()));
+  await page.getByRole("button", { name: "确认办结并建立成效计划" }).click();
   await expect(page.getByText("需求已办结", { exact: true })).toBeVisible();
   expect(await prisma.demand.findUniqueOrThrow({ where: { id: alumniDemand.id } })).toMatchObject({ status: "COMPLETED", currentOwnerPersonId: null });
   expect(await prisma.demandOwnerHistory.count({ where: { demandId: alumniDemand.id } })).toBe(0);
+  await authenticated.context.close();
+
+  authenticated = await login(browser, e2eUsers.alumni);
+  page = authenticated.page;
+  await page.goto(`/demands/${alumniDemand.id}`);
+  await expect(page.getByRole("heading", { name: "填报本轮成效" })).toHaveCount(0);
+  await authenticated.context.close();
+
+  authenticated = await login(browser, e2eUsers.township);
+  page = authenticated.page;
+  await page.goto(`/demands/${alumniDemand.id}`);
+  await expect(page.getByRole("heading", { name: "填报本轮成效" })).toBeVisible();
   await authenticated.context.close();
 });

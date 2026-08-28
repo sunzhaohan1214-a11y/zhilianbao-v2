@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { outcomePlanSchema } from "./outcome-schemas";
 
 const trimmed = (maximum: number, minimum = 1) => z.string().trim().min(minimum).max(maximum);
 const optionalTrimmed = (maximum: number) => z.string().trim().max(maximum).optional();
@@ -232,9 +233,16 @@ export const reviewDemandCloseSchema = z.object({
   decision: z.enum(["APPROVE", "RETURN"]),
   townshipVerificationResult: plainText(5000),
   reason: optionalPlainText(500),
+  outcomePlan: outcomePlanSchema.optional(),
 }).strict().superRefine((value, context) => {
   if (value.decision === "RETURN" && !value.reason) {
     context.addIssue({ code: "custom", path: ["reason"], message: "退回时必须填写原因" });
+  }
+  if (value.decision === "RETURN" && value.outcomePlan) {
+    context.addIssue({ code: "custom", path: ["outcomePlan"], message: "退回办结时不能建立成效计划" });
+  }
+  if (value.decision === "APPROVE" && !value.outcomePlan) {
+    context.addIssue({ code: "custom", path: ["outcomePlan"], message: "通过办结时必须选择成效跟踪策略" });
   }
 });
 

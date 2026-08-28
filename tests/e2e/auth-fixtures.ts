@@ -95,9 +95,13 @@ export async function seedAuthFixtures() {
   })).map(({ id }) => id);
   const e2eProgressIds = (await prisma.demandProgress.findMany({ where: { demandId: { in: e2eDemandIds } }, select: { id: true } })).map(({ id }) => id);
   const e2eCloseRequestIds = (await prisma.demandCloseRequest.findMany({ where: { demandId: { in: e2eDemandIds } }, select: { id: true } })).map(({ id }) => id);
+  const e2eOutcomePlans = await prisma.demandOutcomePlan.findMany({ where: { demandId: { in: e2eDemandIds } }, select: { id: true } });
+  const e2eOutcomePlanIds = e2eOutcomePlans.map(({ id }) => id);
+  const e2eOutcomeRoundIds = (await prisma.demandOutcomeRound.findMany({ where: { demandId: { in: e2eDemandIds } }, select: { id: true } })).map(({ id }) => id);
   const e2eLifecycleAttachmentIds = (await prisma.attachmentLink.findMany({ where: { OR: [
     { entityType: "DEMAND_PROGRESS", entityId: { in: e2eProgressIds } },
     { entityType: "DEMAND_CLOSE_REQUEST", entityId: { in: e2eCloseRequestIds } },
+    { entityType: "DEMAND_OUTCOME_ROUND", entityId: { in: e2eOutcomeRoundIds } },
   ] }, select: { attachmentId: true } })).map(({ attachmentId }) => attachmentId);
   await prisma.todo.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: e2eDemandIds } } });
   await prisma.message.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: e2eDemandIds } } });
@@ -106,12 +110,16 @@ export async function seedAuthFixtures() {
   await prisma.attachmentLink.deleteMany({ where: { OR: [
     { entityType: "DEMAND_PROGRESS", entityId: { in: e2eProgressIds } },
     { entityType: "DEMAND_CLOSE_REQUEST", entityId: { in: e2eCloseRequestIds } },
+    { entityType: "DEMAND_OUTCOME_ROUND", entityId: { in: e2eOutcomeRoundIds } },
   ] } });
   await prisma.demandCloseReview.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandProgressReminder.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandOwnerExitRequest.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandProgress.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandCloseRequest.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.jobTask.deleteMany({ where: { jobType: "DEMAND_OUTCOME_DUE", idempotencyKey: { startsWith: "demand-outcome-due:" } } });
+  await prisma.demandOutcomeRound.deleteMany({ where: { id: { in: e2eOutcomeRoundIds } } });
+  await prisma.demandOutcomePlan.deleteMany({ where: { id: { in: e2eOutcomePlanIds } } });
   await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: e2eLifecycleAttachmentIds } } });
   await prisma.attachment.deleteMany({ where: { id: { in: e2eLifecycleAttachmentIds } } });
   await prisma.demandAlumniHelper.deleteMany({ where: { demandId: { in: e2eDemandIds } } });

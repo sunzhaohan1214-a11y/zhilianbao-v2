@@ -266,7 +266,7 @@ AI运行可返回：
 | `POST /demands/:id/progress` | `demand.progress.add`，并通过当前责任关系校验 | 必须 | `currentProgress`、`nextStep` 必填；可带 `attachmentIds`、受控 `representedPersonId` |
 | `POST /demands/:id/group-leader-remind` | 有效 `GROUP_LEADER` / `MINISTER` 且 `demand.team_coordinator.remind` | 否 | body 为 `{}`；仅真正 stale 的 `IN_PROGRESS` Demand |
 | `POST /demands/:id/submit-close` | `demand.close.submit`；仅 current owner 或 current township handler | 必须 | `solution`、`connectedResources` 必填，可带 `attachmentIds` |
-| `POST /demands/:id/review-close` | ADMIN / SUPER 且 `demand.close.review` | 否 | `townshipVerificationResult` 必填；RETURN 时 `reason` 必填 |
+| `POST /demands/:id/review-close` | ADMIN / SUPER 且 `demand.close.review` | 否 | `townshipVerificationResult` 必填；RETURN 时 `reason` 必填且禁止 `outcomePlan`；APPROVE 时必须带 `outcomePlan={trackingMode:NONE}` 或 `{trackingMode:TRACKING,firstTrackingDate}` |
 | `POST /demands/:id/owner-exit` | `demand.owner.exit_request`；仅 CURRENT_OWNER 本人 | 必须 | `reason` 必填 |
 | `POST /demands/:id/owner-exit/review` | ADMIN / SUPER 且 `demand.owner.exit_review` | 否 | `decision=APPROVE/REJECT`；REJECT 时 `reviewReason` 必填 |
 | `POST /demands/:id/transfer-owner/preview` | 仅 SUPER 且 `demand.owner.transfer` | 否 | `newOwnerPersonId`、`reason`；返回 10 分钟 HMAC `impactToken` |
@@ -288,15 +288,18 @@ ALUMNI_TOWNSHIP
 
 # 8. Outcomes
 
-```text
-GET  /demands/:id/outcomes
-POST /demands/:id/outcome-plan
-POST /demands/:id/outcomes
-POST /demand-outcomes/:id/submit-review
-POST /demand-outcomes/:id/review
-```
+| Route | 身份与对象级规则 | `Idempotency-Key` | 关键请求/响应约束 |
+|---|---|---:|---|
+| `GET /demands/:id/outcomes` | 有效内部用户且 `demand.view` | 否 | 普通用户仅返回 APPROVED；负责镇区和 ADMIN/SUPER 可见活动轮次；返回 Decimal string `approvedTotals` |
+| `POST /demands/:id/outcome-plan` | ADMIN / SUPER 且 `demand.outcome.review` | 必须 | 仅为 `COMPLETED + completedAt` 完整且尚无 Plan 的历史需求补建；`NONE` 或 `TRACKING + firstTrackingDate` |
+| `POST /demands/:id/outcomes` | 负责镇区有效 `TOWNSHIP_STAFF` 且 `demand.outcome.fill` | 必须 | 仅到期 TRACKING Plan；保存本轮新增、实际 `trackingDate`、下一日期或结束二选一及可选佐证 |
+| `POST /demand-outcomes/:id/update` | 同上 | 否 | 仅 DRAFT/RETURNED；必须 `expectedVersion`，成功后 `editVersion+1` |
+| `POST /demand-outcomes/:id/submit-review` | 同上 | 必须 | 仅 DRAFT/RETURNED；必须 `expectedVersion` |
+| `POST /demand-outcomes/:id/review` | ADMIN / SUPER 且 `demand.outcome.review` | 必须 | `RETURN + reason` 或 `APPROVE + verifiedNote?`；无 PASSED 佐证时 APPROVE 必须 `verifiedNote` |
 
-服务端计算统计，不接受客户端提交“累计总额”。
+Outcome mutation strict schema 不接受累计字段、客户端状态、审核人、`trackingBatchId`、`verifiedNote`（镇区命令）或接收人。服务端只汇总 `reviewStatus=APPROVED` 的 increment 字段；金额统一序列化为两位小数字符串。
+
+Plan/Create/Submit/Review 复用 `DemandCommandIdempotency`：同 actor/action/key/object/payload 重放，不同对象或 payload 返回 `409 OUTCOME_IDEMPOTENCY_CONFLICT`。并发和业务错误使用 `OUTCOME_*` 代码；无权 403，不可发现 404，状态/版本/幂等冲突 409，业务约束 422。
 
 ---
 

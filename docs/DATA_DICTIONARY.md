@@ -602,13 +602,16 @@ response_note
 
 ## 8.1 DemandOutcomePlan
 
-```text
-demand_id
-tracking_mode: NONE/TRACKING
-first_tracking_date?
-next_tracking_date?
-status: NOT_TRACKED/PENDING/IN_PROGRESS/ENDED
-```
+| 字段 | 必填 | 口径/约束 |
+|---|---:|---|
+| `demand_id` | 是 | Demand 1:1 唯一；只允许 COMPLETED |
+| `tracking_mode` | 是 | `NONE/TRACKING`，形成后不可普通改写 |
+| `status` | 是 | `NOT_TRACKED/PENDING/IN_PROGRESS/ENDED` |
+| `first_tracking_date` | TRACKING | 上海自然日，不早于 `completed_at` 上海日期 |
+| `next_tracking_date` | 活动 TRACKING | Due 真源；ENDED/NOT_TRACKED 为空 |
+| `due_version` | 是 | NONE=0；TRACKING 从 1 起，每次通过继续递增 |
+| `ended_at` | ENDED | 正式结束时间；不得重开 |
+| `decided_by_person_id/decided_at` | 是 | 办结审核或历史补建决定快照 |
 
 ## 8.2 DemandOutcomeRound
 
@@ -622,10 +625,14 @@ status: NOT_TRACKED/PENDING/IN_PROGRESS/ENDED
 | `patent_increment` | **本轮新增数量** |
 | `qualitative_result` | 本轮定性成效 |
 | `enterprise_feedback` | 本轮反馈 |
-| `next_tracking_date` | 可空 |
-| `end_tracking` | 是否结束 |
+| `tracking_date` | 实际跟踪上海自然日，介于办结日和当前日 |
+| `tracking_batch_id` | 创建轮次时实际 current active Batch 快照，统计真源 |
+| `next_tracking_date` | 继续时必填且晚于 tracking_date；结束时必须空 |
+| `end_tracking` | 与 next_tracking_date 严格二选一 |
 | `review_status` | `DRAFT/PENDING_REVIEW/RETURNED/APPROVED` |
 | `verified_note` | 无附件时管理员线下核实说明 |
+| `edit_version` | 从 1 起；保存、提交、退回时递增，防旧页面覆盖 |
+| `active_key` | 活动轮次=1，APPROVED=NULL；同 Demand 唯一 |
 
 为什么使用“本轮新增”：
 
@@ -634,6 +641,8 @@ status: NOT_TRACKED/PENDING/IN_PROGRESS/ENDED
 若未来需要“当前累计值 / 时点值”，必须新建明确后缀字段，不得复用 increment 字段。
 
 正式统计只计算 `APPROVED`。
+
+正式 `approvedTotals` 字段为 `contractAmount/investmentAmount/policyFund/costReduction/talentIntroduced/patents`。金额 API 值为两位小数字符串。C 线报表必须按 `trackingBatchId + trackingDate` 汇总 APPROVED increment，不得按 completionBatch/currentFollowBatch 归属，也不得从客户端累计值计算。
 
 ---
 

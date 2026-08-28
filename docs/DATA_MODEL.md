@@ -1065,7 +1065,7 @@ canceledAt
 canceledReason
 ```
 
-`completedAt` 是办结审核批准时间；`completionBatchId` 是批准时校验仍为 ACTIVE 的 `currentFollowBatchId`。M1-006 不创建 Outcome，M1-007 只从 COMPLETED Demand 与最终批准的 CloseRequest/Review 接续。
+`completedAt` 是办结审核批准时间；`completionBatchId` 是批准时校验仍为 ACTIVE 的 `currentFollowBatchId`。M1-007 将办结 APPROVE 与唯一 OutcomePlan/首个 Due Job 纳入同一事务；历史 COMPLETED 且无 Plan 的需求只允许管理员一次补建。
 
 ---
 
@@ -1167,7 +1167,11 @@ TRACKING
 
 - 首次计划日期；
 - 当前下次跟踪日期；
-- 是否已结束。
+- `dueVersion`；
+- 是否已结束及 `endedAt`；
+- 办结审批人/补建管理员与决定时间。
+
+`Demand 1 — 0..1 DemandOutcomePlan`，`demandId` 唯一。状态为 `NOT_TRACKED | PENDING | IN_PROGRESS | ENDED`。NONE 只能对应 NOT_TRACKED 且日期为空；TRACKING 初始 `nextTrackingDate=firstTrackingDate,dueVersion=1`。Plan 形成后没有普通改写或重开接口。
 
 ---
 
@@ -1181,26 +1185,21 @@ Demand 1 — N DemandOutcomeRound
 
 每轮保存：
 
-- 跟踪时间；
-- 定量字段；
+- `roundNo`、上海自然日 `trackingDate` 与创建时唯一 current active Batch 的 `trackingBatchId` 快照；
+- Decimal(18,2) 金额和 unsigned integer 数量的本轮新增值；
 - 定性说明；
 - 下次跟踪日期；
 - 是否结束；
-- 审核状态；
+- `DRAFT | PENDING_REVIEW | RETURNED | APPROVED` 审核状态；
 - 填报镇区 / 人员；
-- 管理员审核。
+- 提交/审核人和时间、退回原因、线下核实说明；
+- `editVersion` 乐观版本与 `activeKey` 当前轮次唯一键。
 
 只有审核通过轮次进入正式统计。
 
-数值字段后续 DATA_DICTIONARY 必须标明：
+数值字段全部固定为“本轮新增”，不保存客户端累计。`UNIQUE(demandId,roundNo)` 和 `UNIQUE(demandId,activeKey)` 保证轮号及 DRAFT/PENDING_REVIEW/RETURNED 活动轮次唯一；APPROVED 后 `activeKey=NULL` 并保持不可修改。
 
-```text
-本轮新增
-当前累计
-时点值
-```
-
-不得混用。
+Reporting 交接契约：只读取 `DemandOutcomeRound.reviewStatus=APPROVED`；金额和数量 `SUM(increment)`；批次使用 `trackingBatchId`；时间使用 `trackingDate`，不得使用 `Demand.currentFollowBatchId` 代替。
 
 ---
 

@@ -1,14 +1,16 @@
-import type { DemandRecommendationService, FormalDemandService } from "@/modules/demand";
+import type { DemandOutcomeService, DemandRecommendationService, FormalDemandService } from "@/modules/demand";
 import { FormalDemandActions } from "./formal-demand-actions";
 import { FormalDemandParticipation } from "./formal-demand-participation";
 import { DemandRecommendations } from "./demand-recommendations";
 import { DemandLifecyclePanel } from "./demand-lifecycle-panel";
 import type { DemandLifecycleService } from "@/modules/demand";
+import { DemandOutcomePanel } from "./demand-outcome-panel";
 
 type Detail = Awaited<ReturnType<FormalDemandService["detail"]>>;
 type Timeline = Awaited<ReturnType<FormalDemandService["timeline"]>>;
 type Recommendations = Awaited<ReturnType<DemandRecommendationService["getRecommendations"]>>;
 type Lifecycle = Awaited<ReturnType<DemandLifecycleService["overview"]>>;
+type Outcomes = Awaited<ReturnType<DemandOutcomeService["overview"]>>;
 
 const statusLabel: Record<string, string> = {
   DRAFT: "草稿",
@@ -49,6 +51,7 @@ export function FormalDemandDetail({
   areas,
   recommendations,
   lifecycle,
+  outcomes,
   canEdit,
   canSubmit,
   canReview,
@@ -64,6 +67,7 @@ export function FormalDemandDetail({
   areas: { id: string; name: string }[];
   recommendations: Recommendations | null;
   lifecycle: Lifecycle | null;
+  outcomes: Outcomes | null;
   canEdit: boolean;
   canSubmit: boolean;
   canReview: boolean;
@@ -87,6 +91,8 @@ export function FormalDemandDetail({
       {recommendations && <DemandRecommendations demandId={demand.id} data={recommendations} />}
 
       {lifecycle && <DemandLifecyclePanel demandId={demand.id} overview={lifecycle} />}
+
+      {outcomes && demand.status === "COMPLETED" && <DemandOutcomePanel demandId={demand.id} data={outcomes} />}
 
       {demand.latestReturnReason && <article className="rounded-2xl border border-red-200 bg-red-50 p-5"><p className="text-sm font-medium text-red-700">最新退回原因</p><p className="mt-2 whitespace-pre-wrap text-red-950">{demand.latestReturnReason}</p></article>}
 

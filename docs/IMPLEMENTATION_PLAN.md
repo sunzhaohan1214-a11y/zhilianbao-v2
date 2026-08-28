@@ -228,13 +228,14 @@ AI失败不阻止业务。
 
 ## M1.7 Outcome
 
-状态：未开始；不得由 M1.6 办结逻辑提前实现。
+状态：A-M1-007 已实现，当前 PR 待创建并合并前保持开放。
 
-- 跟踪计划；
-- 多轮；
-- 镇区填报；
-- 管理员审核；
-- 统计字段。
+- 办结 APPROVE 原子创建 NONE/TRACKING Plan，历史 COMPLETED 可一次补建；
+- 多轮 DRAFT/RETURNED/PENDING_REVIEW/APPROVED、editVersion 与 activeKey 并发保护；
+- 负责镇区填报，ADMIN/SUPER 审核，PASSED evidence 或 verifiedNote；
+- dueVersion Job、Outcome Outbox/Message/Todo 与终态清理；
+- 仅 APPROVED increment 的服务端合计，trackingBatchId/trackingDate 为后续 Reporting 真源；
+- 移动端与管理端同一 Demand 详情完成填报、退回、审核、结束。
 
 ## M1.8 Home
 
@@ -506,9 +507,9 @@ M1-003 demand review
 M1-004 demand claim
 M1-005 collaboration
 M1-006 recommendation
-M1-007 progress/close
-M1-008 outcome
-M1-009 home
+M1-006 progress/close
+M1-007 outcome
+M1-008 home
 ```
 
 后续再按模块继续拆。

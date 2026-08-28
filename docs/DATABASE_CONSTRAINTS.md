@@ -274,6 +274,23 @@ APPROVED/REJECTED => active_key IS NULL AND reviewed_at IS NOT NULL
 
 进展、Reminder、CloseRequest/Review、OwnerExitRequest 的 Demand/Person/OwnerHistory FK 全部采用同一删除限制策略。关键写事务统一先锁 Demand，再处理 OwnerHistory、CloseRequest、ExitRequest 与 Collaboration，避免只靠页面或先查后写。
 
+## 10.2 M1-007 Demand Outcome
+
+迁移 `20260901100000_m1_demand_outcome` 为 expand-only，只新增 `demand_outcome_plans`、`demand_outcome_rounds`、索引、CHECK 与 RESTRICT FK。
+
+Plan 使用 `UNIQUE(demand_id)`。CHECK 锁定 NONE/NOT_TRACKED 的空日期形态、TRACKING 活动态的日期与 `due_version>=1`、ENDED 的 `next_tracking_date=NULL + ended_at`。办结 APPROVE 在锁定 Demand 的事务内同时写 COMPLETED、CloseReview、Plan、首个 Due Job、Audit/Transition/Outbox；任一失败整体回滚。历史补建同样锁 Demand。
+
+Round 使用：
+
+```text
+UNIQUE(demand_id, round_no)
+UNIQUE(demand_id, active_key)
+```
+
+其中 DRAFT/PENDING_REVIEW/RETURNED 的 `active_key=1`，APPROVED 为 NULL。CHECK 保证金额/数量非负、继续时下一日期必填且晚于 tracking_date、结束时下一日期为空。Service 仍锁 Demand 与 Round，校验 `editVersion`，因此 create/update/submit/review 并发只有一个合法结果。
+
+统计索引覆盖 `(demand_id,review_status,tracking_date)`、`(tracking_batch_id,review_status,tracking_date)` 与 `(outcome_plan_id,review_status,round_no)`。所有正式关系采用 `ON DELETE RESTRICT`。Due Job 使用唯一 `idempotency_key=demand-outcome-due:{planId}:{dueVersion}`；旧版本 Job 只读校验后 no-op，ENDED 时取消该 Plan 尚在 WAITING 的未来 Job。
+
 # 11. TalentTownshipRound
 
 同人才+区域最多一个IN_PROGRESS。
