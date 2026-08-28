@@ -8,6 +8,7 @@ import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { EnterpriseService } from "@/modules/enterprise/enterprise-service";
 import { MemberService, type MemberImportWrite } from "@/modules/member-foundation/member-service";
 import { TalentService } from "@/modules/talent/talent-service";
+import { matchPerson, normalizeImportPhone } from "@/modules/entity-matching";
 import { autoMapHeaders, importFieldRegistry, validateMapping } from "./field-registry";
 import { ImportExportError } from "./errors";
 import { buildPreviewRows } from "./preview";
@@ -43,6 +44,14 @@ function payloadHash(batchId: string, previewVersion: number): string {
   return createHash("sha256").update(JSON.stringify({ batchId, previewVersion, confirm: true })).digest("hex");
 }
 function keyHash(key: string): string { return createHash("sha256").update(key).digest("hex"); }
+function phoneIdentityHash(phone: string): string { return createHash("sha256").update(`PHONE:${normalizeImportPhone(phone)}`).digest("hex"); }
+function isIdempotencyUniqueViolation(error: unknown): boolean {
+  if (!(typeof error === "object" && error && "code" in error && error.code === "P2002")) return false;
+  const meta = "meta" in error && error.meta && typeof error.meta === "object" ? error.meta as Record<string, unknown> : {};
+  const target = Array.isArray(meta.target) ? meta.target.join(",") : String(meta.target ?? meta.constraint ?? "");
+  return target.includes("actor_person_id") && target.includes("action") && target.includes("key_hash")
+    || target.includes("import_command_idempotency_actor_person_id_action_key_hash_key");
+}
 const EXPLICIT_IDENTITY_REVIEW_CODES = new Set([
   "PERSON_SAME_NAME_DIFFERENT_PHONE", "PERSON_PHONE_DUPLICATED",
   "ENTERPRISE_NAME_AREA_CANDIDATE", "ENTERPRISE_CREDIT_CODE_DUPLICATED", "ENTERPRISE_PRIMARY_CONTACT_CONFLICT",
@@ -295,9 +304,9 @@ export class ImportService {
         fingerprint = reviewed.rowFingerprint;
       }
       if (body.action === "LINK_EXISTING") {
-        const exists = batch.importType === "ENTERPRISE" ? await tx.enterprise.count({ where: { id: body.matchedEntityId } })
-          : batch.importType === "MEMBER" ? await tx.person.count({ where: { id: body.matchedEntityId } }) : await tx.talent.count({ where: { id: body.matchedEntityId } });
-        if (exists !== 1) throw new ImportExportError("IMPORT_ROW_RESOLUTION_INVALID", "选择的正式对象不存在");
+        const exists = batch.importType === "ENTERPRISE" ? await tx.enterprise.count({ where: { id: body.matchedEntityId, status: "NORMAL" } })
+          : batch.importType === "MEMBER" ? await tx.person.count({ where: { id: body.matchedEntityId, personStatus: "ACTIVE" } }) : await tx.talent.count({ where: { id: body.matchedEntityId, status: { not: "MERGED" } } });
+        if (exists !== 1) throw new ImportExportError("IMPORT_ROW_RESOLUTION_INVALID", "选择的正式对象不存在或治理状态不允许通过导入处理");
       }
       const resolution = { action: body.action, matchedEntityId: body.matchedEntityId, correctedFields: Object.keys(corrections), reason: body.reason };
       await tx.importRow.update({ where: { id: row.id }, data: { normalizedJson: normalized as Prisma.InputJsonObject, action: body.action,
@@ -346,6 +355,7 @@ export class ImportService {
         if (!entityId) throw new ImportExportError("IMPORT_ROW_RESOLUTION_INVALID", "企业关联目标不存在");
         const before = await tx.enterprise.findUnique({ where: { id: entityId } });
         if (!before) throw new ImportExportError("IMPORT_ROW_RESOLUTION_INVALID", "企业关联目标不存在");
+        if (before.status !== "NORMAL") throw new ImportExportError("IMPORT_DISABLED_ENTERPRISE_REQUIRES_GOVERNANCE", "停用或已合并企业不能通过导入更新，请先完成企业治理");
         await tx.importApplySnapshot.create({ data: { batchId: batch.id, entityType: "ENTERPRISE", entityId, beforeJson: { id: before.id, name: before.name, responsibleAreaId: before.responsibleAreaId, address: before.address, creditCode: before.creditCode, currentVersion: before.currentVersion } } });
         if (row.action === "UPDATE" || (row.action === "LINK_EXISTING" && row.matchedEntityId)) {
           await this.enterprise.updateFromImportInTransaction(tx, { ...input, enterpriseId: entityId, changes: { ...core, tagIds: undefined }, reason }); action = "UPDATE";
@@ -360,6 +370,15 @@ export class ImportService {
     }
     if (batch.importType === "MEMBER") {
       let personId = row.matchedEntityId ?? createdPeople.get(value.phone);
+      if (!personId && row.action === "CREATE") {
+        const phone = normalizeImportPhone(value.phone);
+        await this.repository.lockPersonPhoneIdentity(tx, phoneIdentityHash(phone));
+        const currentCandidates = await this.repository.findPersonPhoneCandidatesForUpdate(tx, phone);
+        const currentMatch = matchPerson({ name: value.name, phone }, currentCandidates);
+        if (currentMatch.kind !== "CREATE") {
+          throw new ImportExportError("IMPORT_IDENTITY_CONFLICT", "手机号身份在预览后发生变化，整批已回滚，请刷新预览后重试");
+        }
+      }
       const member: MemberImportWrite = { personId, name: value.name, phone: value.phone, batchId: value.batchId,
         memberKind: value.memberKindCode as MemberImportWrite["memberKind"], dispatchOrganizationId: value.dispatchOrganizationId || undefined,
         postOrganizationId: value.postOrganizationId || undefined, positionTitle: value.positionTitle || undefined, startDate: toDate(value.startDate),
@@ -448,7 +467,7 @@ export class ImportService {
         linkedCount: Number((result as { linked?: number }).linked ?? 0), skippedCount: Number((result as { skipped?: number }).skipped ?? 0), duration: Date.now() - startedAt });
       return result;
     } catch (error) {
-      if (typeof error === "object" && error && "code" in error && error.code === "P2002") {
+      if (isIdempotencyUniqueViolation(error)) {
         const existing = await this.repository.prisma.importCommandIdempotency.findUnique({ where: { actorPersonId_action_keyHash: { actorPersonId: input.actor.personId, action: "CONFIRM", keyHash: hashedKey } } });
         if (existing && existing.batchId === input.batchId && existing.previewVersion === body.expectedPreviewVersion && existing.payloadHash === hashedPayload) return existing.responseJson;
         if (existing) throw new ImportExportError("IMPORT_IDEMPOTENCY_CONFLICT", "Idempotency-Key 已用于不同导入命令");

@@ -2762,5 +2762,7 @@ DATA_DICTIONARY.md
 - `ImportRow` 保存不可覆盖的原始行、标准化值、匹配候选、问题与人工 resolution；正式业务不得读取其作为业务数据。
 - `ImportCommandIdempotency` 固化同 actor/key/batch/preview 的确认结果。
 - `ImportApplySnapshot` 保存 Apply 前逻辑快照或 CREATE 产生的实体 ID，不提供任意一键生产回滚。
+- `PersonImportIdentityLock` 仅以标准化手机号的 SHA-256 作为持久 guard key，在正式 Apply 事务内串行化无 Account 人员的身份复核；它不是 Person 主键，也不替代 EntityMatcher。
+- `candidate_json` 可同时保存 `candidateIds` 与最小脱敏 `candidates` 摘要；人员包含姓名、脱敏手机号和档案/账号状态，企业包含区域、部分信用代码和状态，人才不包含本人电话、邮箱或简历链接。
 
 **DATA_MODEL.md v1.2 END**

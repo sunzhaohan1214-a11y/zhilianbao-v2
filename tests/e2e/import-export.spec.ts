@@ -47,12 +47,26 @@ async function uploadResolveAndConfirm(page: Page, buffer: Buffer) {
   await page.getByRole("button", { name: "上传并创建预览" }).click();
   await page.waitForURL(/\/admin\/imports\/[0-9a-f-]+$/);
   await expect(page.getByText("PREVIEW_READY", { exact: true })).toBeVisible();
+  await expect(page.getByText("安宜镇 · 信用代码：9132…T001 · 状态：正常")).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp(enterpriseE2e.enterpriseId.slice(0, 8)) })).toHaveCount(0);
   const resolution = page.waitForResponse((response) => response.url().includes("/resolve") && response.request().method() === "POST");
-  await page.getByRole("button", { name: `匹配 ${enterpriseE2e.enterpriseId.slice(0, 8)}` }).click();
+  await page.getByRole("button", { name: "选择 宝应智造示范企业" }).click();
   expect((await resolution).status()).toBe(200);
-  await expect(page.getByRole("button", { name: "二次确认并执行" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
+  await page.getByRole("button", { name: "确认导入" }).click();
+  const dialog = page.getByRole("dialog", { name: "确认执行正式导入" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/Preview Version/)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "确认执行导入" })).toBeDisabled();
+  const batchId = page.url().split("/").at(-1)!;
+  expect(await getPrismaClient().importBatch.findUniqueOrThrow({ where: { id: batchId }, select: { status: true } })).toEqual({ status: "PREVIEW_READY" });
+  await dialog.getByRole("button", { name: "取消" }).click();
+  await expect(dialog).toBeHidden();
+  expect(await getPrismaClient().importBatch.findUniqueOrThrow({ where: { id: batchId }, select: { status: true } })).toEqual({ status: "PREVIEW_READY" });
+  await page.getByRole("button", { name: "确认导入" }).click();
+  await page.getByLabel("我已核对预览结果与正式候选").check();
   const confirmation = page.waitForResponse((response) => response.url().endsWith("/confirm") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "二次确认并执行" }).click();
+  await page.getByRole("button", { name: "确认执行导入" }).click();
   expect((await confirmation).status()).toBe(200);
   await expect(page.getByText("SUCCEEDED", { exact: true })).toBeVisible();
 }
@@ -71,9 +85,11 @@ async function uploadMemberResolveAndConfirm(page: Page, buffer: Buffer) {
   const resolution = page.waitForResponse((response) => response.url().includes("/resolve") && response.request().method() === "POST");
   await page.getByRole("button", { name: "创建新记录" }).click();
   expect((await resolution).status()).toBe(200);
-  await expect(page.getByRole("button", { name: "二次确认并执行" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
+  await page.getByRole("button", { name: "确认导入" }).click();
+  await page.getByLabel("我已核对预览结果与正式候选").check();
   const confirmation = page.waitForResponse((response) => response.url().endsWith("/confirm") && response.request().method() === "POST");
-  await page.getByRole("button", { name: "二次确认并执行" }).click();
+  await page.getByRole("button", { name: "确认执行导入" }).click();
   expect((await confirmation).status()).toBe(200);
   await expect(page.getByText("SUCCEEDED", { exact: true })).toBeVisible();
 }

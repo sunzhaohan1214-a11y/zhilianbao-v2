@@ -20,6 +20,26 @@ export class ImportRepository {
     if (rows.length !== 1) throw new Error("IMPORT_ROW_LOCK_TARGET_NOT_FOUND");
   }
 
+  async lockPersonPhoneIdentity(tx: ImportTransaction, phoneHash: string): Promise<void> {
+    await tx.$executeRaw`INSERT INTO person_import_identity_locks (phone_hash) VALUES (${phoneHash}) ON DUPLICATE KEY UPDATE phone_hash = ${phoneHash}`;
+    const rows = await tx.$queryRaw<Array<{ phoneHash: string }>>`SELECT phone_hash AS phoneHash FROM person_import_identity_locks WHERE phone_hash = ${phoneHash} FOR UPDATE`;
+    if (rows.length !== 1) throw new Error("IMPORT_PERSON_IDENTITY_LOCK_NOT_FOUND");
+  }
+
+  findPersonPhoneCandidatesForUpdate(tx: ImportTransaction, phone: string) {
+    return tx.$queryRaw<Array<{
+      id: string;
+      name: string;
+      phone: string | null;
+      personStatus: "ACTIVE" | "ARCHIVED";
+      accountStatus: "PENDING_ENABLE" | "UNACTIVATED" | "NORMAL" | "DISABLED" | null;
+    }>>`SELECT p.id, p.name, CASE WHEN a.phone = ${phone} THEN a.phone ELSE p.contact_phone END AS phone, p.person_status AS personStatus, a.status AS accountStatus
+      FROM persons p
+      LEFT JOIN accounts a ON a.person_id = p.id
+      WHERE a.phone = ${phone} OR p.contact_phone = ${phone}
+      FOR UPDATE`;
+  }
+
   findBatch(id: string) {
     return this.prisma.importBatch.findUnique({ where: { id }, include: {
       createdByPerson: { select: { id: true, name: true } },

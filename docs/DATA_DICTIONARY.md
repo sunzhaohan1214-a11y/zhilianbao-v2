@@ -1362,4 +1362,8 @@ DemandOutcomeRound.review_status = APPROVED
 
 `raw_json` 永不被人工修正覆盖；修正后的值写 `normalized_json`，决策与原因写 `resolution_json`。
 
+`candidate_json` 保留兼容字段 `candidateIds`，并提供脱敏最小候选摘要供管理员消歧；不得放入完整手机号、人才本人联系方式、密码或 Session 数据。
+
+`PersonImportIdentityLock.phone_hash`：`CHAR(64)` 主键，仅保存 `SHA-256("PHONE:" + normalizedPhone)`，用于跨 ImportBatch 的正式 Apply 串行化。
+
 **DATA_DICTIONARY.md v1.1 END**

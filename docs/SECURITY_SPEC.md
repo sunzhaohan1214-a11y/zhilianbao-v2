@@ -293,5 +293,7 @@ CI建议检查：
 - 关键身份字段公式单元格阻断；普通公式仅可使用缓存值并产生 warning。
 - 导出文本以 `= + - @` 开头时前置单引号，防止 Formula Injection。
 - Preview 手机号默认脱敏，结构化日志和批次 Audit 不记录 raw row 或完整手机号。
+- 人工消歧只返回授权后的最小 Candidate Summary：人员手机号脱敏，企业信用代码部分脱敏，人才不返回本人电话、邮箱或简历地址；候选仍只存在于 ADMIN/SUPER Import detail。
+- 人员并发 guard 只持久化带类型前缀的手机号 SHA-256，不在 guard 或日志中保存手机号明文。
 
 **SECURITY_SPEC.md v1.0 END**

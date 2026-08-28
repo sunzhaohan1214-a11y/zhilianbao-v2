@@ -5,6 +5,7 @@ import { matchEnterprise, matchPerson, matchTalent, normalizeCreditCode, normali
 import { autoMapHeaders, importFieldRegistry, isProtectedImportHeader, validateMapping } from "@/modules/import-export/field-registry";
 import { rowFingerprint } from "@/modules/import-export/fingerprint";
 import { escapeExcelFormula, resolveEnterpriseExportAreaIds } from "@/modules/import-export/export-service";
+import { summarizeEnterpriseCandidate, summarizePersonCandidate, summarizeTalentCandidate } from "@/modules/import-export/preview";
 import { buildImportResultWorkbook, parseMappedSheet } from "@/modules/import-export/workbook";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 
@@ -57,12 +58,36 @@ describe("M3-005 entity matchers", () => {
     expect(matchPerson({ name: "张三", phone: "138-0000-0000" }, candidates)).toMatchObject({ kind: "INVALID" });
   });
 
+  it("blocks an exact archived person instead of creating a duplicate", () => {
+    const archived = [{ id: "archived", name: "归档人员", phone: "13800000000", personStatus: "ARCHIVED" as const, accountStatus: null }];
+    expect(matchPerson({ name: "归档人员", phone: "13800000000" }, archived)).toMatchObject({
+      kind: "REVIEW",
+      candidateIds: ["archived"],
+      issues: [expect.objectContaining({ code: "PERSON_ARCHIVED_REQUIRES_GOVERNANCE" })],
+    });
+  });
+
   it("uses enterprise credit code exactly and treats name-area without code as review only", () => {
     const candidates = [{ id: "e", name: "宝应装备有限公司", responsibleAreaId: "area", creditCode: "913210231234567890" }];
     expect(matchEnterprise({ name: "不同名称", responsibleAreaId: "other", creditCode: "913210231234567890" }, candidates)).toMatchObject({ kind: "EXACT", matchedEntityId: "e" });
     expect(matchEnterprise({ name: "宝应装备有限公司", responsibleAreaId: "area" }, candidates)).toMatchObject({ kind: "REVIEW" });
     expect(matchEnterprise({ name: "宝应装备有限公司", responsibleAreaId: "area", creditCode: "913210239999999999" }, candidates)).toMatchObject({ kind: "CREATE" });
     expect(matchEnterprise({ name: "宝应装备有限公司", responsibleAreaId: "other" }, candidates)).toMatchObject({ kind: "CREATE" });
+  });
+
+  it("requires governance for disabled and merged exact enterprise matches", () => {
+    const core = { id: "e", name: "停用企业", responsibleAreaId: "area", creditCode: "913210231234567890" };
+    expect(matchEnterprise({ name: core.name, responsibleAreaId: "area", creditCode: core.creditCode }, [{ ...core, status: "NORMAL" }])).toMatchObject({ kind: "EXACT" });
+    expect(matchEnterprise({ name: core.name, responsibleAreaId: "area", creditCode: core.creditCode }, [{ ...core, status: "DISABLED" }])).toMatchObject({ kind: "REVIEW", issues: [expect.objectContaining({ code: "ENTERPRISE_DISABLED_REQUIRES_GOVERNANCE" })] });
+    expect(matchEnterprise({ name: core.name, responsibleAreaId: "area", creditCode: core.creditCode }, [{ ...core, status: "MERGED" }])).toMatchObject({ kind: "REVIEW", issues: [expect.objectContaining({ code: "ENTERPRISE_MATCHED_MERGED" })] });
+  });
+
+  it("returns minimal masked candidate summaries", () => {
+    const person = summarizePersonCandidate({ id: "p", name: "张三", contactPhone: "13800001234", personStatus: "ARCHIVED", account: null });
+    expect(person).toEqual({ id: "p", name: "张三", maskedPhone: "138****1234", personStatus: "ARCHIVED", accountStatus: null });
+    expect(JSON.stringify(person)).not.toContain("13800001234");
+    expect(summarizeEnterpriseCandidate({ id: "e", name: "企业", responsibleAreaId: "a", responsibleArea: { name: "安宜镇" }, creditCode: "913210231234567890", status: "DISABLED" })).toEqual({ id: "e", name: "企业", areaName: "安宜镇", creditCodeMasked: "9132…7890", status: "DISABLED" });
+    expect(summarizeTalentCandidate({ id: "t", name: "人才", organizationName: "研究院", professionalDirection: "装备", status: "ACTIVE" })).toEqual({ id: "t", name: "人才", organizationName: "研究院", professionalDirection: "装备", status: "ACTIVE" });
   });
 
   it("never auto-merges talents", () => {

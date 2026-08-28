@@ -110,6 +110,9 @@ export class MemberService {
   ) {
     await authorizeActor({ actor: input.actor, action: "member.manage", resource: { resourceType: "member", requiredScope: "GLOBAL_OPERATIONAL" } });
     const value = input.member;
+    const batches = await tx.$queryRaw<Array<{ id: string; status: "PLANNED" | "ACTIVE" | "CLOSED" }>>`SELECT id, status FROM batches WHERE id = ${value.batchId} FOR UPDATE`;
+    if (batches.length !== 1) throw new FoundationError("BATCH_STATE_CONFLICT", "导入目标批次不存在");
+    if (value.memberKind === "CURRENT" && batches[0].status !== "ACTIVE") throw new FoundationError("BATCH_STATE_CONFLICT", "在任成员不能导入到非活动批次");
     let person = value.personId ? await tx.person.findUnique({ where: { id: value.personId }, include: { account: true } }) : null;
     if (value.personId && !person) throw new FoundationError("MEMBER_NOT_FOUND", "匹配的人员不存在");
     if (person) {
@@ -121,6 +124,7 @@ export class MemberService {
       await writeFoundationAudit(tx, { ...input, actionCode: "MEMBER_PERSON_CREATED", entityType: "PERSON", entityId: person.id, after: { name: value.name, source: "IMPORT" } });
     }
     if (!person) throw new FoundationError("MEMBER_NOT_FOUND", "人员不存在");
+    if (person.personStatus !== "ACTIVE") throw new FoundationError("MEMBER_STATE_CONFLICT", "已归档人员不能通过导入写入成员身份");
     if (person.account && person.account.phone !== value.phone) {
       throw new FoundationError("MEMBER_STATE_CONFLICT", "已有账号手机号不能通过导入修改");
     }

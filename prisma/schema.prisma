@@ -1388,6 +1388,13 @@ model ImportApplySnapshot {
   @@map("import_apply_snapshots")
 }
 
+model PersonImportIdentityLock {
+  phoneHash String   @id @map("phone_hash") @db.Char(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@map("person_import_identity_locks")
+}
+
 model Enterprise {
   id                     String                    @id @default(uuid()) @db.Char(36)
   name                   String                    @db.VarChar(200)

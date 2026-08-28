@@ -19,6 +19,29 @@ export type StagedImportRow = {
 
 type PreviewDatabase = Pick<PrismaClient, "enterprise" | "person" | "talent" | "administrativeArea" | "batch" | "organization">;
 
+type PersonCandidate = {
+  id: string;
+  name: string;
+  contactPhone: string | null;
+  personStatus: "ACTIVE" | "ARCHIVED";
+  account: { phone: string; status: "PENDING_ENABLE" | "UNACTIVATED" | "NORMAL" | "DISABLED" } | null;
+};
+type EnterpriseCandidate = {
+  id: string;
+  name: string;
+  responsibleAreaId: string;
+  creditCode: string | null;
+  status: "NORMAL" | "DISABLED" | "MERGED";
+  responsibleArea: { name: string };
+};
+type TalentCandidate = {
+  id: string;
+  name: string;
+  organizationName: string;
+  professionalDirection: string;
+  status: "ACTIVE" | "DISABLED" | "MERGED";
+};
+
 function issue(code: string, field: string | undefined, severity: MatchIssue["severity"], message: string, candidateIds?: string[]): MatchIssue {
   return { code, field, severity, message, candidateIds };
 }
@@ -50,6 +73,26 @@ function exactByName<T extends { id: string; name: string }>(items: readonly T[]
   const normalized = normalizeComparableText(name);
   return items.filter((item) => normalizeComparableText(item.name) === normalized);
 }
+function maskedPhone(value: string | null | undefined): string | null {
+  return value && /^1\d{10}$/.test(value) ? `${value.slice(0, 3)}****${value.slice(-4)}` : null;
+}
+function maskedCreditCode(value: string | null | undefined): string | null {
+  return value && value.length >= 8 ? `${value.slice(0, 4)}…${value.slice(-4)}` : null;
+}
+export function summarizePersonCandidate(person: PersonCandidate) {
+  return { id: person.id, name: person.name, maskedPhone: maskedPhone(person.account?.phone ?? person.contactPhone), personStatus: person.personStatus, accountStatus: person.account?.status ?? null };
+}
+export function summarizeEnterpriseCandidate(enterprise: EnterpriseCandidate) {
+  return { id: enterprise.id, name: enterprise.name, areaName: enterprise.responsibleArea.name, creditCodeMasked: maskedCreditCode(enterprise.creditCode), status: enterprise.status };
+}
+export function summarizeTalentCandidate(talent: TalentCandidate) {
+  return { id: talent.id, name: talent.name, organizationName: talent.organizationName, professionalDirection: talent.professionalDirection, status: talent.status };
+}
+function buildCandidateJson<T extends { id: string }>(candidateIds: readonly string[], candidates: readonly T[], summarize: (candidate: T) => object): Prisma.InputJsonObject | undefined {
+  if (!candidateIds.length) return undefined;
+  const wanted = new Set(candidateIds);
+  return { candidateIds: [...candidateIds], candidates: candidates.filter(({ id }) => wanted.has(id)).map(summarize) } as unknown as Prisma.InputJsonObject;
+}
 
 export async function buildPreviewRows(
   prisma: PreviewDatabase,
@@ -58,9 +101,9 @@ export async function buildPreviewRows(
   parsedRows: readonly ParsedImportRow[],
 ): Promise<StagedImportRow[]> {
   const [enterprises, people, talents, areas, batches, organizations] = await Promise.all([
-    importType === "ENTERPRISE" ? prisma.enterprise.findMany({ select: { id: true, name: true, responsibleAreaId: true, creditCode: true, address: true, legalRepresentative: true, introduction: true, mainProducts: true, qualificationsHonors: true, status: true, primaryContact: { select: { name: true, phone: true, status: true } } } }) : [],
-    importType === "MEMBER" || importType === "TALENT" ? prisma.person.findMany({ where: { personStatus: "ACTIVE" }, select: { id: true, name: true, contactPhone: true, account: { select: { phone: true, status: true } } } }) : [],
-    importType === "TALENT" ? prisma.talent.findMany({ where: { status: { not: "MERGED" } }, select: { id: true, name: true, organizationName: true, professionalDirection: true } }) : [],
+    importType === "ENTERPRISE" ? prisma.enterprise.findMany({ select: { id: true, name: true, responsibleAreaId: true, creditCode: true, address: true, legalRepresentative: true, introduction: true, mainProducts: true, qualificationsHonors: true, status: true, responsibleArea: { select: { name: true } }, primaryContact: { select: { name: true, phone: true, status: true } } } }) : [],
+    importType === "MEMBER" || importType === "TALENT" ? prisma.person.findMany({ select: { id: true, name: true, contactPhone: true, personStatus: true, account: { select: { phone: true, status: true } } } }) : [],
+    importType === "TALENT" ? prisma.talent.findMany({ where: { status: { not: "MERGED" } }, select: { id: true, name: true, organizationName: true, professionalDirection: true, status: true } }) : [],
     importType === "ENTERPRISE" ? prisma.administrativeArea.findMany({ where: { status: "ACTIVE", type: { in: ["TOWNSHIP", "PARK", "HIGH_TECH_ZONE", "DEVELOPMENT_ZONE"] } }, select: { id: true, name: true } }) : [],
     importType === "MEMBER" ? prisma.batch.findMany({ select: { id: true, name: true, status: true, startDate: true, endDate: true } }) : [],
     importType === "MEMBER" ? prisma.organization.findMany({ where: { status: "ACTIVE" }, select: { id: true, name: true, type: true } }) : [],
@@ -92,12 +135,13 @@ export async function buildPreviewRows(
         const match = matchEnterprise(core, enterprises);
         issues.push(...match.issues);
         matchedEntityId = match.matchedEntityId;
-        candidateJson = match.candidateIds.length ? { candidateIds: match.candidateIds } : undefined;
+        candidateJson = buildCandidateJson(match.candidateIds, enterprises, summarizeEnterpriseCandidate);
         if (match.kind === "CREATE") action = "CREATE";
         if (match.kind === "EXACT") {
           const existing = enterprises.find(({ id }) => id === match.matchedEntityId)!;
-          action = existing.status === "MERGED" ? "MANUAL_REVIEW" : "UPDATE";
-          if (existing.status === "MERGED") issues.push(issue("ENTERPRISE_MATCHED_MERGED", "creditCode", "REVIEW", "信用代码匹配到已合并企业"));
+          action = existing.status === "NORMAL" ? "UPDATE" : "MANUAL_REVIEW";
+          if (existing.status === "MERGED") issues.push(issue("ENTERPRISE_MATCHED_MERGED", "creditCode", "REVIEW", "信用代码匹配到已合并企业，需先通过企业治理流程处理"));
+          if (existing.status === "DISABLED") issues.push(issue("ENTERPRISE_DISABLED_REQUIRES_GOVERNANCE", "creditCode", "REVIEW", "信用代码匹配到已停用企业，需先通过企业治理流程处理"));
           if (booleanValue(normalized.contactPrimary) && existing.primaryContact?.status === "ACTIVE"
             && (existing.primaryContact.name !== normalized.contactName || existing.primaryContact.phone !== normalized.contactPhone)) {
             issues.push(issue("ENTERPRISE_PRIMARY_CONTACT_CONFLICT", "contactPrimary", "REVIEW", "企业已有其他有效主要联系人，需人工确认"));
@@ -131,7 +175,10 @@ export async function buildPreviewRows(
       else normalized.memberKindCode = kind;
       const batchMatches = exactByName(batches, normalized.batch);
       if (batchMatches.length !== 1) issues.push(issue("MEMBER_BATCH_AMBIGUOUS", "batch", "REVIEW", batchMatches.length ? "批次名称命中多条记录" : "批次不存在", batchMatches.map(({ id }) => id)));
-      else normalized.batchId = batchMatches[0].id;
+      else {
+        normalized.batchId = batchMatches[0].id;
+        if (kind === "CURRENT" && batchMatches[0].status !== "ACTIVE") issues.push(issue("MEMBER_CURRENT_BATCH_INACTIVE", "batch", "REVIEW", "在任成员只能导入到有效活动批次"));
+      }
       const start = dateValue(normalized.startDate);
       const end = normalized.endDate ? dateValue(normalized.endDate) : undefined;
       if (!start || (normalized.endDate && !end) || (start && end && end < start)) issues.push(issue("MEMBER_DATE_INVALID", "startDate", "ERROR", "任期日期格式或区间不正确"));
@@ -142,11 +189,12 @@ export async function buildPreviewRows(
         else normalized[`${field}Id`] = matches[0].id;
       }
       if (kind === "HISTORICAL_ALUMNI" && booleanValue(normalized.createAccount)) issues.push(issue("HISTORICAL_ACCOUNT_FORBIDDEN", "createAccount", "ERROR", "历史往届不能通过导入直接开户"));
-      const personCandidates = people.map((person) => ({ id: person.id, name: person.name, phone: person.account?.phone ?? person.contactPhone }));
+      const personCandidates = people.map((person) => ({ id: person.id, name: person.name, phone: person.account?.phone ?? person.contactPhone, phones: [person.account?.phone, person.contactPhone],
+        personStatus: person.personStatus, accountStatus: person.account?.status ?? null }));
       const match = matchPerson({ name: normalized.name, phone: normalized.phone }, personCandidates);
       issues.push(...match.issues);
       matchedEntityId = match.matchedEntityId;
-      candidateJson = match.candidateIds.length ? { candidateIds: match.candidateIds } : undefined;
+      candidateJson = buildCandidateJson(match.candidateIds, people, summarizePersonCandidate);
       if (match.kind === "CREATE") action = "CREATE";
       if (match.kind === "EXACT") action = "LINK_EXISTING";
       if (match.kind === "REVIEW") action = "MANUAL_REVIEW";
@@ -168,7 +216,7 @@ export async function buildPreviewRows(
       const scope = scopeType(normalized.scopeType);
       if (!scope) issues.push(issue("TALENT_SCOPE_INVALID", "scopeType", "ERROR", "人才范围必须是境内或境外"));
       else normalized.scopeTypeCode = scope;
-      const recommenders = exactByName(people.filter(({ account }) => account && account.status !== "DISABLED"), normalized.originalRecommender);
+      const recommenders = exactByName(people.filter(({ personStatus, account }) => personStatus === "ACTIVE" && account && account.status !== "DISABLED"), normalized.originalRecommender);
       if (recommenders.length !== 1) issues.push(issue("TALENT_RECOMMENDER_AMBIGUOUS", "originalRecommender", "REVIEW", recommenders.length ? "原推荐人姓名命中多个在册人员" : "原推荐人未匹配在册内部人员", recommenders.map(({ id }) => id)));
       else normalized.originalRecommenderPersonId = recommenders[0].id;
       const core = { name: normalized.name, scopeType: normalized.scopeTypeCode, organizationName: normalized.organizationName, title: normalized.title,
@@ -177,7 +225,7 @@ export async function buildPreviewRows(
       if (!talentCoreSchema.safeParse(core).success) issues.push(issue("TALENT_ROW_INVALID", undefined, "ERROR", "人才字段格式不正确"));
       const match = matchTalent({ name: normalized.name, organizationName: normalized.organizationName, professionalDirection: normalized.professionalDirection }, talents);
       issues.push(...match.issues);
-      candidateJson = match.candidateIds.length ? { candidateIds: match.candidateIds } : undefined;
+      candidateJson = buildCandidateJson(match.candidateIds, talents, summarizeTalentCandidate);
       action = match.kind === "CREATE" ? "CREATE" : match.kind === "INVALID" ? "INVALID" : "MANUAL_REVIEW";
     }
 

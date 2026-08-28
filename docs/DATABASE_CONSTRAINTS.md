@@ -480,5 +480,7 @@ RESTRICT / NO ACTION
 - 所有 staging、快照、幂等和源附件外键使用 `ON DELETE RESTRICT`。
 - Confirm 锁定 `ImportBatch` 并在一个事务内写全部正式实体、Version、业务 Audit、逻辑快照、结果和幂等记录。
 - 企业信用代码和账号手机号继续由正式唯一约束承担并发最终防线；只捕获明确目标冲突。
+- 无 Account 人员的手机号不对 `Person.contactPhone` 盲目加 UNIQUE；Apply 先锁定 `person_import_identity_locks(phone_hash)`，再以 locking current read 调用共享 Person Matcher 复核，跨批竞争 loser 整批回滚。
+- 人员 exact phone 必须覆盖 ACTIVE/ARCHIVED；ARCHIVED 以及 DISABLED/MERGED 企业不可通过 Import 创建替代档案、恢复或更新。
 
 **DATABASE_CONSTRAINTS.md v1.0 END**

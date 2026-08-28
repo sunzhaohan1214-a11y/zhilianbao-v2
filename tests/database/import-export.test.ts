@@ -65,7 +65,9 @@ afterAll(async () => {
   await prisma.memberCapabilityIndustry.deleteMany({ where: { personId: { in: importedPeople.map(({ id }) => id) } } }); await prisma.memberPreferredDemandType.deleteMany({ where: { personId: { in: importedPeople.map(({ id }) => id) } } });
   await prisma.memberCapabilityProfile.deleteMany({ where: { personId: { in: importedPeople.map(({ id }) => id) } } }); await prisma.roleAssignment.deleteMany({ where: { personId: { in: importedPeople.map(({ id }) => id) } } });
   await prisma.batchMembership.deleteMany({ where: { personId: { in: importedPeople.map(({ id }) => id) } } }); await prisma.account.deleteMany({ where: { id: { in: allAccounts } } });
-  await prisma.person.deleteMany({ where: { id: { in: allPeople } } }); await prisma.batch.delete({ where: { id: memberBatchId } }); await prisma.administrativeArea.deleteMany({ where: { id: { in: areaIds } } }); await prisma.$disconnect();
+  await prisma.person.deleteMany({ where: { id: { in: allPeople } } });
+  await prisma.personImportIdentityLock.deleteMany({ where: { phoneHash: { in: importedPhones.map((phone) => createHash("sha256").update(`PHONE:${phone}`).digest("hex")) } } });
+  await prisma.batch.delete({ where: { id: memberBatchId } }); await prisma.administrativeArea.deleteMany({ where: { id: { in: areaIds } } }); await prisma.$disconnect();
 });
 
 describe("M3-005 real MySQL atomic import", () => {
@@ -139,6 +141,7 @@ describe("M3-005 real MySQL atomic import", () => {
     ]);
     expect(settled.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(settled.filter(({ status }) => status === "rejected")).toHaveLength(1);
+    expect(settled.find(({ status }) => status === "rejected")).toMatchObject({ reason: { code: "IMPORT_IDENTITY_CONFLICT" } });
     const person = await prisma.person.findFirstOrThrow({ where: { contactPhone: phone } });
     expect(await prisma.person.count({ where: { contactPhone: phone } })).toBe(1);
     expect(await prisma.account.count({ where: { phone, personId: person.id } })).toBe(1);
@@ -146,6 +149,62 @@ describe("M3-005 real MySQL atomic import", () => {
     expect(await prisma.importApplySnapshot.count({ where: { batchId: { in: [first.id, second.id] }, createdEntityId: person.id } })).toBe(1);
     const statuses = await prisma.importBatch.findMany({ where: { id: { in: [first.id, second.id] } }, select: { status: true } });
     expect(statuses.map(({ status }) => status).sort()).toEqual(["FAILED", "SUCCEEDED"]);
+  });
+
+  it("serializes concurrent historical imports without accounts by a hashed phone guard", async () => {
+    const phone = `133${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
+    importedPhones.push(phone);
+    const rows = [["M3历史身份竞态", phone, memberBatchName, "历史往届", "2025-01-01", "否"]];
+    const [first, second] = await Promise.all([
+      createBatch("MEMBER", await workbook(["姓名", "手机号", "批次", "成员类型", "开始日期", "创建账号"], rows), "historical-race-a.xlsx"),
+      createBatch("MEMBER", await workbook(["姓名", "手机号", "批次", "成员类型", "开始日期", "创建账号"], rows), "historical-race-b.xlsx"),
+    ]);
+    expect(first).toMatchObject({ status: "PREVIEW_READY", blockingRowCount: 0 });
+    expect(second).toMatchObject({ status: "PREVIEW_READY", blockingRowCount: 0 });
+
+    const settled = await Promise.allSettled([
+      importService.confirm({ actor: admin, batchId: first.id, body: { confirm: true, expectedPreviewVersion: first.previewVersion }, idempotencyKey: randomUUID() }),
+      importService.confirm({ actor: admin, batchId: second.id, body: { confirm: true, expectedPreviewVersion: second.previewVersion }, idempotencyKey: randomUUID() }),
+    ]);
+    expect(settled.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(settled.filter(({ status }) => status === "rejected")).toHaveLength(1);
+    expect(settled.find(({ status }) => status === "rejected")).toMatchObject({ reason: { code: "IMPORT_IDENTITY_CONFLICT" } });
+    const person = await prisma.person.findFirstOrThrow({ where: { contactPhone: phone } });
+    expect(await prisma.person.count({ where: { contactPhone: phone } })).toBe(1);
+    expect(await prisma.account.count({ where: { personId: person.id } })).toBe(0);
+    expect(await prisma.batchMembership.count({ where: { personId: person.id, batchId: memberBatchId } })).toBe(1);
+    const batches = await prisma.importBatch.findMany({ where: { id: { in: [first.id, second.id] } }, select: { id: true, status: true } });
+    expect(batches.map(({ status }) => status).sort()).toEqual(["FAILED", "SUCCEEDED"]);
+    const loser = batches.find(({ status }) => status === "FAILED")!;
+    expect(await prisma.importApplySnapshot.count({ where: { batchId: loser.id } })).toBe(0);
+    expect(await prisma.importApplySnapshot.count({ where: { batchId: { in: [first.id, second.id] }, createdEntityId: person.id } })).toBe(1);
+  });
+
+  it("blocks an archived exact-phone person without restoring or duplicating the record", async () => {
+    const phone = `132${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
+    importedPhones.push(phone);
+    const archived = await prisma.person.create({ data: { name: "M3归档人员", contactPhone: phone, personStatus: "ARCHIVED" } });
+    const batch = await createBatch("MEMBER", await workbook(["姓名", "手机号", "批次", "成员类型", "开始日期", "创建账号"], [["M3归档人员", phone, memberBatchName, "历史往届", "2025-01-01", "否"]]), "archived-person.xlsx");
+    expect(batch).toMatchObject({ status: "PREVIEW_READY", blockingRowCount: 1 });
+    expect(batch.rows[0]).toMatchObject({ action: "MANUAL_REVIEW", resolutionStatus: "NEEDS_REVIEW" });
+    expect(batch.rows[0].issuesJson).toEqual(expect.arrayContaining([expect.objectContaining({ code: "PERSON_ARCHIVED_REQUIRES_GOVERNANCE" })]));
+    await expect(importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "IMPORT_BLOCKING_ROWS" });
+    expect(await prisma.person.count({ where: { contactPhone: phone } })).toBe(1);
+    expect(await prisma.person.findUniqueOrThrow({ where: { id: archived.id } })).toMatchObject({ personStatus: "ARCHIVED" });
+  });
+
+  it("requires governance for a disabled enterprise and never updates its formal fields", async () => {
+    const credit = `91321023${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
+    const disabled = await prisma.enterprise.create({ data: { name: "M3停用企业", responsibleAreaId: areaA, address: "原地址", creditCode: credit, mainProducts: "原产品", status: "DISABLED", createdByPersonId: admin.personId } });
+    enterpriseIds.push(disabled.id);
+    const areaName = (await prisma.administrativeArea.findUniqueOrThrow({ where: { id: areaA } })).name;
+    const batch = await createBatch("ENTERPRISE", await workbook(["企业名称", "信用代码", "镇区", "地址", "主营产品"], [["M3停用企业新名称", credit, areaName, "新地址", "新产品"]]), "disabled-enterprise.xlsx");
+    expect(batch).toMatchObject({ status: "PREVIEW_READY", blockingRowCount: 1 });
+    expect(batch.rows[0]).toMatchObject({ action: "MANUAL_REVIEW", resolutionStatus: "NEEDS_REVIEW" });
+    expect(batch.rows[0].issuesJson).toEqual(expect.arrayContaining([expect.objectContaining({ code: "ENTERPRISE_DISABLED_REQUIRES_GOVERNANCE" })]));
+    const resolved = await importService.resolveRow({ actor: admin, batchId: batch.id, rowId: batch.rows[0].id, body: { action: "SKIP", reason: "先走企业治理流程" } });
+    await importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: resolved.previewVersion }, idempotencyKey: randomUUID() });
+    expect(await prisma.enterprise.findUniqueOrThrow({ where: { id: disabled.id } })).toMatchObject({ name: "M3停用企业", address: "原地址", mainProducts: "原产品", status: "DISABLED" });
   });
 });
 
