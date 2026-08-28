@@ -14,6 +14,7 @@ import {
   type CurrentDemandResponsibilityDetails,
 } from "./demand-responsibility";
 import { DemandError, isDemandCommandIdempotencyUniqueConflict } from "./errors";
+import { createDemandOutcomePlanAtCompletionInTransaction } from "./demand-outcome-service";
 import { FormalDemandRepository, type FormalDemandTransaction } from "./repository/formal-demand-repository";
 import {
   addDemandProgressSchema,
@@ -426,6 +427,14 @@ export class DemandLifecycleService {
       const completionBatch = await tx.batch.findUnique({ where: { id: demand.currentFollowBatchId }, select: { id: true, status: true } });
       if (!completionBatch || completionBatch.status !== "ACTIVE") throw new DemandError("DEMAND_CLOSE_REVIEW_STATE_CONFLICT", "当前跟进批次无效，不能猜测实际办结批次");
       await tx.demand.update({ where: { id: demand.id }, data: { status: "COMPLETED", completedAt: now, completionBatchId: completionBatch.id } });
+      const outcomePlan = await createDemandOutcomePlanAtCompletionInTransaction(tx, {
+        actor: input.actor,
+        context: input.context,
+        demandId: demand.id,
+        completedAt: now,
+        decidedAt: now,
+        plan: command.outcomePlan!,
+      });
       await writeDemandTransition(tx, { actor: input.actor, entityType: "DEMAND", entityId: demand.id, fromState: "PENDING_CLOSE_REVIEW", toState: "COMPLETED", actionCode: "DEMAND_COMPLETED", metadata: { closeRequestId: active.id, reviewId: review.id, completionBatchId: completionBatch.id }, context: input.context });
       await writeDemandAudit(tx, { actor: input.actor, actionCode: "DEMAND_COMPLETED", entityType: "DEMAND", entityId: demand.id, before: { status: demand.status }, after: { status: "COMPLETED", completedAt: now.toISOString(), completionBatchId: completionBatch.id, reviewId: review.id }, context: input.context });
       await this.outbox.append({
@@ -436,7 +445,7 @@ export class DemandLifecycleService {
         dedupeKey: `demand-completed:${review.id}`,
         occurredAt: now,
       }, tx);
-      return { demandId: demand.id, closeRequestId: active.id, reviewId: review.id, status: "COMPLETED", decision: "APPROVE", completedAt: now.toISOString(), completionBatchId: completionBatch.id };
+      return { demandId: demand.id, closeRequestId: active.id, reviewId: review.id, status: "COMPLETED", decision: "APPROVE", completedAt: now.toISOString(), completionBatchId: completionBatch.id, outcomePlan: { id: outcomePlan.id, trackingMode: outcomePlan.trackingMode, status: outcomePlan.status } };
     });
   }
 

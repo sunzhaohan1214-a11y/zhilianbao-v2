@@ -477,6 +477,8 @@ action code 是技术映射，不改变 PRD 业务语义。
 - 修改其他镇区需求；
 - 人工改写 AI 推荐名单。
 
+成效填报还必须同时满足：账号有有效 `TOWNSHIP_STAFF`、`demand.outcome.fill`，且其有效镇区范围包含 Demand.responsibleAreaId。其他镇区无权。ADMIN/SUPER 不因管理角色获得填报权；只有同时持有上述镇区角色与范围时才可填报。
+
 ### 部门工作人员
 
 对负责镇区：
@@ -519,6 +521,10 @@ action code 是技术映射，不改变 PRD 业务语义。
 禁止：
 
 - 强制转交正式需求负责人。
+
+成效审核使用 `demand.outcome.review + GLOBAL_OPERATIONAL`，仅 ADMIN / SUPER_ADMIN。管理员只能 APPROVE/RETURN，不能代填镇区数据或把自己的附件加入 Round；无正式佐证时可写线下 `verifiedNote`。
+
+普通 MEMBER_CURRENT、MEMBER_ALUMNI_PLATFORM、GROUP_LEADER、MINISTER、DEPARTMENT_STAFF 只可按正式 Demand 可见范围读取 APPROVED 轮次和服务端合计，不能读取 DRAFT/RETURNED/PENDING_REVIEW，也不能调用 Outcome mutation。往届协助不会取得办结后的填报责任，仍由负责镇区承担。
 
 ### 超级管理员
 

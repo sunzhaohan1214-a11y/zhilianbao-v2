@@ -51,4 +51,20 @@ export function registerDemandAttachmentAuthorizers(registry: AttachmentParentAu
       return Boolean(request && !["DRAFT", "RETURNED", "PENDING_REVIEW"].includes(request.demand.status));
     },
   });
+
+  registry.register("DEMAND_OUTCOME_ROUND", {
+    async authorize({ actor, link }) {
+      if (!actor.capabilities.has("demand.view") || !actor.hasGlobalPublished) return false;
+      const round = await getPrismaClient().demandOutcomeRound.findUnique({
+        where: { id: link.entityId },
+        select: { reviewStatus: true, demand: { select: { responsibleAreaId: true, status: true } } },
+      });
+      if (!round || round.demand.status !== "COMPLETED") return false;
+      if (round.reviewStatus === "APPROVED") return true;
+      return (actor.capabilities.has("demand.outcome.review") && actor.hasGlobalOperational)
+        || (actor.capabilities.has("demand.outcome.fill")
+          && actor.effectiveRoles.includes("TOWNSHIP_STAFF")
+          && actor.townshipAreaIds.includes(round.demand.responsibleAreaId));
+    },
+  });
 }

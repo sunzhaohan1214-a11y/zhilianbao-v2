@@ -96,6 +96,23 @@ Playwright。
 
 至少1条完整端到端。
 
+### Demand Outcome（A-M1-007 critical）
+
+```text
+Close APPROVE + TRACKING + first date
+→ atomic Plan PENDING / one Due Job
+→ Due Message + OUTCOME_FILL
+→ township Draft / explicit save / submit
+→ ADMIN RETURN + reason
+→ township revise / resubmit
+→ ADMIN APPROVE + verifiedNote/evidence
+→ approvedTotals only
+→ final Round endTracking
+→ Plan ENDED / no OPEN Outcome Todo / no WAITING future Job
+```
+
+另测 NONE → NOT_TRACKED 且无填报按钮；普通内部只见 APPROVED；往届协助不获得填报入口。
+
 ### Visit Lead
 
 ```text
@@ -340,7 +357,21 @@ tests/e2e/demand-lifecycle.spec.ts
 - current batch member按Person去重；
 - 来离宝人数按Person去重；
 - 成效只统计APPROVED；
+- 成效金额/数量只 SUM increment，Decimal API 为 string；
+- 成效批次使用 Round.trackingBatchId，日期使用 trackingDate；
 - 无排名。
+
+## 13.1 A-M1-007 专项数据库与安全门禁
+
+- Close APPROVE 与 Plan/Job 失败整体回滚；NONE 无 Due Job；legacy Plan 双 ADMIN 仅一条；
+- 双镇区创建只有一个 active Round/roundNo；同 expectedVersion 双更新仅一个成功；Submit vs Update、APPROVE vs RETURN 各只有一个合法赢家；
+- APPROVED/RETURNED/APPROVED 三轮只合计两条 APPROVED；切 current Batch 后旧 Round 归属不漂移；
+- stale/duplicate Due 不生成重复 Outbox/Message/Todo；活动 Round 时 Due no-op；ENDED 取消 WAITING Job；
+- PENDING/FAILED scan 拒绝，PASSED 且当前填报人临时未关联附件才可 link；普通内部不可读活动 evidence，可读 APPROVED evidence；
+- responsible township 可填，其他 township、member、alumni、leader、minister、department、仅 ADMIN/SUPER 不可填；ADMIN/SUPER 可审核，双角色按两种身份合并；
+- APPROVED 不可 update/resubmit；strict schema 拒绝累计字段、镇区 verifiedNote、客户端状态和批次。
+
+本地无 Docker/MySQL 时不得把 Unit/Integration 结果写成真实数据库证明；`database` CI 必须执行空 MySQL 8.4 首次与重复 deploy、真实并发/事务测试。
 
 ## 14. Migration
 

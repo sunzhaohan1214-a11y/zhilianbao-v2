@@ -324,6 +324,25 @@ enum DemandOwnerExitStatus {
   REJECTED
 }
 
+enum DemandOutcomeTrackingMode {
+  NONE
+  TRACKING
+}
+
+enum DemandOutcomePlanStatus {
+  NOT_TRACKED
+  PENDING
+  IN_PROGRESS
+  ENDED
+}
+
+enum DemandOutcomeReviewStatus {
+  DRAFT
+  PENDING_REVIEW
+  RETURNED
+  APPROVED
+}
+
 enum TalentScopeType {
   DOMESTIC
   OVERSEAS
@@ -506,121 +525,125 @@ enum ImportRowResolutionStatus {
 }
 
 model Person {
-  id                              String                            @id @default(uuid()) @db.Char(36)
-  name                            String                            @db.VarChar(80)
-  contactPhone                    String?                           @map("contact_phone") @db.VarChar(30)
-  personStatus                    PersonStatus                      @default(ACTIVE) @map("person_status")
-  createdAt                       DateTime                          @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                       DateTime                          @updatedAt @map("updated_at") @db.DateTime(3)
-  account                         Account?
-  phoneChanges                    AccountPhoneHistory[]             @relation("PhoneChangeAccount")
-  appointments                    Appointment[]
-  roleAssignments                 RoleAssignment[]                  @relation("RoleAssignmentPerson")
-  grantedRoleAssignments          RoleAssignment[]                  @relation("RoleAssignmentGrantor")
-  specialPermissionGrants         SpecialPermissionGrant[]          @relation("PermissionGrantPerson")
-  grantedSpecialPermissions       SpecialPermissionGrant[]          @relation("PermissionGrantGrantor")
-  batchMemberships                BatchMembership[]
-  groupLeaderAssignments          GroupLeaderAssignment[]           @relation("GroupLeaderPerson")
-  grantedGroupLeaderAssignments   GroupLeaderAssignment[]           @relation("GroupLeaderGrantor")
-  memberCapabilityProfile         MemberCapabilityProfile?          @relation("MemberCapabilityPerson")
-  updatedMemberCapabilities       MemberCapabilityProfile[]         @relation("MemberCapabilityUpdater")
-  auditLogs                       AuditLog[]
-  stateTransitions                StateTransitionHistory[]
-  uploadedAttachments             Attachment[]                      @relation("AttachmentUploader")
-  createdAttachmentLinks          AttachmentLink[]                  @relation("AttachmentLinkCreator")
-  attachmentAccessLogs            AttachmentAccessLog[]             @relation("AttachmentAccessPerson")
-  createdEnterprises              Enterprise[]                      @relation("EnterpriseCreator")
-  coordinatedEnterprises          Enterprise[]                      @relation("EnterpriseCoordinateUpdater")
-  createdEnterpriseContacts       EnterpriseContact[]
-  submittedEnterpriseRequests     EnterpriseChangeRequest[]         @relation("EnterpriseRequestSubmitter")
-  reviewedEnterpriseRequests      EnterpriseChangeRequest[]         @relation("EnterpriseRequestReviewer")
-  enterpriseVersions              EnterpriseVersion[]
-  presenceReports                 PresenceReport[]
-  createdPolicies                 Policy[]                          @relation("PolicyCreator")
-  changedPolicyVersions           PolicyContentVersion[]            @relation("PolicyVersionChanger")
-  confirmedPolicyVersions         PolicyContentVersion[]            @relation("PolicyVersionConfirmer")
-  confirmedPolicyInterpretations  PolicyAIInterpretation[]          @relation("PolicyInterpretationConfirmer")
-  createdPolicyReplacements       PolicyReplacementRelation[]       @relation("PolicyReplacementCreator")
-  endedPolicyReplacements         PolicyReplacementRelation[]       @relation("PolicyReplacementEnder")
-  sourcedDemandLeads              DemandLead[]                      @relation("DemandLeadSourcePerson")
-  createdDemandLeads              DemandLead[]                      @relation("DemandLeadCreator")
-  demandLeadSupplements           DemandLeadSupplement[]
-  createdDemands                  Demand[]                          @relation("DemandCreator")
-  createdMapBoundaryVersions      MapBoundaryVersion[]              @relation("MapBoundaryCreator")
-  createdTrips                    Trip[]                            @relation("TripCreator")
-  canceledTrips                   Trip[]                            @relation("TripCanceler")
-  tripParticipations              TripParticipant[]                 @relation("TripParticipantPerson")
-  addedTripParticipations         TripParticipant[]                 @relation("TripParticipantAdder")
-  submittedTripResults            TripResult[]                      @relation("TripResultSubmitter")
-  visitSupplements                VisitSupplement[]                 @relation("VisitSupplementCreator")
-  tripIdempotencyRecords          TripIdempotency[]                 @relation("TripIdempotencyActor")
-  visitLeadIdempotencyRecords     VisitDemandLeadIdempotency[]      @relation("VisitLeadIdempotencyActor")
-  createdTalents                  Talent[]                          @relation("TalentCreator")
-  recommendedTalents              Talent[]                          @relation("TalentOriginalRecommender")
-  contactedTalents                Talent[]                          @relation("TalentCurrentContact")
-  submittedTalentRequests         TalentChangeRequest[]             @relation("TalentRequestSubmitter")
-  reviewedTalentRequests          TalentChangeRequest[]             @relation("TalentRequestReviewer")
-  changedTalentVersions           TalentVersion[]                   @relation("TalentVersionChanger")
-  talentContactHistories          TalentContactPersonHistory[]      @relation("TalentContactPerson")
-  changedTalentContacts           TalentContactPersonHistory[]      @relation("TalentContactChanger")
-  startedTalentRounds             TalentTownshipRound[]             @relation("TalentRoundStarter")
-  handledTalentRounds             TalentTownshipRound[]             @relation("TalentRoundHandler")
-  voidedTalentRounds              TalentTownshipRound[]             @relation("TalentRoundVoider")
-  talentRoundProgresses           TalentTownshipProgress[]          @relation("TalentProgressCreator")
-  requestedTalentAIExtractions    TalentAIExtraction[]              @relation("TalentAIRequester")
-  confirmedTalentAIExtractions    TalentAIExtraction[]              @relation("TalentAIConfirmer")
-  submittedHelpRequests           HelpRequest[]                     @relation("HelpSubmitter")
-  ownedHelpRequests               HelpRequest[]                     @relation("HelpCurrentOwner")
-  helpAssignments                 HelpAssignmentHistory[]           @relation("HelpAssignmentPerson")
-  changedHelpAssignments          HelpAssignmentHistory[]           @relation("HelpAssignmentChanger")
-  helpProgresses                  HelpProgress[]                    @relation("HelpProgressCreator")
-  helpCommandIdempotencies        HelpCommandIdempotency[]          @relation("HelpIdempotencyActor")
-  reimbursements                  Reimbursement[]                   @relation("ReimbursementApplicant")
-  submittedReimbursementVersions  ReimbursementSubmissionVersion[]  @relation("ReimbursementVersionSubmitter")
-  confirmedReimbursementInvoices  ReimbursementInvoice[]            @relation("ReimbursementInvoiceConfirmer")
-  receivedReimbursements          Reimbursement[]                   @relation("ReimbursementPaperReceiver")
-  financeSubmittedReimbursements  Reimbursement[]                   @relation("ReimbursementFinanceSubmitter")
-  reimbursementIdempotencies      ReimbursementCommandIdempotency[] @relation("ReimbursementIdempotencyActor")
-  reimbursementExports            ReimbursementExportTask[]         @relation("ReimbursementExportCreator")
-  reviewedDemands                 Demand[]                          @relation("DemandReviewer")
-  publishedDemands                Demand[]                          @relation("DemandPublisher")
-  demandReviews                   DemandReview[]
-  demandCommandIdempotencies      DemandCommandIdempotency[]
-  createdAnnouncements            Announcement[]                    @relation("AnnouncementCreator")
-  publishedAnnouncements          Announcement[]                    @relation("AnnouncementPublisher")
-  withdrawnAnnouncements          Announcement[]                    @relation("AnnouncementWithdrawer")
-  createdAnnouncementVersions     AnnouncementVersion[]             @relation("AnnouncementVersionCreator")
-  targetedAnnouncementRules       AnnouncementAudienceRule[]        @relation("AnnouncementAudiencePerson")
-  createdAnnouncementRules        AnnouncementAudienceRule[]        @relation("AnnouncementAudienceCreator")
-  announcementRecipientStates     AnnouncementRecipientState[]
-  messages                        Message[]
-  todos                           Todo[]
-  createdImportBatches            ImportBatch[]                     @relation("ImportBatchCreator")
-  importIdempotencies             ImportCommandIdempotency[]        @relation("ImportIdempotencyActor")
-  currentlyOwnedDemands           Demand[]                          @relation("DemandCurrentOwner")
-  demandOwnerHistories            DemandOwnerHistory[]              @relation("DemandOwnerPerson")
-  createdDemandOwnerHistories     DemandOwnerHistory[]              @relation("DemandOwnerHistoryCreator")
-  demandCollaborationRequests     DemandCollaborationRequest[]      @relation("DemandCollaborationTarget")
-  requestedDemandCollaborations   DemandCollaborationRequest[]      @relation("DemandCollaborationRequester")
-  decidedDemandCollaborations     DemandCollaborationRequest[]      @relation("DemandCollaborationDecider")
-  demandCollaborations            DemandCollaborator[]              @relation("DemandCollaboratorPerson")
-  endedDemandCollaborations       DemandCollaborator[]              @relation("DemandCollaboratorEnder")
-  createdRecommendationRuns       DemandRecommendationRun[]         @relation("RecommendationRunCreator")
-  recommendationItems             DemandRecommendationItem[]        @relation("RecommendationCandidate")
-  recommendationResponses         DemandRecommendationItem[]        @relation("RecommendationResponder")
-  alumniHelpAssignments           DemandAlumniHelper[]              @relation("DemandAlumniHelperPerson")
-  createdAlumniHelpAssignments    DemandAlumniHelper[]              @relation("DemandAlumniHelperCreator")
-  townshipHandlerAssignments      DemandTownshipHandler[]           @relation("DemandTownshipHandlerPerson")
-  assignedTownshipHandlers        DemandTownshipHandler[]           @relation("DemandTownshipHandlerAssigner")
-  demandProgresses                DemandProgress[]                  @relation("DemandProgressCreator")
-  representedDemandProgresses     DemandProgress[]                  @relation("DemandProgressRepresentedPerson")
-  sentDemandProgressReminders     DemandProgressReminder[]          @relation("DemandProgressReminderSender")
-  receivedDemandProgressReminders DemandProgressReminder[]          @relation("DemandProgressReminderRecipient")
-  submittedDemandCloseRequests    DemandCloseRequest[]              @relation("DemandCloseRequestSubmitter")
-  handledDemandCloseRequests      DemandCloseRequest[]              @relation("DemandCloseRequestTownshipHandler")
-  reviewedDemandCloseRequests     DemandCloseReview[]               @relation("DemandCloseReviewer")
-  requestedDemandOwnerExits       DemandOwnerExitRequest[]          @relation("DemandOwnerExitOwner")
-  reviewedDemandOwnerExits        DemandOwnerExitRequest[]          @relation("DemandOwnerExitReviewer")
+  id                             String                       @id @default(uuid()) @db.Char(36)
+  name                           String                       @db.VarChar(80)
+  contactPhone                   String?                      @map("contact_phone") @db.VarChar(30)
+  personStatus                   PersonStatus                 @default(ACTIVE) @map("person_status")
+  createdAt                      DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                      DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  account                        Account?
+  phoneChanges                   AccountPhoneHistory[]        @relation("PhoneChangeAccount")
+  appointments                   Appointment[]
+  roleAssignments                RoleAssignment[]             @relation("RoleAssignmentPerson")
+  grantedRoleAssignments         RoleAssignment[]             @relation("RoleAssignmentGrantor")
+  specialPermissionGrants        SpecialPermissionGrant[]     @relation("PermissionGrantPerson")
+  grantedSpecialPermissions      SpecialPermissionGrant[]     @relation("PermissionGrantGrantor")
+  batchMemberships               BatchMembership[]
+  groupLeaderAssignments         GroupLeaderAssignment[]      @relation("GroupLeaderPerson")
+  grantedGroupLeaderAssignments  GroupLeaderAssignment[]      @relation("GroupLeaderGrantor")
+  memberCapabilityProfile        MemberCapabilityProfile?     @relation("MemberCapabilityPerson")
+  updatedMemberCapabilities      MemberCapabilityProfile[]    @relation("MemberCapabilityUpdater")
+  auditLogs                      AuditLog[]
+  stateTransitions               StateTransitionHistory[]
+  uploadedAttachments            Attachment[]                 @relation("AttachmentUploader")
+  createdAttachmentLinks         AttachmentLink[]             @relation("AttachmentLinkCreator")
+  attachmentAccessLogs           AttachmentAccessLog[]        @relation("AttachmentAccessPerson")
+  createdEnterprises             Enterprise[]                 @relation("EnterpriseCreator")
+  coordinatedEnterprises         Enterprise[]                 @relation("EnterpriseCoordinateUpdater")
+  createdEnterpriseContacts      EnterpriseContact[]
+  submittedEnterpriseRequests    EnterpriseChangeRequest[]    @relation("EnterpriseRequestSubmitter")
+  reviewedEnterpriseRequests     EnterpriseChangeRequest[]    @relation("EnterpriseRequestReviewer")
+  enterpriseVersions             EnterpriseVersion[]
+  presenceReports                PresenceReport[]
+  createdPolicies                Policy[]                     @relation("PolicyCreator")
+  changedPolicyVersions          PolicyContentVersion[]       @relation("PolicyVersionChanger")
+  confirmedPolicyVersions        PolicyContentVersion[]       @relation("PolicyVersionConfirmer")
+  confirmedPolicyInterpretations PolicyAIInterpretation[]     @relation("PolicyInterpretationConfirmer")
+  createdPolicyReplacements      PolicyReplacementRelation[]  @relation("PolicyReplacementCreator")
+  endedPolicyReplacements        PolicyReplacementRelation[]  @relation("PolicyReplacementEnder")
+  sourcedDemandLeads             DemandLead[]                 @relation("DemandLeadSourcePerson")
+  createdDemandLeads             DemandLead[]                 @relation("DemandLeadCreator")
+  demandLeadSupplements          DemandLeadSupplement[]
+  createdDemands                 Demand[]                     @relation("DemandCreator")
+  createdMapBoundaryVersions     MapBoundaryVersion[]         @relation("MapBoundaryCreator")
+  createdTrips                   Trip[]                       @relation("TripCreator")
+  canceledTrips                  Trip[]                       @relation("TripCanceler")
+  tripParticipations             TripParticipant[]            @relation("TripParticipantPerson")
+  addedTripParticipations        TripParticipant[]            @relation("TripParticipantAdder")
+  submittedTripResults           TripResult[]                 @relation("TripResultSubmitter")
+  visitSupplements               VisitSupplement[]            @relation("VisitSupplementCreator")
+  tripIdempotencyRecords         TripIdempotency[]            @relation("TripIdempotencyActor")
+  visitLeadIdempotencyRecords    VisitDemandLeadIdempotency[] @relation("VisitLeadIdempotencyActor")
+  createdTalents                 Talent[]                     @relation("TalentCreator")
+  recommendedTalents             Talent[]                     @relation("TalentOriginalRecommender")
+  contactedTalents               Talent[]                     @relation("TalentCurrentContact")
+  submittedTalentRequests        TalentChangeRequest[]        @relation("TalentRequestSubmitter")
+  reviewedTalentRequests         TalentChangeRequest[]        @relation("TalentRequestReviewer")
+  changedTalentVersions          TalentVersion[]              @relation("TalentVersionChanger")
+  talentContactHistories         TalentContactPersonHistory[] @relation("TalentContactPerson")
+  changedTalentContacts          TalentContactPersonHistory[] @relation("TalentContactChanger")
+  startedTalentRounds            TalentTownshipRound[]        @relation("TalentRoundStarter")
+  handledTalentRounds            TalentTownshipRound[]        @relation("TalentRoundHandler")
+  voidedTalentRounds             TalentTownshipRound[]        @relation("TalentRoundVoider")
+  talentRoundProgresses          TalentTownshipProgress[]     @relation("TalentProgressCreator")
+  requestedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIRequester")
+  confirmedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIConfirmer")
+  submittedHelpRequests          HelpRequest[]                 @relation("HelpSubmitter")
+  ownedHelpRequests              HelpRequest[]                 @relation("HelpCurrentOwner")
+  helpAssignments                HelpAssignmentHistory[]       @relation("HelpAssignmentPerson")
+  changedHelpAssignments         HelpAssignmentHistory[]       @relation("HelpAssignmentChanger")
+  helpProgresses                 HelpProgress[]                @relation("HelpProgressCreator")
+  helpCommandIdempotencies       HelpCommandIdempotency[]      @relation("HelpIdempotencyActor")
+  reimbursements                 Reimbursement[]               @relation("ReimbursementApplicant")
+  submittedReimbursementVersions ReimbursementSubmissionVersion[] @relation("ReimbursementVersionSubmitter")
+  confirmedReimbursementInvoices ReimbursementInvoice[]       @relation("ReimbursementInvoiceConfirmer")
+  receivedReimbursements         Reimbursement[]               @relation("ReimbursementPaperReceiver")
+  financeSubmittedReimbursements Reimbursement[]               @relation("ReimbursementFinanceSubmitter")
+  reimbursementIdempotencies     ReimbursementCommandIdempotency[] @relation("ReimbursementIdempotencyActor")
+  reimbursementExports           ReimbursementExportTask[]     @relation("ReimbursementExportCreator")
+  reviewedDemands                Demand[]                      @relation("DemandReviewer")
+  publishedDemands               Demand[]                      @relation("DemandPublisher")
+  demandReviews                  DemandReview[]
+  demandCommandIdempotencies     DemandCommandIdempotency[]
+  createdAnnouncements           Announcement[]               @relation("AnnouncementCreator")
+  publishedAnnouncements         Announcement[]               @relation("AnnouncementPublisher")
+  withdrawnAnnouncements         Announcement[]               @relation("AnnouncementWithdrawer")
+  createdAnnouncementVersions    AnnouncementVersion[]        @relation("AnnouncementVersionCreator")
+  targetedAnnouncementRules      AnnouncementAudienceRule[]   @relation("AnnouncementAudiencePerson")
+  createdAnnouncementRules       AnnouncementAudienceRule[]   @relation("AnnouncementAudienceCreator")
+  announcementRecipientStates    AnnouncementRecipientState[]
+  messages                       Message[]
+  todos                          Todo[]
+  createdImportBatches           ImportBatch[]                  @relation("ImportBatchCreator")
+  importIdempotencies            ImportCommandIdempotency[]     @relation("ImportIdempotencyActor")
+  currentlyOwnedDemands          Demand[]                     @relation("DemandCurrentOwner")
+  demandOwnerHistories           DemandOwnerHistory[]         @relation("DemandOwnerPerson")
+  createdDemandOwnerHistories    DemandOwnerHistory[]         @relation("DemandOwnerHistoryCreator")
+  demandCollaborationRequests    DemandCollaborationRequest[] @relation("DemandCollaborationTarget")
+  requestedDemandCollaborations  DemandCollaborationRequest[] @relation("DemandCollaborationRequester")
+  decidedDemandCollaborations    DemandCollaborationRequest[] @relation("DemandCollaborationDecider")
+  demandCollaborations           DemandCollaborator[]         @relation("DemandCollaboratorPerson")
+  endedDemandCollaborations      DemandCollaborator[]         @relation("DemandCollaboratorEnder")
+  createdRecommendationRuns      DemandRecommendationRun[]    @relation("RecommendationRunCreator")
+  recommendationItems            DemandRecommendationItem[]   @relation("RecommendationCandidate")
+  recommendationResponses        DemandRecommendationItem[]   @relation("RecommendationResponder")
+  alumniHelpAssignments          DemandAlumniHelper[]          @relation("DemandAlumniHelperPerson")
+  createdAlumniHelpAssignments   DemandAlumniHelper[]          @relation("DemandAlumniHelperCreator")
+  townshipHandlerAssignments     DemandTownshipHandler[]       @relation("DemandTownshipHandlerPerson")
+  assignedTownshipHandlers       DemandTownshipHandler[]       @relation("DemandTownshipHandlerAssigner")
+  demandProgresses               DemandProgress[]              @relation("DemandProgressCreator")
+  representedDemandProgresses    DemandProgress[]              @relation("DemandProgressRepresentedPerson")
+  sentDemandProgressReminders    DemandProgressReminder[]      @relation("DemandProgressReminderSender")
+  receivedDemandProgressReminders DemandProgressReminder[]     @relation("DemandProgressReminderRecipient")
+  submittedDemandCloseRequests   DemandCloseRequest[]          @relation("DemandCloseRequestSubmitter")
+  handledDemandCloseRequests     DemandCloseRequest[]          @relation("DemandCloseRequestTownshipHandler")
+  reviewedDemandCloseRequests    DemandCloseReview[]           @relation("DemandCloseReviewer")
+  requestedDemandOwnerExits      DemandOwnerExitRequest[]      @relation("DemandOwnerExitOwner")
+  reviewedDemandOwnerExits       DemandOwnerExitRequest[]      @relation("DemandOwnerExitReviewer")
+  decidedDemandOutcomePlans      DemandOutcomePlan[]            @relation("DemandOutcomePlanDecider")
+  createdDemandOutcomeRounds     DemandOutcomeRound[]           @relation("DemandOutcomeRoundCreator")
+  submittedDemandOutcomeRounds   DemandOutcomeRound[]           @relation("DemandOutcomeRoundSubmitter")
+  reviewedDemandOutcomeRounds    DemandOutcomeRound[]           @relation("DemandOutcomeRoundReviewer")
 
   @@index([personStatus])
   @@map("persons")
@@ -876,6 +899,7 @@ model Batch {
   followedDemands        Demand[]                @relation("DemandFollowBatch")
   completedDemands       Demand[]                @relation("DemandCompletionBatch")
   demandOwnerHistories   DemandOwnerHistory[]
+  trackedOutcomeRounds   DemandOutcomeRound[]
 
   @@index([status, isCurrent])
   @@index([year])
@@ -1827,6 +1851,8 @@ model Demand {
   closeRequests         DemandCloseRequest[]
   closeReviews          DemandCloseReview[]
   ownerExitRequests     DemandOwnerExitRequest[]
+  outcomePlan           DemandOutcomePlan?
+  outcomeRounds         DemandOutcomeRound[]
 
   @@index([responsibleAreaId, status, createdAt])
   @@index([enterpriseId, status])
@@ -2179,6 +2205,75 @@ model DemandOwnerExitRequest {
   @@index([ownerPersonId, requestedAt])
   @@index([reviewedByPersonId, reviewedAt])
   @@map("demand_owner_exit_requests")
+}
+
+model DemandOutcomePlan {
+  id                    String                    @id @default(uuid()) @db.Char(36)
+  demandId              String                    @unique @map("demand_id") @db.Char(36)
+  trackingMode          DemandOutcomeTrackingMode @map("tracking_mode")
+  status                DemandOutcomePlanStatus
+  firstTrackingDate     DateTime?                 @map("first_tracking_date") @db.Date
+  nextTrackingDate      DateTime?                 @map("next_tracking_date") @db.Date
+  dueVersion            Int                       @default(0) @map("due_version") @db.UnsignedInt
+  endedAt               DateTime?                 @map("ended_at") @db.DateTime(3)
+  decidedByPersonId     String                    @map("decided_by_person_id") @db.Char(36)
+  decidedAt             DateTime                  @default(now()) @map("decided_at") @db.DateTime(3)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  demand                Demand                    @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  decidedByPerson       Person                    @relation("DemandOutcomePlanDecider", fields: [decidedByPersonId], references: [id], onDelete: Restrict)
+  rounds                DemandOutcomeRound[]
+
+  @@index([status, nextTrackingDate])
+  @@index([decidedByPersonId, decidedAt])
+  @@map("demand_outcome_plans")
+}
+
+model DemandOutcomeRound {
+  id                       String                    @id @default(uuid()) @db.Char(36)
+  demandId                 String                    @map("demand_id") @db.Char(36)
+  outcomePlanId            String                    @map("outcome_plan_id") @db.Char(36)
+  roundNo                  Int                       @map("round_no") @db.UnsignedInt
+  trackingDate             DateTime                  @map("tracking_date") @db.Date
+  trackingBatchId          String                    @map("tracking_batch_id") @db.Char(36)
+  contractAmountIncrement  Decimal                   @default(0) @map("contract_amount_increment") @db.Decimal(18, 2)
+  investmentAmountIncrement Decimal                  @default(0) @map("investment_amount_increment") @db.Decimal(18, 2)
+  policyFundIncrement      Decimal                   @default(0) @map("policy_fund_increment") @db.Decimal(18, 2)
+  costReductionIncrement   Decimal                   @default(0) @map("cost_reduction_increment") @db.Decimal(18, 2)
+  talentIntroducedIncrement Int                      @default(0) @map("talent_introduced_increment") @db.UnsignedInt
+  patentIncrement          Int                       @default(0) @map("patent_increment") @db.UnsignedInt
+  qualitativeResult        String?                   @map("qualitative_result") @db.Text
+  enterpriseFeedback       String?                   @map("enterprise_feedback") @db.Text
+  nextTrackingDate         DateTime?                 @map("next_tracking_date") @db.Date
+  endTracking              Boolean                   @map("end_tracking")
+  reviewStatus             DemandOutcomeReviewStatus @default(DRAFT) @map("review_status")
+  createdByPersonId        String                    @map("created_by_person_id") @db.Char(36)
+  submittedByPersonId      String?                   @map("submitted_by_person_id") @db.Char(36)
+  submittedAt              DateTime?                 @map("submitted_at") @db.DateTime(3)
+  reviewedByPersonId       String?                   @map("reviewed_by_person_id") @db.Char(36)
+  reviewedAt               DateTime?                 @map("reviewed_at") @db.DateTime(3)
+  returnReason             String?                   @map("return_reason") @db.VarChar(500)
+  verifiedNote             String?                   @map("verified_note") @db.VarChar(2000)
+  editVersion              Int                       @default(1) @map("edit_version") @db.UnsignedInt
+  activeKey                Int?                      @default(1) @map("active_key") @db.UnsignedTinyInt
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  demand                   Demand                    @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  outcomePlan              DemandOutcomePlan         @relation(fields: [outcomePlanId], references: [id], onDelete: Restrict)
+  trackingBatch            Batch                     @relation(fields: [trackingBatchId], references: [id], onDelete: Restrict)
+  createdByPerson          Person                    @relation("DemandOutcomeRoundCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  submittedByPerson        Person?                   @relation("DemandOutcomeRoundSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
+  reviewedByPerson         Person?                   @relation("DemandOutcomeRoundReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, roundNo])
+  @@unique([demandId, activeKey])
+  @@index([demandId, reviewStatus, trackingDate])
+  @@index([trackingBatchId, reviewStatus, trackingDate])
+  @@index([outcomePlanId, reviewStatus, roundNo])
+  @@index([createdByPersonId, createdAt])
+  @@index([submittedByPersonId, submittedAt])
+  @@index([reviewedByPersonId, reviewedAt])
+  @@map("demand_outcome_rounds")
 }
 
 model Talent {
