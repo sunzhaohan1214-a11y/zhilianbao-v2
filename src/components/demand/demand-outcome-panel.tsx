@@ -86,6 +86,7 @@ export function DemandOutcomePanel({ demandId, data }: { demandId: string; data:
   const keys = useRef<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [roundVersions, setRoundVersions] = useState<Record<string, number>>({});
   const key = (action: string) => keys.current[action] ??= crypto.randomUUID();
 
   async function run(action: string, operation: () => Promise<unknown>) {
@@ -124,7 +125,14 @@ export function DemandOutcomePanel({ demandId, data }: { demandId: string; data:
   function updateRound(event: FormEvent<HTMLFormElement>, round: Round) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    void run(`update:${round.id}`, async () => post(`/api/v2/demand-outcomes/${round.id}/update`, { ...roundBody(form), expectedVersion: round.editVersion, attachmentIds: await attachmentIds(form) }));
+    void run(`update:${round.id}`, async () => {
+      const updated = await post(`/api/v2/demand-outcomes/${round.id}/update`, {
+        ...roundBody(form),
+        expectedVersion: roundVersions[round.id] ?? round.editVersion,
+        attachmentIds: await attachmentIds(form),
+      }) as { editVersion: number };
+      setRoundVersions((versions) => ({ ...versions, [round.id]: updated.editVersion }));
+    });
   }
 
   const card = "space-y-4 rounded-2xl border border-slate-200 bg-white p-5";
@@ -148,7 +156,7 @@ export function DemandOutcomePanel({ demandId, data }: { demandId: string; data:
       {round.attachments.length > 0 && <ul className="mt-3 space-y-1 text-sm">{round.attachments.map((attachment) => <li key={attachment.id}>佐证：<AttachmentOpenButton id={attachment.id} label={attachment.originalFilename} /></li>)}</ul>}
       {round.returnReason && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">退回原因：{round.returnReason}</p>}{round.verifiedNote && <p className="mt-3 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">线下核实：{round.verifiedNote}</p>}
       {round.permissions.canUpdate && <form onSubmit={(event) => updateRound(event, round)} className="mt-4 space-y-4 rounded-xl bg-slate-50 p-4"><h4 className="font-medium">修改本轮草稿</h4><RoundFields round={round} /><button disabled={pending} className="min-h-11 rounded-xl border bg-white px-4 py-2 font-medium">保存修改</button></form>}
-      {round.permissions.canSubmit && <button type="button" disabled={pending} onClick={() => void run(`submit:${round.id}`, () => post(`/api/v2/demand-outcomes/${round.id}/submit-review`, { expectedVersion: round.editVersion }, key(`submit:${round.id}`)))} className="mt-4 min-h-11 rounded-xl bg-blue-700 px-4 py-2 font-medium text-white">提交管理员审核</button>}
+      {round.permissions.canSubmit && <button type="button" disabled={pending} onClick={() => void run(`submit:${round.id}`, () => post(`/api/v2/demand-outcomes/${round.id}/submit-review`, { expectedVersion: roundVersions[round.id] ?? round.editVersion }, key(`submit:${round.id}`)))} className="mt-4 min-h-11 rounded-xl bg-blue-700 px-4 py-2 font-medium text-white">提交管理员审核</button>}
       {round.permissions.canReview && <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void run(`approve:${round.id}`, () => post(`/api/v2/demand-outcomes/${round.id}/review`, { decision: "APPROVE", verifiedNote: value(form, "verifiedNote") || undefined }, key(`approve:${round.id}`))); }} className="mt-4 space-y-3 rounded-xl bg-emerald-50 p-4"><label className="block text-sm font-medium">线下核实说明（无佐证附件时必填）<textarea name="verifiedNote" maxLength={2000} rows={3} className="mt-2 w-full rounded-xl border bg-white p-3" /></label><label className="block text-sm font-medium">退回原因<textarea name="returnReason" maxLength={500} rows={2} className="mt-2 w-full rounded-xl border bg-white p-3" /></label><div className="flex flex-wrap gap-3"><button disabled={pending} className="min-h-11 rounded-xl bg-emerald-700 px-4 py-2 font-medium text-white">审核通过</button><button type="button" disabled={pending} onClick={(event) => { const form = event.currentTarget.form; if (!form) return; const reason = value(new FormData(form), "returnReason"); void run(`return:${round.id}`, () => post(`/api/v2/demand-outcomes/${round.id}/review`, { decision: "RETURN", reason }, key(`return:${round.id}`))); }} className="min-h-11 rounded-xl border border-red-300 bg-white px-4 py-2 font-medium text-red-700">退回修改</button></div></form>}
     </li>)}</ol>}</article>
     {message && <p role="status" className="rounded-xl bg-slate-100 p-3 text-sm">{message}</p>}
