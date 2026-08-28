@@ -474,4 +474,11 @@ P3 UI/文案/低频问题
 - Real MySQL：空库与重复 migrate deploy、双 Confirm、mapping/旧 preview 竞争、信用代码/有账号与无账号手机号 race、ARCHIVED 人员与 DISABLED 企业不变、晚行失败全回滚、快照和幂等。
 - Critical E2E：管理员企业/团员导入与重复上传、可辨识候选摘要、首层确认不写库/取消不写库/Modal 二次确认后才 Apply；镇区/部门企业导出限域；成员导出拒绝；管理员人才导出。
 
+## 23. M3-006 automated coverage
+
+- Unit/sample: strict manifest/source contract, deterministic fingerprint, traversal guard, shared Person/Enterprise/Talent/Policy matchers, fixed Demand/reimbursement mapping, no historical account/high-privilege invention, presence/trip historical semantics, reconciliation formula, missing/hash-mismatch attachments, full-snapshot gate.
+- Real MySQL: one active batch per source system, unique source mapping, same-snapshot rerun identity, and changed immutable-history rejection. CI also applies all expand-only migrations twice through the existing database gate.
+- The sanitized fixture contains 26 business records plus three attachment rows and intentionally ends `REVIEW_REQUIRED`; it is not a false all-success sample.
+- Full rehearsal is not automated or claimed until a controlled real V1 full snapshot/schema is supplied.
+
 **TEST_PLAN.md v1.1 END**

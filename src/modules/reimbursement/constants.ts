@@ -31,4 +31,5 @@ export const REIMBURSEMENT_STATUS_LABELS: Record<ReimbursementStatus, string> = 
   VERIFIED_PENDING_PAPER: "已核对（待交纸质材料）",
   PAPER_RECEIVED: "已收材料",
   FINANCE_SUBMITTED: "已提交财务",
+  LEGACY_VERIFIED_TERMINAL: "历史已核验（只读）",
 };

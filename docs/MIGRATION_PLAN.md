@@ -469,6 +469,6 @@ M3-005 已提供可复用 `EntityMatcher`（Person/Enterprise/Talent）。M3-006
 
 Person Matcher 的 exact-phone 候选覆盖 ACTIVE/ARCHIVED，ARCHIVED 命中进入治理清单而非 CREATE；正式写入前的手机号复核与 `PersonImportIdentityLock` guard 也应复用，不能依赖 Account unique 或另写一套判断。
 
-M3-006 V1 Migration 尚未开始，本文件其余迁移演练、对账和切换要求状态不变。
+M3-006 已实现版本化 snapshot source contract、MigrationBatch/Map/Issue/ModuleResult/AttachmentResult、共享 Matcher 复用、严格 source/path/hash 校验、样本 fixture、CLI 和 JSON/XLSX 对账框架。当前执行环境没有真实 V1 schema 或受控 full snapshot，因此仅可记录“framework + sample rehearsal implemented”；full rehearsal 状态为 `FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT`，不得表述为正式迁移或全量演练已完成。
 
 **MIGRATION_PLAN.md v1.0 END**

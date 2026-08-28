@@ -18,6 +18,7 @@ export type PersonMatchCandidate = {
 };
 export type EnterpriseMatchCandidate = { id: string; name: string; responsibleAreaId: string; creditCode?: string | null; status?: "NORMAL" | "DISABLED" | "MERGED" };
 export type TalentMatchCandidate = { id: string; name: string; organizationName: string; professionalDirection: string };
+export type PolicyMatchCandidate = { id: string; title: string; publishingDepartment: string; publishedDate: string; primaryFileSha256: string };
 
 export function matchPerson(
   input: { name: string; phone?: string | null },
@@ -87,5 +88,19 @@ export function matchTalent(
   if (exact.length > 0) {
     return { kind: "REVIEW", candidateIds: exact.map(({ id }) => id), issues: [{ code: "TALENT_DUPLICATE_CANDIDATE", field: "name", severity: "REVIEW", message: "姓名、单位和专业方向相同，需人工确认", candidateIds: exact.map(({ id }) => id) }] };
   }
+  return { kind: "CREATE", candidateIds: [], issues: [] };
+}
+
+export function matchPolicy(
+  input: { title: string; publishingDepartment: string; publishedDate: string; primaryFileSha256: string },
+  candidates: readonly PolicyMatchCandidate[],
+): EntityMatchResult {
+  const matches = candidates.filter((candidate) =>
+    normalizeComparableText(candidate.title) === normalizeComparableText(input.title)
+    && normalizeComparableText(candidate.publishingDepartment) === normalizeComparableText(input.publishingDepartment)
+    && candidate.publishedDate === input.publishedDate
+    && candidate.primaryFileSha256.toLowerCase() === input.primaryFileSha256.toLowerCase());
+  if (matches.length === 1) return { kind: "EXACT", matchedEntityId: matches[0].id, candidateIds: [matches[0].id], issues: [] };
+  if (matches.length > 1) return { kind: "REVIEW", candidateIds: matches.map(({ id }) => id), issues: [{ code: "POLICY_IDENTITY_DUPLICATED", severity: "REVIEW", message: "政策四要素命中多条正式记录，需人工确认", candidateIds: matches.map(({ id }) => id) }] };
   return { kind: "CREATE", candidateIds: [], issues: [] };
 }

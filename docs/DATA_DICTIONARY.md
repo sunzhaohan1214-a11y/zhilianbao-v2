@@ -1429,4 +1429,12 @@ DemandOutcomeRound.review_status = APPROVED
 
 `PersonImportIdentityLock.phone_hash`：`CHAR(64)` 主键，仅保存 `SHA-256("PHONE:" + normalizedPhone)`，用于跨 ImportBatch 的正式 Apply 串行化。
 
+M3-006 dictionary additions:
+
+- `MigrationBatch.mode`: `SAMPLE_REHEARSAL | FULL_REHEARSAL | FINAL_INCREMENTAL`; this milestone refuses actual `FINAL_INCREMENTAL`.
+- `MigrationBatch.status`: `CREATED | VALIDATING | READY | RUNNING | REVIEW_REQUIRED | RECONCILING | SUCCEEDED | FAILED | CANCELED | SIGNED_OFF`; code never auto-signs.
+- `MigrationIssue.severity`: `WARNING | REVIEW | BLOCKER`; unresolved BLOCKER prevents success.
+- `MigrationAttachmentResult.status`: `PENDING | COPIED | MISSING | CORRUPTED | COPY_FAILED | HASH_MISMATCH | SKIPPED`.
+- `ReimbursementStatus.LEGACY_VERIFIED_TERMINAL`: migrated V1 verified history, visible under normal reimbursement privacy rules and excluded from every paper/finance transition.
+
 **DATA_DICTIONARY.md v1.1 END**

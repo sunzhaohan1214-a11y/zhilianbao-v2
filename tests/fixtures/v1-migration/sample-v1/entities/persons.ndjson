@@ -1,0 +1,5 @@
+{"sourceId":"PERSON-001","name":"样本甲","phone":"13800001001","memberKind":"CURRENT","currentEmploymentConfirmed":true,"accountEligible":true,"batchName":"2026样本批次","startDate":"2026-01-01"}
+{"sourceId":"PERSON-002","name":"样本乙","phone":"13800001002","memberKind":"ALUMNI_HISTORICAL","currentEmploymentConfirmed":false,"accountEligible":false,"endDate":"2025-12-31"}
+{"sourceId":"PERSON-003","name":"样本丙","phone":"13800001001","memberKind":"CURRENT","currentEmploymentConfirmed":true,"accountEligible":true,"batchName":"2026样本批次","startDate":"2026-01-01"}
+{"sourceId":"PERSON-004","name":"样本甲","phone":"13800001004","memberKind":"ALUMNI_PLATFORM","currentEmploymentConfirmed":false,"accountEligible":false,"endDate":"2025-12-31"}
+{"sourceId":"PERSON-005","name":"样本戊","memberKind":"ALUMNI_HISTORICAL","currentEmploymentConfirmed":false,"accountEligible":false}

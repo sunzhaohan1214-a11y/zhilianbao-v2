@@ -91,7 +91,7 @@ function reimbursementPayloadSchema() {
     applicantPersonId: z.uuid(),
     managerRecipientIds: recipientIdsSchema,
     eventKey: z.string().min(1).max(120),
-    toState: z.enum(["DRAFT", "PENDING_ONLINE_REVIEW", "RETURNED", "VERIFIED_PENDING_PAPER", "PAPER_RECEIVED", "FINANCE_SUBMITTED"]).optional(),
+    toState: z.enum(["DRAFT", "PENDING_ONLINE_REVIEW", "RETURNED", "VERIFIED_PENDING_PAPER", "PAPER_RECEIVED", "FINANCE_SUBMITTED", "LEGACY_VERIFIED_TERMINAL"]).optional(),
   }).strict();
 }
 

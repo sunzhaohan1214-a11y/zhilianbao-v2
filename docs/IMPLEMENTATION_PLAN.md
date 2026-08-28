@@ -352,6 +352,8 @@ Gate：
 - 全量演练；
 - 对账。
 
+当前实现状态：迁移 framework 与 26 条脱敏 sample rehearsal 已实现；真实 V1 schema/受控 full snapshot 尚未提供，full rehearsal pending source snapshot。该状态不代表正式迁移、final incremental 或生产切换完成。
+
 ## M3.7 System Admin
 
 - 参数；
@@ -531,6 +533,6 @@ M1-009 home
 
 ## M3.5 实现记录（2026-08-28）
 
-统一 Import Engine、Field Registry、EntityMatcher、企业/团员/人才 Adapter、逻辑快照、确认幂等，以及企业限域/人才管理员导出已进入本里程碑实现。M3.4 Reporting 与 M3.6 V1 Migration 未开始。
+统一 Import Engine、Field Registry、EntityMatcher、企业/团员/人才 Adapter、逻辑快照、确认幂等，以及企业限域/人才管理员导出已进入本里程碑实现。M3.4 Reporting 未开始。M3.6 已实现 framework/sample；full rehearsal pending controlled V1 source snapshot。
 
 **IMPLEMENTATION_PLAN.md v1.1 END**

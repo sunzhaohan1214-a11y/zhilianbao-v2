@@ -1798,4 +1798,11 @@ TEST_PLAN.md
 - 企业导出：管理员全县；`TOWNSHIP_STAFF` 当前本镇；`DEPARTMENT_STAFF` 当前有效负责镇区；普通成员拒绝。
 - 人才批量导出仅当前有效管理员。创建和下载响应均执行服务端权限判断。
 
+## 30. M3-006 Migration permission
+
+- `migration.execute` and `migration.view` are `SYSTEM`, `superAdminOnly` capabilities.
+- Apply additionally requires an active `NORMAL` account and effective `SUPER_ADMIN` role; CLI cannot bypass central authorization.
+- `ADMIN`, reimbursement managers, group leaders, ministers, and other roles receive neither capability.
+- Migration capabilities do not expand reimbursement, Help, AI conversation, attachment, audit, or unpublished-data visibility.
+
 **PERMISSIONS.md v1.3 END**

@@ -1,0 +1,41 @@
+{
+  "sourceSystem": "ZHILIANBAO_V1",
+  "schemaVersion": "v1-fixture-1",
+  "snapshotId": "sanitized-sample-v1-20260828",
+  "snapshotAt": "2026-08-28T16:00:00+08:00",
+  "exportedAt": "2026-08-28T16:10:00+08:00",
+  "isSanitized": true,
+  "snapshotKind": "SAMPLE",
+  "mappingVersion": "m3-006-v1",
+  "files": {
+    "entities/announcements.ndjson": { "count": 1, "sha256": "d00fe02be806816fccca3bdc36d3317ff2e4b210f8bd58f4f89ded6e6ec07757" },
+    "entities/demands.ndjson": { "count": 3, "sha256": "7179a03f9abddd71872a10f196552c024d7be6eb3e1ec1ba554ab9e4a2195dbe" },
+    "entities/enterprises.ndjson": { "count": 3, "sha256": "9963a7803fd2947f60c559f7c719b78b435055575775964cfbd90637c0109c8d" },
+    "entities/helps.ndjson": { "count": 1, "sha256": "d254abe554314fcf0bd4de24e63b1d451cf9aa746d4b20cba6bb6cbaeec8a842" },
+    "entities/organizations.ndjson": { "count": 2, "sha256": "2feedd1af0fa31482f2f2e49a470e82fe4bdea7f8603fa769e78bd46830f3366" },
+    "entities/persons.ndjson": { "count": 5, "sha256": "f06b2ff7ec71261da514e3e84fd8fc4d68ccf04afd993546fc5b36a48e323265" },
+    "entities/policies.ndjson": { "count": 2, "sha256": "ec99c8d574ef53dd6624d0c094c69eacde57c632df5054687cd882767032b6fe" },
+    "entities/presence.ndjson": { "count": 1, "sha256": "b101ce7640864a23ac2c2879ac609b008bbe2e06db90ec4accf1dd0608559df9" },
+    "entities/reimbursements.ndjson": { "count": 3, "sha256": "5bfb37a96903b53a6a8db3d27dcd4b4c86811022e81f0dd08a447530e5ab3394" },
+    "entities/roles.ndjson": { "count": 1, "sha256": "ba289758c3f0ba61d6f0ef75377620afb3fbafa1aec563775eb0aed4e5e23dc9" },
+    "entities/talents.ndjson": { "count": 2, "sha256": "a57cd8d9c9d5e86a0e306223d130c14d94f1dfd8915c14ab73c5526094a8e085" },
+    "entities/trips.ndjson": { "count": 1, "sha256": "0d0eb04661ef952c66875cb06346adeefe8f19d388a2ef668e866190be018396" },
+    "entities/visits.ndjson": { "count": 1, "sha256": "f976295950e91df275211c1fb80bfbef7fc6d930e0535c2da2a613b568670076" },
+    "attachments/manifest.ndjson": { "count": 3, "sha256": "7bbc9cd557ae64ed8439559803fb9005b29ef4041c328d078ad643bb7276f898" }
+  },
+  "entities": {
+    "ORGANIZATION": 2,
+    "PERSON": 5,
+    "ENTERPRISE": 3,
+    "TALENT": 2,
+    "POLICY": 2,
+    "DEMAND": 3,
+    "PRESENCE": 1,
+    "TRIP": 1,
+    "VISIT": 1,
+    "REIMBURSEMENT": 3,
+    "HELP": 1,
+    "ANNOUNCEMENT": 1,
+    "ROLE": 1
+  }
+}
