@@ -32,7 +32,11 @@ async function addInvoice(itemId: string, status: "NOT_REQUESTED" | "READY" | "D
   const attachment = await prisma.attachment.create({ data: { originalFilename: `remove-${randomUUID()}.pdf`, extension: "pdf", declaredMimeType: "application/pdf", expectedSizeBytes: BigInt(8), actualSizeBytes: BigInt(8), bucket: "test", region: "test", objectKey: `reimbursement/${randomUUID()}.pdf`, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: true, uploadedByPersonId: applicant.personId } });
   attachments.push(attachment.id);
   const invoice = await service.addInvoice({ actor: applicant, reimbursementId: itemId, body: { attachmentId: attachment.id } });
-  if (status !== "NOT_REQUESTED") await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: status } });
+  if (status === "CONFIRMED") {
+    await service.confirmInvoice({ actor: applicant, reimbursementId: itemId, invoiceId: invoice.id, body: { expenseType: "TRAVEL_LODGING", amount: "88.00", invoiceNo: `REMOVE-${randomUUID()}` } });
+  } else if (status !== "NOT_REQUESTED") {
+    await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: status } });
+  }
   return { attachment, invoice };
 }
 
