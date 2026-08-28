@@ -428,6 +428,48 @@ enum ReimbursementStatus {
   VERIFIED_PENDING_PAPER
   PAPER_RECEIVED
   FINANCE_SUBMITTED
+  LEGACY_VERIFIED_TERMINAL
+}
+
+enum MigrationBatchStatus {
+  CREATED
+  VALIDATING
+  READY
+  RUNNING
+  REVIEW_REQUIRED
+  RECONCILING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  SIGNED_OFF
+}
+
+enum MigrationMode {
+  SAMPLE_REHEARSAL
+  FULL_REHEARSAL
+  FINAL_INCREMENTAL
+}
+
+enum MigrationIssueSeverity {
+  WARNING
+  REVIEW
+  BLOCKER
+}
+
+enum MigrationIssueStatus {
+  OPEN
+  RESOLVED
+  WAIVED
+}
+
+enum MigrationAttachmentStatus {
+  PENDING
+  COPIED
+  MISSING
+  CORRUPTED
+  COPY_FAILED
+  HASH_MISMATCH
+  SKIPPED
 }
 
 enum ReimbursementExpenseType {
@@ -624,6 +666,9 @@ model Person {
   todos                          Todo[]
   createdImportBatches           ImportBatch[]                  @relation("ImportBatchCreator")
   importIdempotencies            ImportCommandIdempotency[]     @relation("ImportIdempotencyActor")
+  createdMigrationBatches        MigrationBatch[]                @relation("MigrationBatchCreator")
+  signedOffMigrationBatches      MigrationBatch[]                @relation("MigrationBatchSigner")
+  resolvedMigrationIssues        MigrationIssue[]                @relation("MigrationIssueResolver")
   currentlyOwnedDemands          Demand[]                     @relation("DemandCurrentOwner")
   demandOwnerHistories           DemandOwnerHistory[]         @relation("DemandOwnerPerson")
   createdDemandOwnerHistories    DemandOwnerHistory[]         @relation("DemandOwnerHistoryCreator")
@@ -1327,6 +1372,7 @@ model Attachment {
   reimbursementExports  ReimbursementExportTask[] @relation("ReimbursementExportOutput")
   monthlyReportExports  MonthlyReportExportTask[] @relation("MonthlyReportExportOutput")
   importSourceBatches   ImportBatch[]             @relation("ImportBatchSourceAttachment")
+  migrationAttachmentResults MigrationAttachmentResult[] @relation("MigrationAttachmentTarget")
 
   @@index([uploadedByPersonId, isTemporary, uploadStatus])
   @@index([uploadStatus, scanStatus])
@@ -1469,6 +1515,132 @@ model PersonImportIdentityLock {
   createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
   @@map("person_import_identity_locks")
+}
+
+model MigrationBatch {
+  id                    String                 @id @default(uuid()) @db.Char(36)
+  sourceSystem          String                 @map("source_system") @db.VarChar(50)
+  snapshotId            String                 @map("snapshot_id") @db.VarChar(191)
+  snapshotAt            DateTime               @map("snapshot_at") @db.DateTime(3)
+  sourceSchemaVersion   String                 @map("source_schema_version") @db.VarChar(100)
+  sourceManifestSha256  String                 @map("source_manifest_sha256") @db.Char(64)
+  codeVersion           String                 @map("code_version") @db.VarChar(100)
+  mappingVersion        String                 @map("mapping_version") @db.VarChar(100)
+  resolutionVersion     String?                @map("resolution_version") @db.VarChar(100)
+  status                MigrationBatchStatus   @default(CREATED)
+  mode                  MigrationMode
+  activeKey             String?                @unique @map("active_key") @db.VarChar(50)
+  startedAt             DateTime?              @map("started_at") @db.DateTime(3)
+  finishedAt            DateTime?              @map("finished_at") @db.DateTime(3)
+  createdByPersonId     String                 @map("created_by_person_id") @db.Char(36)
+  createdAt             DateTime               @default(now()) @map("created_at") @db.DateTime(3)
+  reconciliationJson    Json?                  @map("reconciliation_json")
+  failureCode           String?                @map("failure_code") @db.VarChar(100)
+  failureSummary        String?                @map("failure_summary") @db.VarChar(1000)
+  signedOffByPersonId   String?                @map("signed_off_by_person_id") @db.Char(36)
+  signedOffAt           DateTime?              @map("signed_off_at") @db.DateTime(3)
+  createdByPerson       Person                 @relation("MigrationBatchCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  signedOffByPerson     Person?                @relation("MigrationBatchSigner", fields: [signedOffByPersonId], references: [id], onDelete: Restrict)
+  firstMappings         LegacyMigrationMap[]   @relation("MigrationFirstBatch")
+  lastMappings          LegacyMigrationMap[]   @relation("MigrationLastBatch")
+  issues                MigrationIssue[]
+  moduleResults         MigrationModuleResult[]
+  attachmentResults     MigrationAttachmentResult[]
+
+  @@index([sourceSystem, status, createdAt])
+  @@index([createdByPersonId, createdAt])
+  @@map("migration_batches")
+}
+
+model LegacyMigrationMap {
+  id                    String         @id @default(uuid()) @db.Char(36)
+  sourceSystem          String         @map("source_system") @db.VarChar(50)
+  sourceEntity          String         @map("source_entity") @db.VarChar(100)
+  sourceId              String         @map("source_id") @db.VarChar(191)
+  targetEntity          String         @map("target_entity") @db.VarChar(100)
+  targetId              String         @map("target_id") @db.Char(36)
+  sourceFingerprint     String         @map("source_fingerprint") @db.Char(64)
+  immutableHistory      Boolean        @default(false) @map("immutable_history")
+  firstMigrationBatchId String         @map("first_migration_batch_id") @db.Char(36)
+  lastMigrationBatchId  String         @map("last_migration_batch_id") @db.Char(36)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.DateTime(3)
+  firstMigrationBatch   MigrationBatch @relation("MigrationFirstBatch", fields: [firstMigrationBatchId], references: [id], onDelete: Restrict)
+  lastMigrationBatch    MigrationBatch @relation("MigrationLastBatch", fields: [lastMigrationBatchId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceSystem, sourceEntity, sourceId], map: "legacy_migration_source_key")
+  @@index([targetEntity, targetId])
+  @@index([firstMigrationBatchId])
+  @@index([lastMigrationBatchId])
+  @@map("legacy_migration_maps")
+}
+
+model MigrationIssue {
+  id                   String                 @id @default(uuid()) @db.Char(36)
+  migrationBatchId     String                 @map("migration_batch_id") @db.Char(36)
+  sourceEntity         String                 @map("source_entity") @db.VarChar(100)
+  sourceId             String                 @map("source_id") @db.VarChar(191)
+  code                 String                 @db.VarChar(100)
+  severity             MigrationIssueSeverity
+  field                String?                @db.VarChar(100)
+  message              String                 @db.VarChar(1000)
+  candidateJson        Json?                  @map("candidate_json")
+  sourceSnapshotJson   Json?                  @map("source_snapshot_json")
+  status               MigrationIssueStatus   @default(OPEN)
+  resolutionJson       Json?                  @map("resolution_json")
+  resolvedByPersonId   String?                @map("resolved_by_person_id") @db.Char(36)
+  resolvedAt           DateTime?              @map("resolved_at") @db.DateTime(3)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.DateTime(3)
+  migrationBatch       MigrationBatch         @relation(fields: [migrationBatchId], references: [id], onDelete: Restrict)
+  resolvedByPerson     Person?                @relation("MigrationIssueResolver", fields: [resolvedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([migrationBatchId, sourceEntity, sourceId, code, field], map: "migration_issue_source_code_key")
+  @@index([migrationBatchId, status, severity])
+  @@index([resolvedByPersonId, resolvedAt])
+  @@map("migration_issues")
+}
+
+model MigrationModuleResult {
+  batchId                String         @map("batch_id") @db.Char(36)
+  module                 String         @db.VarChar(100)
+  sourceCount            Int            @default(0) @map("source_count") @db.UnsignedInt
+  successCount           Int            @default(0) @map("success_count") @db.UnsignedInt
+  failedCount            Int            @default(0) @map("failed_count") @db.UnsignedInt
+  skippedCount           Int            @default(0) @map("skipped_count") @db.UnsignedInt
+  mergedCount            Int            @default(0) @map("merged_count") @db.UnsignedInt
+  reviewCount            Int            @default(0) @map("review_count") @db.UnsignedInt
+  attachmentCount        Int            @default(0) @map("attachment_count") @db.UnsignedInt
+  attachmentSuccessCount Int            @default(0) @map("attachment_success_count") @db.UnsignedInt
+  attachmentIssueCount   Int            @default(0) @map("attachment_issue_count") @db.UnsignedInt
+  startedAt              DateTime       @map("started_at") @db.DateTime(3)
+  finishedAt             DateTime       @map("finished_at") @db.DateTime(3)
+  batch                   MigrationBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@id([batchId, module])
+  @@map("migration_module_results")
+}
+
+model MigrationAttachmentResult {
+  id                   String                    @id @default(uuid()) @db.Char(36)
+  migrationBatchId     String                    @map("migration_batch_id") @db.Char(36)
+  sourceEntity         String                    @map("source_entity") @db.VarChar(100)
+  sourceId             String                    @map("source_id") @db.VarChar(191)
+  sourceAttachmentKey  String                    @map("source_attachment_key") @db.VarChar(191)
+  status               MigrationAttachmentStatus @default(PENDING)
+  sourceSha256         String?                   @map("source_sha256") @db.Char(64)
+  targetAttachmentId   String?                   @map("target_attachment_id") @db.Char(36)
+  targetSha256         String?                   @map("target_sha256") @db.Char(64)
+  sourceSize           BigInt?                   @map("source_size") @db.UnsignedBigInt
+  targetSize           BigInt?                   @map("target_size") @db.UnsignedBigInt
+  errorCode            String?                   @map("error_code") @db.VarChar(100)
+  createdAt            DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  migrationBatch       MigrationBatch            @relation(fields: [migrationBatchId], references: [id], onDelete: Restrict)
+  targetAttachment     Attachment?               @relation("MigrationAttachmentTarget", fields: [targetAttachmentId], references: [id], onDelete: Restrict)
+
+  @@unique([migrationBatchId, sourceEntity, sourceId, sourceAttachmentKey], map: "migration_attachment_source_key")
+  @@index([migrationBatchId, status])
+  @@index([targetAttachmentId])
+  @@map("migration_attachment_results")
 }
 
 model Enterprise {

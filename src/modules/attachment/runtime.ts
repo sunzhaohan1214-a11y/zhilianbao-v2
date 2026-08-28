@@ -5,7 +5,7 @@ import { AttachmentScanService } from "./attachment-scan-service";
 import { AttachmentService } from "./attachment-service";
 import { AttachmentParentAuthorizerRegistry } from "./parent-authorization";
 import { AttachmentRepository } from "./repository/attachment-repository";
-import { FakeCleanScanner, UnavailableFileScanAdapter } from "./scan/file-scan-adapter";
+import { FakeCleanScanner, UnavailableFileScanAdapter, type FileScanAdapter } from "./scan/file-scan-adapter";
 import { CosStorageAdapter } from "./storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "./storage/in-memory-storage-adapter";
 import type { StorageAdapter } from "./storage/storage-adapter";
@@ -21,6 +21,7 @@ import { registerMonthlyReportAttachmentAuthorizer } from "@/modules/reporting/a
 
 type AttachmentRuntime = {
   storage: StorageAdapter;
+  scanner: FileScanAdapter;
   repository: AttachmentRepository;
   service: AttachmentService;
   scanService: AttachmentScanService;
@@ -63,6 +64,7 @@ function createRuntime(): AttachmentRuntime {
   const scanner = isTest ? new FakeCleanScanner() : new UnavailableFileScanAdapter();
   return {
     storage,
+    scanner,
     repository,
     parentAuthorizers,
     service: new AttachmentService(repository, storage, parentAuthorizers, config),

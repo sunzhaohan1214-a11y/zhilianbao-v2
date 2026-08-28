@@ -6,6 +6,10 @@
 /.next
 /out
 /worker-dist
+/migration-dist
+/.migration-output
+/legacy-snapshot
+/*full-snapshot*/
 
 # tests
 /playwright-report

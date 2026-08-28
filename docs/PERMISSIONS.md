@@ -1811,4 +1811,11 @@ TEST_PLAN.md
 - `MEMBER_CURRENT` 与往届无批量月报。页面、Service、API、Worker 与 Attachment Authorizer 统一调用 Reporting scope resolver。
 - 创建时 scope snapshot 是上限；Worker 再查当前权限。失去下载能力或范围缩小时任务失败，不沿用旧大权限。输出首期仅创建人和 SUPER_ADMIN 可访问。
 
+## 30. M3-006 Migration permission
+
+- `migration.execute` and `migration.view` are `SYSTEM`, `superAdminOnly` capabilities.
+- Apply additionally requires an active `NORMAL` account and effective `SUPER_ADMIN` role; CLI cannot bypass central authorization.
+- `ADMIN`, reimbursement managers, group leaders, ministers, and other roles receive neither capability.
+- Migration capabilities do not expand reimbursement, Help, AI conversation, attachment, audit, or unpublished-data visibility.
+
 **PERMISSIONS.md v1.3 END**

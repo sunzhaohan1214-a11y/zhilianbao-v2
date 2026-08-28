@@ -511,4 +511,11 @@ P3 UI/文案/低频问题
 - Real MySQL：6月 IN_PROGRESS/7月 COMPLETED 历史时点；创建批次 A/责任批次 B/办结批次 C；APPROVED/RETURNED 与 trackingDate/trackingBatch；异步任务、唯一 Attachment、Job 重跑、Excel parser 重开。
 - Critical E2E：ADMIN preview/export/授权下载；GROUP_LEADER/MINISTER 无 admin shell 入口；TOWNSHIP/DEPARTMENT 限域与篡改拒绝；普通成员拒绝；页面无排名。
 
+## 23. M3-006 automated coverage
+
+- Unit/sample: strict manifest/source contract, deterministic fingerprint, traversal guard, shared Person/Enterprise/Talent/Policy matchers, fixed Demand/reimbursement mapping, no historical account/high-privilege invention, presence/trip historical semantics, reconciliation formula, missing/hash-mismatch attachments, full-snapshot gate.
+- Real MySQL: provider-driven dry-run with zero business/Map writes; Actual Apply creates real Person/Organization/Enterprise/Demand/Reimbursement and supported targets; Map IDs reference real rows; same-snapshot rerun preserves exact counts/IDs; changed Enterprise and Demand main fields become REVIEW with unchanged target/fingerprint; changed DemandProgress is rejected through the real pipeline; a PDF passes the shared formal file policy/scanner and its private Attachment/object/Link/hash/size reruns without duplication; executable signature and MIME mismatch fail closed without Attachment/Link; historical Outbox delta is zero; legacy reimbursement remains private/read-only; historical COMPLETED Demand has no fake close rows; non-PENDING Help without reliable owner/timestamps remains explicit review with zero fabricated target rows. CI also applies all expand-only migrations twice through the existing database gate.
+- The sanitized fixture contains 26 business records plus three attachment rows and intentionally ends `REVIEW_REQUIRED`; it is not a false all-success sample.
+- Full rehearsal is not automated or claimed until a controlled real V1 full snapshot/schema is supplied.
+
 **TEST_PLAN.md v1.1 END**
