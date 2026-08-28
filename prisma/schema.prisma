@@ -3125,7 +3125,7 @@ model SystemCommandIdempotency {
   actorPerson    Person   @relation("SystemCommandActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
 
   @@unique([actorPersonId, action, keyHash])
-  @@index([aggregateType, aggregateId, createdAt])
+  @@index([aggregateType, aggregateId, createdAt], map: "system_command_aggregate_idx")
   @@map("system_command_idempotencies")
 }
 

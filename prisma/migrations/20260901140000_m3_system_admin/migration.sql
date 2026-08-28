@@ -28,7 +28,7 @@ CREATE TABLE `system_command_idempotencies` (
   `key_hash` CHAR(64) NOT NULL, `payload_hash` CHAR(64) NOT NULL, `aggregate_type` VARCHAR(100) NOT NULL,
   `aggregate_id` CHAR(36) NULL, `response_json` JSON NOT NULL, `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE INDEX `system_command_idempotencies_actor_person_id_action_key_hash_key`(`actor_person_id`, `action`, `key_hash`),
-  INDEX `system_command_idempotencies_aggregate_type_aggregate_id_created_at_idx`(`aggregate_type`, `aggregate_id`, `created_at`), PRIMARY KEY (`id`)
+  INDEX `system_command_aggregate_idx`(`aggregate_type`, `aggregate_id`, `created_at`), PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE `ai_service_configs` (
