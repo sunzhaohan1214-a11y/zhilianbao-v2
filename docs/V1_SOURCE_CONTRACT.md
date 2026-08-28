@@ -69,7 +69,7 @@ Key semantics:
 
 ## 5. Attachments
 
-Each attachment manifest row includes source identity, owner entity/source ID, path relative to `attachments/blobs`, expected SHA-256, expected size, original filename, and declared MIME type. Preview returns source `VALIDATED`, never `COPIED`. Apply copies to private temporary target storage, applies the migration scan allowlist, re-reads the target, verifies size/hash, and only then atomically creates the formal `AttachmentLink`, attachment Map, and `MigrationAttachmentResult(COPIED)` with non-null target fields. Missing, corrupt, parent-unresolved, copy-failed, hash-mismatch, scan-rejected, and skipped results remain auditable.
+Each attachment manifest row includes source identity, owner entity/source ID, path relative to `attachments/blobs`, expected SHA-256, expected size, original filename, and declared MIME type. Preview returns source `VALIDATED`, never `COPIED`. Apply reuses the formal Attachment file policy and scanner interface: filename/extension allowlist, declared MIME, detected magic type, executable-signature rejection, size, and malware result must all pass. It then copies to private target storage, re-reads the target, verifies size/hash, and only then atomically creates the formal `AttachmentLink`, attachment Map, and `MigrationAttachmentResult(COPIED)` with non-null target fields. Missing, corrupt, parent-unresolved, copy-failed, hash-mismatch, type/MIME/signature rejection, scanner-unavailable, and skipped results remain auditable and fail closed.
 
 ## 6.1 Resolution contract
 
@@ -77,7 +77,7 @@ Each attachment manifest row includes source identity, owner entity/source ID, p
 
 ## 6. Fingerprint and rerun
 
-`sourceFingerprint = SHA-256(canonical JSON payload)`. Object keys are recursively sorted; runtime timestamps and random values are not added. `LegacyMigrationMap` is unique on source system/entity/ID. Same-snapshot reruns retain the target ID. Mutable current facts may update through formal version/audit helpers. Changed immutable historical records raise `MIGRATION_SOURCE_HISTORY_CHANGED` and are never overwritten.
+`sourceFingerprint = SHA-256(canonical JSON payload)`. Object keys are recursively sorted; runtime timestamps and random values are not added. `LegacyMigrationMap` is unique on source system/entity/ID. Same-snapshot reruns retain the target ID. A different fingerprint may advance only after CREATE/LINK to a verified real target or a supported formal UPDATE; ordinary SKIP requires an equal fingerprint. Unsupported mutable drift is `MIGRATION_SOURCE_CHANGED_REQUIRES_REVIEW` and preserves the old target/fingerprint. Changed immutable historical records raise `MIGRATION_SOURCE_HISTORY_CHANGED` and are never overwritten. `upsertMap` independently rejects an unapproved fingerprint advance.
 
 ## 7. Real V1 onboarding gate
 

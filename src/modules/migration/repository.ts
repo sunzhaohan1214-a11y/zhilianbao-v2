@@ -19,15 +19,16 @@ export class MigrationRepository {
     if (rows.length !== 1) throw new MigrationError("MIGRATION_IDENTITY_CONFLICT", "人员手机号 identity guard 加锁失败");
   }
 
-  async upsertMap(tx: MigrationTransaction, input: { sourceSystem: string; sourceEntity: string; sourceId: string; targetEntity: string; targetId: string; sourceFingerprint: string; immutableHistory: boolean; batchId: string }) {
+  async upsertMap(tx: MigrationTransaction, input: { sourceSystem: string; sourceEntity: string; sourceId: string; targetEntity: string; targetId: string; sourceFingerprint: string; immutableHistory: boolean; batchId: string; allowFingerprintAdvance?: boolean }) {
     const key = { sourceSystem_sourceEntity_sourceId: { sourceSystem: input.sourceSystem, sourceEntity: input.sourceEntity, sourceId: input.sourceId } };
     const existing = await tx.legacyMigrationMap.findUnique({ where: key });
     if (!existing) {
-      const { batchId, ...mapping } = input;
+      const { batchId, allowFingerprintAdvance: _, ...mapping } = input;
       return tx.legacyMigrationMap.create({ data: { ...mapping, firstMigrationBatchId: batchId, lastMigrationBatchId: batchId } });
     }
     if (existing.targetEntity !== input.targetEntity || existing.targetId !== input.targetId) throw new MigrationError("MIGRATION_TARGET_CONFLICT", "同一 V1 源记录不能改指向另一个 V2 目标");
     if (existing.immutableHistory && existing.sourceFingerprint !== input.sourceFingerprint) throw new MigrationError("MIGRATION_SOURCE_HISTORY_CHANGED", "不可变历史源记录内容发生变化，禁止覆盖");
+    if (existing.sourceFingerprint !== input.sourceFingerprint && !input.allowFingerprintAdvance) throw new MigrationError("MIGRATION_MAP_FINGERPRINT_ADVANCE_FORBIDDEN", "目标未确认应用源变化，禁止推进迁移 Map fingerprint");
     return tx.legacyMigrationMap.update({ where: { id: existing.id }, data: { sourceFingerprint: input.sourceFingerprint, lastMigrationBatchId: input.batchId } });
   }
 

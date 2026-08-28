@@ -58,6 +58,7 @@ export type ApplyAdapterContext = {
   snapshotAt: Date;
   resolution?: MigrationResolution;
   existingMap?: ExistingMap;
+  currentFingerprint: string;
   preparedPasswordHash?: string;
   validatedAttachmentShaByParent: ReadonlyMap<string, string>;
 };
@@ -168,6 +169,25 @@ export class MigrationAdapterRegistry {
   }
 
   async apply(record: LegacyRecord, context: ApplyAdapterContext): Promise<AdapterResult> {
+    if (context.existingMap) {
+      if (!await targetExists(context.tx, context.existingMap.targetEntity, context.existingMap.targetId)) {
+        throw new MigrationError("MIGRATION_TARGET_MISSING", "既有迁移 Map 指向的 V2 目标不存在");
+      }
+      if (context.existingMap.sourceFingerprint !== context.currentFingerprint) {
+        if (context.existingMap.immutableHistory) {
+          throw new MigrationError("MIGRATION_SOURCE_HISTORY_CHANGED", "不可变历史源记录内容发生变化，禁止覆盖");
+        }
+        if (record.entityType === "DEMAND") await this.assertDemandProgressHistoryUnchanged(record, context);
+        return {
+          action: "REVIEW",
+          targetEntity: context.existingMap.targetEntity,
+          targetId: context.existingMap.targetId,
+          immutableHistory: context.existingMap.immutableHistory,
+          issues: [issue(record, "MIGRATION_SOURCE_CHANGED_REQUIRES_REVIEW", "REVIEW", "源记录已变化但当前 adapter 未实现可审计的正式 UPDATE；目标与旧 fingerprint 均保持不变")],
+        };
+      }
+      return { action: "SKIP", targetEntity: context.existingMap.targetEntity, targetId: context.existingMap.targetId, immutableHistory: context.existingMap.immutableHistory, issues: [] };
+    }
     if (context.resolution?.action === "SKIP") {
       return { action: "SKIP", targetEntity: TARGET_ENTITY[record.entityType], issues: [resolutionApplied(record, context.resolution)] };
     }
@@ -177,12 +197,6 @@ export class MigrationAdapterRegistry {
     if (context.resolution) {
       const linked = await validateResolutionLink(context.tx, record, context.resolution);
       if (linked) return linked;
-    }
-    if (context.existingMap && record.entityType !== "DEMAND") {
-      if (!await targetExists(context.tx, context.existingMap.targetEntity, context.existingMap.targetId)) {
-        throw new MigrationError("MIGRATION_TARGET_MISSING", "既有迁移 Map 指向的 V2 目标不存在");
-      }
-      return { action: "SKIP", targetEntity: context.existingMap.targetEntity, targetId: context.existingMap.targetId, immutableHistory: context.existingMap.immutableHistory, issues: [] };
     }
     switch (record.entityType) {
       case "ORGANIZATION": return this.organization(record, context);
@@ -199,6 +213,19 @@ export class MigrationAdapterRegistry {
       case "VISIT":
       case "ROLE":
         return { action: "REVIEW", targetEntity: TARGET_ENTITY[record.entityType], immutableHistory: true, issues: [issue(record, "MIGRATION_APPLY_UNSUPPORTED", "REVIEW", `${record.entityType} 当前 schema 缺少可证明安全的历史写入表示`)] };
+    }
+  }
+
+  private async assertDemandProgressHistoryUnchanged(record: LegacyRecord, context: ApplyAdapterContext): Promise<void> {
+    const targetProgressIds = (await context.tx.demandProgress.findMany({ where: { demandId: context.existingMap!.targetId }, select: { id: true } })).map(({ id }) => id);
+    if (targetProgressIds.length === 0) return;
+    const existingProgressMaps = await context.tx.legacyMigrationMap.findMany({ where: { sourceSystem: context.sourceSystem, targetEntity: "DEMAND_PROGRESS", targetId: { in: targetProgressIds } } });
+    const currentProgress = new Map((record.payload.progress as Array<Record<string, unknown>>).map((value) => [String(value.sourceId), value]));
+    for (const mapping of existingProgressMaps) {
+      const source = currentProgress.get(mapping.sourceId);
+      if (!source || mapping.sourceFingerprint !== sourceFingerprint(source)) {
+        throw new MigrationError("MIGRATION_SOURCE_HISTORY_CHANGED", "不可变 DemandProgress 源历史发生变化，禁止覆盖");
+      }
     }
   }
 

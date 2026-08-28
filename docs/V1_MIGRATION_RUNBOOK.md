@@ -73,9 +73,9 @@ For the same snapshot verify:
 - no historical Message/Todo/Outbox is created;
 - all module equations remain balanced.
 
-For attachments, `COPIED` means the private target object was written, scanned/verified, re-read, hash/size checked, formally linked, assigned a non-null `targetAttachmentId`, and mapped. Source-only validation is reported as planned validation during dry-run and never as `COPIED`.
+For attachments, `COPIED` means the source passed the same formal Attachment filename/extension, declared MIME, detected magic type, executable-signature, size, and scanner policy before the private target object was written; the target was then re-read, hash/size checked, formally linked, assigned a non-null `targetAttachmentId`, and mapped. Source-only validation is reported as planned validation during dry-run and never as `COPIED`. Scanner unavailability fails closed and never writes `scanStatus=PASSED`.
 
-For a new snapshot, changed mutable current fields keep the same target ID and use formal version/audit helpers. Changed immutable history must raise `MIGRATION_SOURCE_HISTORY_CHANGED`.
+For a new snapshot, compare the current source fingerprint before any same-snapshot skip. A changed mutable record may advance its Map fingerprint only after a supported formal UPDATE has changed the same target with required version/audit evidence. Otherwise it is `MIGRATION_SOURCE_CHANGED_REQUIRES_REVIEW`, while the target and old fingerprint remain unchanged. Changed immutable history raises `MIGRATION_SOURCE_HISTORY_CHANGED` and fails closed.
 
 ## 6. Reconciliation
 

@@ -8,6 +8,7 @@ import { MigrationError } from "./errors";
 import { MigrationRepository } from "./repository";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import type { StorageAdapter } from "@/modules/attachment/storage/storage-adapter";
+import type { FileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
 import { MigrationApplyRunner } from "./apply-runner";
 import type { LegacySourceProvider } from "./snapshot-provider";
 import type { LoadedMigrationResolutions } from "./resolutions";
@@ -29,6 +30,7 @@ export class MigrationService {
   constructor(
     private readonly repository = new MigrationRepository(),
     private readonly storage: StorageAdapter = getAttachmentRuntime().storage,
+    private readonly scanner: FileScanAdapter = getAttachmentRuntime().scanner,
   ) {}
 
   private async authorize(actor: PermissionActor, action: "migration.execute" | "migration.view") {
@@ -48,7 +50,7 @@ export class MigrationService {
     await this.authorize(input.actor, "migration.execute");
     if (process.env.APP_ENV === "production") throw new MigrationError("MIGRATION_PRODUCTION_REFUSED", "本版本拒绝在 production 执行迁移");
     if (input.mode === "FULL_REHEARSAL" && input.manifest.snapshotKind !== "FULL") throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
-    return new MigrationApplyRunner(this.repository, this.storage).run(input);
+    return new MigrationApplyRunner(this.repository, this.storage, this.scanner).run(input);
   }
 
   async persistRehearsal(input: PersistInput) {

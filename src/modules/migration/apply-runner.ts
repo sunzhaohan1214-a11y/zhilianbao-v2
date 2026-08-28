@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import path from "node:path";
 import { Prisma } from "@/generated/prisma/client";
-import { hasExecutableSignature } from "@/modules/attachment/file-policy";
+import { inspectAttachmentContent, validateIntentFile } from "@/modules/attachment/file-policy";
+import type { FileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
 import type { StorageAdapter } from "@/modules/attachment/storage/storage-adapter";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { MigrationAdapterRegistry } from "./apply-adapters";
@@ -51,11 +51,23 @@ function relationType(entityType: string): string {
   return "SOURCE_ATTACHMENT";
 }
 
-function validateMigrationScan(record: AttachmentPreviewResult["record"], body: Buffer): { extension: string; mimeType: string } {
-  const extension = path.extname(record.originalFilename).slice(1).toLowerCase();
-  if (hasExecutableSignature(body)) throw new MigrationError("MIGRATION_ATTACHMENT_SCAN_REJECTED", "附件未通过迁移安全扫描");
-  if (extension === "txt" && record.declaredMimeType.toLowerCase() === "text/plain") return { extension, mimeType: "text/plain" };
-  throw new MigrationError("MIGRATION_ATTACHMENT_SCAN_REJECTED", "附件类型尚未纳入 migration scan allowlist");
+async function validateMigrationScan(record: AttachmentPreviewResult["record"], body: Buffer, scanner: FileScanAdapter) {
+  let normalized;
+  let detected;
+  try {
+    normalized = validateIntentFile({ filename: record.originalFilename, declaredMimeType: record.declaredMimeType, expectedSizeBytes: record.size });
+    detected = await inspectAttachmentContent({ buffer: body, extension: normalized.extension, declaredMimeType: normalized.declaredMimeType });
+  } catch {
+    throw new MigrationError("MIGRATION_ATTACHMENT_SCAN_REJECTED", "附件未通过正式文件类型、MIME 或签名策略");
+  }
+  let scan;
+  try {
+    scan = await scanner.scan({ content: body, filename: normalized.originalFilename, detectedMimeType: detected.mimeType });
+  } catch {
+    throw new MigrationError("MIGRATION_ATTACHMENT_SCANNER_UNAVAILABLE", "附件安全扫描服务不可用，迁移附件 fail closed");
+  }
+  if (!scan.clean) throw new MigrationError("MIGRATION_ATTACHMENT_SCAN_REJECTED", "附件未通过恶意文件扫描");
+  return { ...normalized, detected };
 }
 
 export type MigrationApplyResult = {
@@ -72,6 +84,7 @@ export class MigrationApplyRunner {
   constructor(
     private readonly repository: MigrationRepository,
     private readonly storage: StorageAdapter,
+    private readonly scanner: FileScanAdapter,
   ) {}
 
   async run(input: {
@@ -139,9 +152,10 @@ export class MigrationApplyRunner {
             const applied = await this.repository.transaction(async (tx) => {
               const existingMap = await tx.legacyMigrationMap.findUnique({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: input.manifest.sourceSystem, sourceEntity: record.entityType, sourceId: record.sourceId } } });
               const resolution = input.resolutions.resolutions.get(resolutionKey(record.entityType, record.sourceId));
-              const outcome = await this.adapters.apply(record, { tx, actor: input.actor, sourceSystem: input.manifest.sourceSystem, snapshotAt: new Date(input.manifest.snapshotAt), resolution, existingMap: existingMap ?? undefined, preparedPasswordHash, validatedAttachmentShaByParent });
+              const currentFingerprint = sourceFingerprint(record.payload);
+              const outcome = await this.adapters.apply(record, { tx, actor: input.actor, sourceSystem: input.manifest.sourceSystem, snapshotAt: new Date(input.manifest.snapshotAt), resolution, existingMap: existingMap ?? undefined, currentFingerprint, preparedPasswordHash, validatedAttachmentShaByParent });
               if (outcome.targetId && outcome.targetEntity && ["CREATE", "LINK", "UPDATE", "SKIP"].includes(outcome.action)) {
-                await this.repository.upsertMap(tx, { sourceSystem: input.manifest.sourceSystem, sourceEntity: record.entityType, sourceId: record.sourceId, targetEntity: outcome.targetEntity, targetId: outcome.targetId, sourceFingerprint: sourceFingerprint(record.payload), immutableHistory: outcome.immutableHistory ?? false, batchId: batchId! });
+                await this.repository.upsertMap(tx, { sourceSystem: input.manifest.sourceSystem, sourceEntity: record.entityType, sourceId: record.sourceId, targetEntity: outcome.targetEntity, targetId: outcome.targetId, sourceFingerprint: currentFingerprint, immutableHistory: outcome.immutableHistory ?? false, batchId: batchId!, allowFingerprintAdvance: outcome.action === "UPDATE" || outcome.action === "LINK" });
               }
               for (const mapping of outcome.mappings ?? []) {
                 await this.repository.upsertMap(tx, { ...mapping, sourceSystem: input.manifest.sourceSystem, batchId: batchId! });
@@ -245,11 +259,11 @@ export class MigrationApplyRunner {
       return { record: { sourceEntity: "ATTACHMENT", sourceId: value.sourceAttachmentId, action: "SKIP", targetEntity: "ATTACHMENT", targetId: target.id, issues: [] }, copied: true };
     }
     const body = await input.provider.getAttachment(value);
-    const detected = validateMigrationScan(value, body);
+    const inspected = await validateMigrationScan(value, body, this.scanner);
     const attachmentId = randomUUID();
-    const objectKey = `migration/${input.manifest.sourceSystem.toLowerCase()}/${attachmentId}/${value.sha256}.${detected.extension}`;
-    await this.repository.prisma.attachment.create({ data: { id: attachmentId, originalFilename: value.originalFilename, extension: detected.extension, declaredMimeType: value.declaredMimeType, expectedSizeBytes: BigInt(value.size), storageProvider: "TENCENT_COS", bucket: this.storage.bucket, region: this.storage.region, objectKey, uploadStatus: "PENDING_UPLOAD", scanStatus: "PENDING", isTemporary: true, uploadedByPersonId: input.actor.personId } });
-    await this.storage.writeObject(objectKey, body, value.declaredMimeType);
+    const objectKey = `migration/${input.manifest.sourceSystem.toLowerCase()}/${attachmentId}/${value.sha256}.${inspected.detected.extension}`;
+    await this.repository.prisma.attachment.create({ data: { id: attachmentId, originalFilename: inspected.originalFilename, extension: inspected.extension, declaredMimeType: inspected.declaredMimeType, expectedSizeBytes: BigInt(value.size), storageProvider: "TENCENT_COS", bucket: this.storage.bucket, region: this.storage.region, objectKey, uploadStatus: "PENDING_UPLOAD", scanStatus: "PENDING", isTemporary: true, uploadedByPersonId: input.actor.personId } });
+    await this.storage.writeObject(objectKey, body, inspected.detected.mimeType);
     const targetBody = await this.storage.readObject(objectKey);
     const digest = createHash("sha256").update(targetBody).digest("hex");
     if (digest !== value.sha256 || targetBody.byteLength !== value.size) {
@@ -260,7 +274,7 @@ export class MigrationApplyRunner {
     await this.repository.transaction(async (tx) => {
       const currentParent = await tx.legacyMigrationMap.findUnique({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: input.manifest.sourceSystem, sourceEntity: value.sourceEntity, sourceId: value.sourceId } } });
       if (!currentParent || currentParent.targetId !== parentMap.targetId) throw new MigrationError("MIGRATION_ATTACHMENT_PARENT_UNRESOLVED", "附件父 Map 在提交前发生变化");
-      await tx.attachment.update({ where: { id: attachmentId }, data: { detectedMimeType: detected.mimeType, detectedFileType: detected.extension, actualSizeBytes: BigInt(targetBody.byteLength), sha256: digest, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false } });
+      await tx.attachment.update({ where: { id: attachmentId }, data: { detectedMimeType: inspected.detected.mimeType, detectedFileType: inspected.detected.extension, actualSizeBytes: BigInt(targetBody.byteLength), sha256: digest, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false } });
       await tx.attachmentLink.create({ data: { attachmentId, entityType: parentMap.targetEntity, entityId: parentMap.targetId, relationType: relationType(value.sourceEntity), createdByPersonId: input.actor.personId } });
       await this.repository.upsertMap(tx, { sourceSystem: input.manifest.sourceSystem, sourceEntity: "ATTACHMENT", sourceId: value.sourceAttachmentId, targetEntity: "ATTACHMENT", targetId: attachmentId, sourceFingerprint: sourceFingerprint(value), immutableHistory: true, batchId: input.batchId });
       await tx.migrationAttachmentResult.create({ data: { migrationBatchId: input.batchId, sourceEntity: value.sourceEntity, sourceId: value.sourceId, sourceAttachmentKey: value.sourceAttachmentId, status: "COPIED", sourceSha256: value.sha256, targetAttachmentId: attachmentId, targetSha256: digest, sourceSize: BigInt(value.size), targetSize: BigInt(targetBody.byteLength) } });

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InMemoryStorageAdapter } from "@/modules/attachment/storage/in-memory-storage-adapter";
+import { FakeCleanScanner } from "@/modules/attachment/scan/file-scan-adapter";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { loadMigrationResolutions, MigrationRepository, MigrationService, runMigrationPreview, SnapshotDirectoryLegacySourceProvider } from "@/modules/migration";
 import type { PermissionActor } from "@/modules/permissions/types";
@@ -15,7 +16,7 @@ const prisma = getPrismaClient();
 const fixture = path.resolve("tests/fixtures/v1-migration/sample-v1");
 const storage = new InMemoryStorageAdapter();
 const repository = new MigrationRepository(prisma);
-const service = new MigrationService(repository, storage);
+const service = new MigrationService(repository, storage, new FakeCleanScanner());
 const createdBatchIds: string[] = [];
 const previousCurrentBatchIds: string[] = [];
 let actor: PermissionActor;
@@ -46,6 +47,14 @@ async function targetIds(entity: string): Promise<string[]> {
 
 async function uniqueTargetCount(entity: string): Promise<number> {
   return new Set(await targetIds(entity)).size;
+}
+
+async function updateManifestEntry(root: string, relativePath: string, content: string, count?: number): Promise<void> {
+  const manifestPath = path.join(root, "snapshot.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.files[relativePath].sha256 = createHash("sha256").update(content).digest("hex");
+  if (count !== undefined) manifest.files[relativePath].count = count;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 beforeAll(async () => {
@@ -135,23 +144,63 @@ describe("M3-006 Actual Apply on real MySQL", () => {
     expect(await uniqueTargetCount("ATTACHMENT")).toBe(1);
     const attachmentMap = await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "ATTACHMENT", sourceId: "ATTACHMENT-001" } } });
     const attachment = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentMap.targetId }, include: { links: true } });
-    expect(attachment).toMatchObject({ isTemporary: false, uploadStatus: "UPLOADED", scanStatus: "PASSED", sha256: "097eeb44ffadee75a67047df670c0956bc20786f85deb6906baef66df6529ed6" });
-    expect(Number(attachment.actualSizeBytes)).toBe(26);
+    expect(attachment).toMatchObject({ isTemporary: false, uploadStatus: "UPLOADED", scanStatus: "PASSED", detectedMimeType: "application/pdf", detectedFileType: "pdf", sha256: "80b6aae12698eee2d1273b90fb6b49932f9c15b3102850f735c3af70f4eb26aa" });
+    expect(Number(attachment.actualSizeBytes)).toBe(370);
     expect(attachment.links).toHaveLength(1);
     expect(createHash("sha256").update(await storage.readObject(attachment.objectKey!)).digest("hex")).toBe(attachment.sha256);
   });
 
   it("reruns the same provider without duplicate targets and preserves every target id", async () => {
     const beforeMaps = await prisma.legacyMigrationMap.findMany({ where: { sourceSystem: "ZHILIANBAO_V1" }, orderBy: [{ sourceEntity: "asc" }, { sourceId: "asc" }] });
-    const beforeCounts = { people: await prisma.person.count(), enterprises: await prisma.enterprise.count(), demands: await prisma.demand.count(), progresses: await prisma.demandProgress.count(), reimbursements: await prisma.reimbursement.count(), attachments: await prisma.attachment.count() };
+    const beforeCounts = { people: await prisma.person.count(), enterprises: await prisma.enterprise.count(), demands: await prisma.demand.count(), progresses: await prisma.demandProgress.count(), reimbursements: await prisma.reimbursement.count(), attachments: await prisma.attachment.count(), attachmentLinks: await prisma.attachmentLink.count() };
     const second = await apply();
     const afterMaps = await prisma.legacyMigrationMap.findMany({ where: { sourceSystem: "ZHILIANBAO_V1" }, orderBy: [{ sourceEntity: "asc" }, { sourceId: "asc" }] });
-    expect({ people: await prisma.person.count(), enterprises: await prisma.enterprise.count(), demands: await prisma.demand.count(), progresses: await prisma.demandProgress.count(), reimbursements: await prisma.reimbursement.count(), attachments: await prisma.attachment.count() }).toEqual(beforeCounts);
+    expect({ people: await prisma.person.count(), enterprises: await prisma.enterprise.count(), demands: await prisma.demand.count(), progresses: await prisma.demandProgress.count(), reimbursements: await prisma.reimbursement.count(), attachments: await prisma.attachment.count(), attachmentLinks: await prisma.attachmentLink.count() }).toEqual(beforeCounts);
     expect(afterMaps.map(({ sourceEntity, sourceId, targetId }) => ({ sourceEntity, sourceId, targetId }))).toEqual(beforeMaps.map(({ sourceEntity, sourceId, targetId }) => ({ sourceEntity, sourceId, targetId })));
     expect(new Set(afterMaps.map((value) => `${value.sourceEntity}:${value.sourceId}`)).size).toBe(afterMaps.length);
     const firstAttachment = await prisma.migrationAttachmentResult.findFirstOrThrow({ where: { migrationBatchId: firstResult.batchId, sourceAttachmentKey: "ATTACHMENT-001" } });
     const secondAttachment = await prisma.migrationAttachmentResult.findFirstOrThrow({ where: { migrationBatchId: second.batchId, sourceAttachmentKey: "ATTACHMENT-001" } });
     expect(secondAttachment.targetAttachmentId).toBe(firstAttachment.targetAttachmentId);
+  });
+
+  it("does not advance the Enterprise map when a changed mutable source needs review", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "zlb-migration-enterprise-drift-"));
+    try {
+      await cp(fixture, temporary, { recursive: true });
+      const enterprisePath = path.join(temporary, "entities/enterprises.ndjson");
+      const changed = (await readFile(enterprisePath, "utf8")).replace("样本路1号", "样本路1号变更");
+      await writeFile(enterprisePath, changed);
+      await updateManifestEntry(temporary, "entities/enterprises.ndjson", changed);
+      const beforeMap = await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "ENTERPRISE", sourceId: "ENTERPRISE-001" } } });
+      const beforeTarget = await prisma.enterprise.findUniqueOrThrow({ where: { id: beforeMap.targetId } });
+      const changedResult = await apply(temporary);
+      expect(changedResult.records).toEqual(expect.arrayContaining([expect.objectContaining({ sourceEntity: "ENTERPRISE", sourceId: "ENTERPRISE-001", action: "REVIEW", targetId: beforeMap.targetId })]));
+      expect(changedResult.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "MIGRATION_SOURCE_CHANGED_REQUIRES_REVIEW", sourceId: "ENTERPRISE-001" })]));
+      expect(await prisma.enterprise.findUniqueOrThrow({ where: { id: beforeMap.targetId } })).toMatchObject({ address: beforeTarget.address });
+      expect(await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "ENTERPRISE", sourceId: "ENTERPRISE-001" } } })).toMatchObject({ targetId: beforeMap.targetId, sourceFingerprint: beforeMap.sourceFingerprint });
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  it("does not advance the Demand map when a main field changes without a formal update", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "zlb-migration-demand-drift-"));
+    try {
+      await cp(fixture, temporary, { recursive: true });
+      const demandPath = path.join(temporary, "entities/demands.ndjson");
+      const changed = (await readFile(demandPath, "utf8")).replace("待对接样本需求", "待对接样本需求变更");
+      await writeFile(demandPath, changed);
+      await updateManifestEntry(temporary, "entities/demands.ndjson", changed);
+      const beforeMap = await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "DEMAND", sourceId: "DEMAND-001" } } });
+      const beforeTarget = await prisma.demand.findUniqueOrThrow({ where: { id: beforeMap.targetId } });
+      const changedResult = await apply(temporary);
+      expect(changedResult.records).toEqual(expect.arrayContaining([expect.objectContaining({ sourceEntity: "DEMAND", sourceId: "DEMAND-001", action: "REVIEW", targetId: beforeMap.targetId })]));
+      expect(changedResult.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "MIGRATION_SOURCE_CHANGED_REQUIRES_REVIEW", sourceId: "DEMAND-001" })]));
+      expect(await prisma.demand.findUniqueOrThrow({ where: { id: beforeMap.targetId } })).toMatchObject({ title: beforeTarget.title });
+      expect(await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "DEMAND", sourceId: "DEMAND-001" } } })).toMatchObject({ targetId: beforeMap.targetId, sourceFingerprint: beforeMap.sourceFingerprint });
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
 
   it("detects changed immutable DemandProgress through the real provider pipeline", async () => {
@@ -160,16 +209,39 @@ describe("M3-006 Actual Apply on real MySQL", () => {
     const demandPath = path.join(temporary, "entities/demands.ndjson");
     const changed = (await readFile(demandPath, "utf8")).replace("历史进展样本。", "不可变历史被修改。");
     await writeFile(demandPath, changed);
-    const manifestPath = path.join(temporary, "snapshot.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.files["entities/demands.ndjson"].sha256 = createHash("sha256").update(changed).digest("hex");
-    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await updateManifestEntry(temporary, "entities/demands.ndjson", changed);
     const progressMap = await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "DEMAND_PROGRESS", sourceId: "PROGRESS-001" } } });
     const original = await prisma.demandProgress.findUniqueOrThrow({ where: { id: progressMap.targetId } });
     const changedResult = await apply(temporary);
     expect(changedResult.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: "MIGRATION_SOURCE_HISTORY_CHANGED", sourceId: "DEMAND-002" })]));
     expect(await prisma.demandProgress.findUniqueOrThrow({ where: { id: original.id } })).toMatchObject({ currentProgress: original.currentProgress });
     await rm(temporary, { recursive: true, force: true });
+  });
+
+  it("rejects executable signatures and declared MIME mismatches without creating Attachment or Link", async () => {
+    const temporary = await mkdtemp(path.join(tmpdir(), "zlb-migration-unsafe-attachments-"));
+    try {
+      await cp(fixture, temporary, { recursive: true });
+      const blobs = path.join(temporary, "attachments/blobs");
+      const executable = Buffer.from("MZ executable payload disguised as a PDF");
+      const pdf = await readFile(path.join(blobs, "sample-policy.pdf"));
+      await writeFile(path.join(blobs, "unsafe.pdf"), executable);
+      await writeFile(path.join(blobs, "mime-mismatch.pdf"), pdf);
+      const attachmentManifestPath = path.join(temporary, "attachments/manifest.ndjson");
+      const rows = (await readFile(attachmentManifestPath, "utf8")).trimEnd().split("\n");
+      rows.push(JSON.stringify({ sourceAttachmentId: "ATTACHMENT-004", sourceEntity: "ANNOUNCEMENT", sourceId: "ANNOUNCEMENT-001", relativePath: "unsafe.pdf", sha256: createHash("sha256").update(executable).digest("hex"), size: executable.byteLength, originalFilename: "伪装文件.pdf", declaredMimeType: "application/pdf" }));
+      rows.push(JSON.stringify({ sourceAttachmentId: "ATTACHMENT-005", sourceEntity: "ANNOUNCEMENT", sourceId: "ANNOUNCEMENT-001", relativePath: "mime-mismatch.pdf", sha256: createHash("sha256").update(pdf).digest("hex"), size: pdf.byteLength, originalFilename: "类型不匹配.pdf", declaredMimeType: "image/png" }));
+      const changedManifest = `${rows.join("\n")}\n`;
+      await writeFile(attachmentManifestPath, changedManifest);
+      await updateManifestEntry(temporary, "attachments/manifest.ndjson", changedManifest, rows.length);
+      const before = { attachments: await prisma.attachment.count(), links: await prisma.attachmentLink.count() };
+      const result = await apply(temporary);
+      expect(result.issues.filter(({ code, sourceId }) => code === "MIGRATION_ATTACHMENT_SCAN_REJECTED" && ["ATTACHMENT-004", "ATTACHMENT-005"].includes(sourceId))).toHaveLength(2);
+      expect(await prisma.legacyMigrationMap.count({ where: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "ATTACHMENT", sourceId: { in: ["ATTACHMENT-004", "ATTACHMENT-005"] } } })).toBe(0);
+      expect({ attachments: await prisma.attachment.count(), links: await prisma.attachmentLink.count() }).toEqual(before);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   });
 
   it("keeps migrated terminal reimbursement read-only/private and historical completed Demand free of fake close rows", async () => {
