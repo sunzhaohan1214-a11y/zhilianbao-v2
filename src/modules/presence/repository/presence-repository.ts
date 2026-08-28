@@ -54,7 +54,7 @@ export class PresenceRepository {
       const currentBatchId = currentActiveBatches.length === 1 ? currentActiveBatches[0].id : undefined;
       const rows = await tx.presenceReport.findMany({
         where: { canceledAt: null, arrivalAt: { lte: now }, expectedDepartureAt: { gt: now } },
-        orderBy: [{ personId: "asc" }, { arrivalAt: "desc" }, { id: "asc" }],
+        orderBy: [{ arrivalAt: "desc" }, { personId: "asc" }, { id: "asc" }],
         select: {
           id: true,
           personId: true,

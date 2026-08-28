@@ -1,5 +1,8 @@
-import { MobilePlaceholder } from "@/components/mobile/mobile-placeholder";
+import { HomeView } from "@/components/mobile/home-view";
+import { homePageContext } from "@/lib/home/page-context";
 
-export default function HomePage() {
-  return <MobilePlaceholder title="首页" description="聚合与当前用户有关的信息入口。" />;
+export default async function HomePage() {
+  const now = new Date();
+  const { actor, service } = await homePageContext(now);
+  return <HomeView data={await service.overview({ actor, now })} />;
 }
