@@ -68,8 +68,11 @@ export class RestoreService {
   }
   async complete(input: Input & { restoreId: string; body: unknown }) {
     await authorizeActor({ actor: input.actor, action: "backup.restore", resource: { resourceType: "restore", requiredScope: "SYSTEM" } }); const body = restoreCompleteSchema.parse(input.body); const restore = await this.prisma.restoreRequest.findUnique({ where: { id: input.restoreId } }); if (!restore) throw new SystemError("RESTORE_NOT_FOUND", "恢复请求不存在"); if (restore.status === "SUCCEEDED") return restore; if (restore.status !== "VALIDATION_REQUIRED") throw new SystemError("RESTORE_VALIDATION_FAILED", "恢复尚未通过自动校验与人工抽查");
-    const operationKey = `restore:${restore.id}:${restore.previewVersion}`; const maintenance = await this.maintenance.status(); if (maintenance.active && maintenance.operationId === operationKey) await this.maintenance.exit(operationKey); else if (maintenance.completedOperationId !== operationKey) throw new SystemError("RESTORE_MAINTENANCE_UNAVAILABLE", "维护模式状态与恢复操作不一致，禁止完成");
+    const operationKey = `restore:${restore.id}:${restore.previewVersion}`; const maintenance = await this.maintenance.status();
+    if (maintenance.active && maintenance.operationId !== operationKey) throw new SystemError("RESTORE_MAINTENANCE_UNAVAILABLE", "维护模式状态与恢复操作不一致，禁止完成");
+    if (!maintenance.active && maintenance.completedOperationId !== operationKey) throw new SystemError("RESTORE_MAINTENANCE_UNAVAILABLE", "维护模式状态与恢复操作不一致，禁止完成");
     await this.prisma.session.deleteMany();
+    if (maintenance.active) await this.maintenance.exit(operationKey);
     return this.prisma.$transaction(async (tx) => { const existingExit = await tx.systemMaintenanceEvent.findFirst({ where: { restoreId: restore.id, operationId: operationKey, eventType: "EXIT" } }); if (!existingExit) await tx.systemMaintenanceEvent.create({ data: { eventType: "EXIT", operationId: operationKey, restoreId: restore.id, actorPersonId: input.actor.personId, reason: body.reason } }); const updated = await tx.restoreRequest.update({ where: { id: restore.id }, data: { status: "SUCCEEDED", activeKey: null, finishedAt: new Date() } }); await tx.auditLog.create({ data: { actorPersonId: input.actor.personId, actorAccountId: input.actor.accountId, actionCode: "RESTORE_COMPLETED", entityType: "RESTORE_REQUEST", entityId: restore.id, afterJson: { status: "SUCCEEDED", sessionsInvalidated: true, maintenanceReleased: true }, reason: body.reason, requestId: input.context?.requestId, ip: input.context?.ip, device: input.context?.deviceName } }); return updated; });
   }
 }
