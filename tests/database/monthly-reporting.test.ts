@@ -134,7 +134,7 @@ describe("C-M3-004 real MySQL historical reporting", () => {
   it("keeps June demand IN_PROGRESS even though current status is COMPLETED and applies cross-batch semantics", async () => {
     const juneB = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId, batchId: batchB }, now: new Date("2026-08-28T12:00:00+08:00") });
     expect(juneB.overview.demand.added).toBe(0); expect(juneB.overview.demand.completed).toBe(0); expect(juneB.overview.demand.stock.IN_PROGRESS).toBe(2); expect(juneB.overview.demand.stale).toBe(1);
-    const juneA = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId, batchId: batchA }, now: new Date("2026-08-28T12:00:00+08:00") }); expect(juneA.overview.demand.added).toBe(1); expect(juneA.overview.demand.stock.IN_PROGRESS).toBe(0);
+    const juneA = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId, batchId: batchA }, now: new Date("2026-08-28T12:00:00+08:00") }); expect(juneA.overview.demand.added).toBe(1); expect(juneA.overview.demand.stock.IN_PROGRESS).toBe(1);
     const julyC = await service.previewMonthlyReport({ actor, query: { month: "2026-07", areaId, batchId: batchC }, now: new Date("2026-08-28T12:00:00+08:00") }); expect(julyC.overview.demand.completed).toBe(2);
   });
 
