@@ -163,6 +163,10 @@ eventKey = 当前业务轮次
 | `OUTCOME_APPROVED_CONTINUE` | 负责镇区 | 下次日期到达再生成 |
 | `OUTCOME_TRACKING_ENDED` | 负责镇区 | 关闭相关Todo |
 
+具体关闭规则：SUBMITTED stale 负责镇区的 `OUTCOME_FILL/OUTCOME_REVISE`；RETURNED stale 管理员 `OUTCOME_REVIEW`；APPROVED_CONTINUE 与 TRACKING_ENDED stale 全部 Outcome Todo。CONTINUE 不立即创建下一轮 `OUTCOME_FILL`，只由新 dueVersion Job 在下一日期到达后生成。ENDED 后无未来 Due Job。
+
+Message 聚合键固定为 `eventType:DEMAND:demandId:personId`，不带 roundId/eventKey；Todo 固定为 `DEMAND:demandId:todoType:personId`，轮次 eventKey 可 reopen stale Todo。Due Outbox 去重键为 `outcome-tracking-due:{planId}:{dueVersion}`。无负责镇区有效 staff 时 Job retry，不伪造接收人，也不在错误中写企业反馈或附件内容。
+
 ---
 
 # 10. 企业 / 人才申请

@@ -324,6 +324,25 @@ enum DemandOwnerExitStatus {
   REJECTED
 }
 
+enum DemandOutcomeTrackingMode {
+  NONE
+  TRACKING
+}
+
+enum DemandOutcomePlanStatus {
+  NOT_TRACKED
+  PENDING
+  IN_PROGRESS
+  ENDED
+}
+
+enum DemandOutcomeReviewStatus {
+  DRAFT
+  PENDING_REVIEW
+  RETURNED
+  APPROVED
+}
+
 enum TalentScopeType {
   DOMESTIC
   OVERSEAS
@@ -666,6 +685,10 @@ model Person {
   reviewedDemandCloseRequests     DemandCloseReview[]               @relation("DemandCloseReviewer")
   requestedDemandOwnerExits       DemandOwnerExitRequest[]          @relation("DemandOwnerExitOwner")
   reviewedDemandOwnerExits        DemandOwnerExitRequest[]          @relation("DemandOwnerExitReviewer")
+  decidedDemandOutcomePlans      DemandOutcomePlan[]            @relation("DemandOutcomePlanDecider")
+  createdDemandOutcomeRounds     DemandOutcomeRound[]           @relation("DemandOutcomeRoundCreator")
+  submittedDemandOutcomeRounds   DemandOutcomeRound[]           @relation("DemandOutcomeRoundSubmitter")
+  reviewedDemandOutcomeRounds    DemandOutcomeRound[]           @relation("DemandOutcomeRoundReviewer")
 
   @@index([personStatus])
   @@map("persons")
@@ -921,6 +944,7 @@ model Batch {
   followedDemands        Demand[]                @relation("DemandFollowBatch")
   completedDemands       Demand[]                @relation("DemandCompletionBatch")
   demandOwnerHistories   DemandOwnerHistory[]
+  trackedOutcomeRounds   DemandOutcomeRound[]
 
   @@index([status, isCurrent])
   @@index([year])
@@ -1999,6 +2023,8 @@ model Demand {
   closeRequests         DemandCloseRequest[]
   closeReviews          DemandCloseReview[]
   ownerExitRequests     DemandOwnerExitRequest[]
+  outcomePlan           DemandOutcomePlan?
+  outcomeRounds         DemandOutcomeRound[]
 
   @@index([responsibleAreaId, status, createdAt])
   @@index([enterpriseId, status])
@@ -2351,6 +2377,75 @@ model DemandOwnerExitRequest {
   @@index([ownerPersonId, requestedAt])
   @@index([reviewedByPersonId, reviewedAt])
   @@map("demand_owner_exit_requests")
+}
+
+model DemandOutcomePlan {
+  id                    String                    @id @default(uuid()) @db.Char(36)
+  demandId              String                    @unique @map("demand_id") @db.Char(36)
+  trackingMode          DemandOutcomeTrackingMode @map("tracking_mode")
+  status                DemandOutcomePlanStatus
+  firstTrackingDate     DateTime?                 @map("first_tracking_date") @db.Date
+  nextTrackingDate      DateTime?                 @map("next_tracking_date") @db.Date
+  dueVersion            Int                       @default(0) @map("due_version") @db.UnsignedInt
+  endedAt               DateTime?                 @map("ended_at") @db.DateTime(3)
+  decidedByPersonId     String                    @map("decided_by_person_id") @db.Char(36)
+  decidedAt             DateTime                  @default(now()) @map("decided_at") @db.DateTime(3)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  demand                Demand                    @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  decidedByPerson       Person                    @relation("DemandOutcomePlanDecider", fields: [decidedByPersonId], references: [id], onDelete: Restrict)
+  rounds                DemandOutcomeRound[]
+
+  @@index([status, nextTrackingDate])
+  @@index([decidedByPersonId, decidedAt])
+  @@map("demand_outcome_plans")
+}
+
+model DemandOutcomeRound {
+  id                       String                    @id @default(uuid()) @db.Char(36)
+  demandId                 String                    @map("demand_id") @db.Char(36)
+  outcomePlanId            String                    @map("outcome_plan_id") @db.Char(36)
+  roundNo                  Int                       @map("round_no") @db.UnsignedInt
+  trackingDate             DateTime                  @map("tracking_date") @db.Date
+  trackingBatchId          String                    @map("tracking_batch_id") @db.Char(36)
+  contractAmountIncrement  Decimal                   @default(0) @map("contract_amount_increment") @db.Decimal(18, 2)
+  investmentAmountIncrement Decimal                  @default(0) @map("investment_amount_increment") @db.Decimal(18, 2)
+  policyFundIncrement      Decimal                   @default(0) @map("policy_fund_increment") @db.Decimal(18, 2)
+  costReductionIncrement   Decimal                   @default(0) @map("cost_reduction_increment") @db.Decimal(18, 2)
+  talentIntroducedIncrement Int                      @default(0) @map("talent_introduced_increment") @db.UnsignedInt
+  patentIncrement          Int                       @default(0) @map("patent_increment") @db.UnsignedInt
+  qualitativeResult        String?                   @map("qualitative_result") @db.Text
+  enterpriseFeedback       String?                   @map("enterprise_feedback") @db.Text
+  nextTrackingDate         DateTime?                 @map("next_tracking_date") @db.Date
+  endTracking              Boolean                   @map("end_tracking")
+  reviewStatus             DemandOutcomeReviewStatus @default(DRAFT) @map("review_status")
+  createdByPersonId        String                    @map("created_by_person_id") @db.Char(36)
+  submittedByPersonId      String?                   @map("submitted_by_person_id") @db.Char(36)
+  submittedAt              DateTime?                 @map("submitted_at") @db.DateTime(3)
+  reviewedByPersonId       String?                   @map("reviewed_by_person_id") @db.Char(36)
+  reviewedAt               DateTime?                 @map("reviewed_at") @db.DateTime(3)
+  returnReason             String?                   @map("return_reason") @db.VarChar(500)
+  verifiedNote             String?                   @map("verified_note") @db.VarChar(2000)
+  editVersion              Int                       @default(1) @map("edit_version") @db.UnsignedInt
+  activeKey                Int?                      @default(1) @map("active_key") @db.UnsignedTinyInt
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  demand                   Demand                    @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  outcomePlan              DemandOutcomePlan         @relation(fields: [outcomePlanId], references: [id], onDelete: Restrict)
+  trackingBatch            Batch                     @relation(fields: [trackingBatchId], references: [id], onDelete: Restrict)
+  createdByPerson          Person                    @relation("DemandOutcomeRoundCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  submittedByPerson        Person?                   @relation("DemandOutcomeRoundSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
+  reviewedByPerson         Person?                   @relation("DemandOutcomeRoundReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, roundNo])
+  @@unique([demandId, activeKey])
+  @@index([demandId, reviewStatus, trackingDate])
+  @@index([trackingBatchId, reviewStatus, trackingDate])
+  @@index([outcomePlanId, reviewStatus, roundNo])
+  @@index([createdByPersonId, createdAt])
+  @@index([submittedByPersonId, submittedAt])
+  @@index([reviewedByPersonId, reviewedAt])
+  @@map("demand_outcome_rounds")
 }
 
 model Talent {

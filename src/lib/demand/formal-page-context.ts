@@ -1,5 +1,5 @@
 import { requireBusinessPageSession } from "@/lib/auth/guards";
-import { DemandLifecycleService, DemandRecommendationService, FormalDemandService } from "@/modules/demand";
+import { DemandLifecycleService, DemandOutcomeService, DemandRecommendationService, FormalDemandService } from "@/modules/demand";
 import { resolvePermissionActor } from "@/modules/permissions/actor-resolver";
 
 export async function formalDemandPageContext() {
@@ -9,5 +9,6 @@ export async function formalDemandPageContext() {
     service: new FormalDemandService(),
     recommendationService: new DemandRecommendationService(),
     lifecycleService: new DemandLifecycleService(),
+    outcomeService: new DemandOutcomeService(),
   };
 }

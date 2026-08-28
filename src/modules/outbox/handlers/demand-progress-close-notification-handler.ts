@@ -13,6 +13,11 @@ export const DEMAND_LIFECYCLE_NOTIFICATION_EVENTS = [
   "DEMAND_OWNER_EXIT_REJECTED",
   "DEMAND_OWNER_TRANSFERRED",
   "DEMAND_CANCELED",
+  "OUTCOME_TRACKING_DUE",
+  "OUTCOME_SUBMITTED",
+  "OUTCOME_RETURNED",
+  "OUTCOME_APPROVED_CONTINUE",
+  "OUTCOME_TRACKING_ENDED",
 ] as const satisfies readonly OutboxEventType[];
 
 type EventType = (typeof DEMAND_LIFECYCLE_NOTIFICATION_EVENTS)[number];
@@ -34,6 +39,11 @@ const messages: Partial<Record<EventType, { title: string; summary: string }>> =
   DEMAND_OWNER_EXIT_REJECTED: { title: "负责人退出未通过", summary: "负责人退出申请未通过，原负责人继续负责" },
   DEMAND_OWNER_TRANSFERRED: { title: "需求负责人已转交", summary: "需求负责人转交已立即生效" },
   DEMAND_CANCELED: { title: "需求已取消", summary: "需求已按线下沟通结果取消" },
+  OUTCOME_TRACKING_DUE: { title: "成效待跟踪", summary: "一条已办结需求已到成效跟踪日期" },
+  OUTCOME_SUBMITTED: { title: "成效已提交审核", summary: "本轮成效已提交管理员审核" },
+  OUTCOME_RETURNED: { title: "成效审核已退回", summary: "本轮成效需修改后重新提交" },
+  OUTCOME_APPROVED_CONTINUE: { title: "成效审核已通过", summary: "本轮成效已核实，后续按计划继续跟踪" },
+  OUTCOME_TRACKING_ENDED: { title: "成效跟踪已结束", summary: "最后一轮成效已核实，跟踪正式结束" },
 };
 
 async function staleTypes(
@@ -51,6 +61,9 @@ function todoType(eventType: EventType): string | null {
   if (eventType === "DEMAND_CLOSE_SUBMITTED") return "DEMAND_CLOSE_REVIEW";
   if (eventType === "DEMAND_CLOSE_RETURNED") return "DEMAND_CONTINUE";
   if (eventType === "DEMAND_OWNER_EXIT_REQUESTED") return "DEMAND_OWNER_EXIT_REVIEW";
+  if (eventType === "OUTCOME_TRACKING_DUE") return "OUTCOME_FILL";
+  if (eventType === "OUTCOME_SUBMITTED") return "OUTCOME_REVIEW";
+  if (eventType === "OUTCOME_RETURNED") return "OUTCOME_REVISE";
   return null;
 }
 
@@ -73,6 +86,15 @@ export class DemandProgressCloseNotificationHandler implements OutboxHandler<Eve
     }
     if (this.eventType === "DEMAND_OWNER_TRANSFERRED" && payload.staleTodoRecipientIds?.length) {
       await staleTypes(tx, payload.aggregateId, ["DEMAND_UPDATE_STALE", "DEMAND_CONTINUE"], payload.staleTodoRecipientIds, event.occurredAt);
+    }
+    if (this.eventType === "OUTCOME_SUBMITTED") {
+      await staleTypes(tx, payload.aggregateId, ["OUTCOME_FILL", "OUTCOME_REVISE"], undefined, event.occurredAt);
+    }
+    if (this.eventType === "OUTCOME_RETURNED") {
+      await staleTypes(tx, payload.aggregateId, ["OUTCOME_REVIEW"], undefined, event.occurredAt);
+    }
+    if (["OUTCOME_APPROVED_CONTINUE", "OUTCOME_TRACKING_ENDED"].includes(this.eventType)) {
+      await staleTypes(tx, payload.aggregateId, ["OUTCOME_FILL", "OUTCOME_REVISE", "OUTCOME_REVIEW"], undefined, event.occurredAt);
     }
 
     const message = messages[this.eventType];

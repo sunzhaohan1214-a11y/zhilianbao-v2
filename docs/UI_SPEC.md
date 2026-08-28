@@ -387,7 +387,15 @@ Progress 每条显示时间、真实提交人、来源、当前进展、下一�
 
 `PENDING_CLOSE_REVIEW` 显示“待办结审核”，CloseRequest 不可编辑且不开放普通 Progress。`COMPLETED` 显示已办结、办结时间/批次、最终核验和全部历史；`CANCELED` 显示取消事实。两种终态均不显示继续进展或再次提交办结。
 
-SUPER 转交预览展示 old/new owner、active collaborator 数、是否跨批次与责任影响；确认后立即生效，新 owner 无线上接受步骤。M1-006 页面不包含 Outcome 填报、审核或跟踪 UI。
+SUPER 转交预览展示 old/new owner、active collaborator 数、是否跨批次与责任影响；确认后立即生效，新 owner 无线上接受步骤。
+
+### M1-007 Outcome detail
+
+办结审核仍在原单页完成。APPROVE 前必须选择“不跟踪/需要跟踪”，TRACKING 同表单填写首次上海自然日；RETURN 不携带策略。COMPLETED 详情在生命周期区后显示“成效跟踪”，不新增全局导航、Home 卡片、Dashboard 或额外跳转。
+
+顶部显示 Plan 中文状态、首次/下次日期和服务端 `approvedTotals`；金额两位小数、千分位、人民币符号。普通内部只显示 APPROVED 卡片与合计。负责镇区在到期且无活动轮次时显示“填报本轮成效”，字段明确标注“本轮新增”，显式保存草稿，支持 RETURNED 修改与重提。ADMIN/SUPER 在 PENDING_REVIEW 卡片显示退回原因/线下核实表单；无佐证时提示 `verifiedNote` 必填。
+
+Round 卡片显示轮号、实际跟踪日期与批次、六类增量、定性结果、企业反馈、下一日期或结束选择、状态、佐证、退回原因及核实说明。NOT_TRACKED 无填报入口；ENDED 显示“已结束”且无重开动作。所有按钮仍受服务端权限和状态校验，隐藏按钮不是授权边界。
 
 ---
 

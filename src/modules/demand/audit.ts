@@ -9,7 +9,7 @@ export async function writeDemandAudit(
   input: {
     actor?: PermissionActor;
     actionCode: string;
-    entityType: "DEMAND_LEAD" | "DEMAND";
+    entityType: "DEMAND_LEAD" | "DEMAND" | "DEMAND_OUTCOME_PLAN" | "DEMAND_OUTCOME_ROUND";
     entityId: string;
     before?: Prisma.InputJsonObject;
     after?: Prisma.InputJsonObject;
@@ -36,7 +36,7 @@ export async function writeDemandTransition(
   tx: Prisma.TransactionClient,
   input: {
     actor?: PermissionActor;
-    entityType: "DEMAND_LEAD" | "DEMAND";
+    entityType: "DEMAND_LEAD" | "DEMAND" | "DEMAND_OUTCOME_PLAN" | "DEMAND_OUTCOME_ROUND";
     entityId: string;
     fromState?: string;
     toState: string;

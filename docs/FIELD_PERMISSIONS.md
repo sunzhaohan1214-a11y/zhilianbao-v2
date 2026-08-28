@@ -76,6 +76,20 @@ C  可正式纠错（需原因/版本/审计）
 
 `DemandProgress`、`DemandCloseRequest`、`DemandCloseReview` 和 `DemandOwnerExitRequest` 均为历史事实，不提供普通字段覆盖。Progress/Close 附件为 Private Attachment；只有 `scanStatus=PASSED` 后可正式 link，每次下载重新执行 Demand parent visibility，不能暴露永久对象存储 URL。
 
+## 2.2 M1-007 Outcome 字段边界
+
+| 字段/事实 | 普通内部/往届协助 | 负责镇区 staff | 其他镇区 | ADMIN/SUPER | ADMIN/SUPER + 负责镇区角色 |
+|---|---|---|---|---|---|
+| Plan 策略/日期 | R | R | R | 仅办结 APPROVE 或历史补建时 W 一次 | 同左 |
+| APPROVED Round/合计 | R | R | R | R | R |
+| 活动 Round 正文/退回原因 | — | R/W（仅 DRAFT/RETURNED） | — | R/审核动作 | R；镇区身份可按规则 W |
+| increment/trackingDate/end/next | — | 创建/显式保存 W | — | 不可代填 | 镇区身份 W |
+| trackingBatchId/roundNo/status | R正式值 | 服务端生成，只读 | R正式值 | 审核动作触发状态 | 同左 |
+| verifiedNote | R（APPROVED） | 只读 | R（APPROVED） | APPROVE 时 W | APPROVE 时 W |
+| evidence | APPROVED R | 活动/历史 R，可在 DRAFT/RETURNED 新增 | 仅 APPROVED R | 活动/历史 R，不可新增 | 镇区身份可新增 |
+
+客户端不得写累计总额、`trackingBatchId`、审核字段、接收人或 Plan 状态。APPROVED Round、旧 evidence、Audit/Transition 均不可普通覆盖或删除。
+
 ---
 
 # 3. Demand Lead

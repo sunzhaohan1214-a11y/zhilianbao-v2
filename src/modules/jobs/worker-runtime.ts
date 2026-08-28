@@ -16,6 +16,7 @@ import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry"
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
 import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
 import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation-handler";
+import { DemandOutcomeDueJobHandler } from "./handlers/demand-outcome-due-handler";
 import { ReimbursementOcrJobHandler } from "./handlers/reimbursement-ocr-handler";
 import { ReimbursementExportJobHandler } from "./handlers/reimbursement-export-handler";
 import { TripResultDueJobHandler } from "./handlers/trip-result-due-handler";
@@ -69,6 +70,7 @@ export class WorkerRuntime {
     jobHandlers.register("ATTACHMENT_SCAN", new AttachmentScanJobHandler(attachment.scanService));
     jobHandlers.register("ATTACHMENT_TEMP_CLEANUP", new AttachmentCleanupJobHandler(attachment.cleanupService));
     jobHandlers.register("DEMAND_RECOMMENDATION_RUN", new DemandRecommendationJobHandler());
+    jobHandlers.register("DEMAND_OUTCOME_DUE", new DemandOutcomeDueJobHandler());
     jobHandlers.register("REIMBURSEMENT_INVOICE_OCR", new ReimbursementOcrJobHandler());
     jobHandlers.register("REIMBURSEMENT_EXPORT", new ReimbursementExportJobHandler());
     jobHandlers.register("TRIP_RESULT_DUE", new TripResultDueJobHandler());

@@ -510,7 +510,7 @@ completedAt = approval time
 completionBatchId = 已验证仍 ACTIVE 的 currentFollowBatchId
 ```
 
-M1-006 不创建 Outcome；M1-007 尚未开始。
+M1-006 原办结事务已由 M1-007 扩展：APPROVE 必须同时创建唯一 OutcomePlan；NONE 进入 NOT_TRACKED，TRACKING 进入 PENDING 并创建 dueVersion=1 的 Due Job。事务失败则办结事实和计划均不提交。
 
 ### 4.9.2 Owner exit
 
@@ -653,6 +653,8 @@ ENDED          已结束
 待跟踪 → 跟踪中
 ```
 
+实际 transition 由负责镇区创建首个 DRAFT Round 触发；Due Job 只生成消息/待办，不提前创建 Round 或改变计划状态。
+
 每轮可：
 
 ```text
@@ -685,6 +687,18 @@ APPROVED
 ```
 
 进入正式统计。
+
+每轮正式流转：
+
+```text
+DRAFT ─提交→ PENDING_REVIEW ─退回→ RETURNED ─修改/重提→ PENDING_REVIEW
+                              └通过继续→ APPROVED + Plan IN_PROGRESS + dueVersion+1 + 新 Due Job
+                              └通过结束→ APPROVED + Plan ENDED + 取消 WAITING Due Job
+```
+
+同 Demand 的 DRAFT/PENDING_REVIEW/RETURNED 最多一条；APPROVED immutable。RETURN 不进入统计。APPROVE 必须有 PASSED evidence，或由管理员填写 `verifiedNote`。Plan ENDED 不提供重开 transition。
+
+Due Job 在锁定 Plan 后同时校验 Demand COMPLETED、TRACKING 活动态、`dueVersion`、`dueDate`、当前无活动 Round 且日期已到。任一不符 no-op；负责镇区无当前有效 staff 时 retry，不猜接收人。
 
 ---
 

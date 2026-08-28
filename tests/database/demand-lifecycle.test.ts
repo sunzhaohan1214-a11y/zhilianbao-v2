@@ -168,10 +168,11 @@ describe("M1-006 real MySQL demand lifecycle", () => {
     await expect(lifecycle.reviewClose({ actor: admin.actor, demandId: demand.id, body: { decision: "RETURN", townshipVerificationResult: "核验后需补充落地证明", reason: "证明不足" } })).resolves.toMatchObject({ status: "IN_PROGRESS" });
     const second = await lifecycle.submitClose({ actor: owner.actor, demandId: demand.id, idempotencyKey: randomUUID(), body: { solution: "完成技术诊断并提交证明", connectedResources: "对接高校专家和实验室" } });
     expect(second.submissionNo).toBe(first.submissionNo + 1);
-    await expect(lifecycle.reviewClose({ actor: admin.actor, demandId: demand.id, body: { decision: "APPROVE", townshipVerificationResult: "企业和属地已核实完成" } })).resolves.toMatchObject({ status: "COMPLETED", completionBatchId: batchId });
+    await expect(lifecycle.reviewClose({ actor: admin.actor, demandId: demand.id, body: { decision: "APPROVE", townshipVerificationResult: "企业和属地已核实完成", outcomePlan: { trackingMode: "NONE" } } })).resolves.toMatchObject({ status: "COMPLETED", completionBatchId: batchId, outcomePlan: { trackingMode: "NONE", status: "NOT_TRACKED" } });
     expect(await prisma.demandCloseRequest.count({ where: { demandId: demand.id } })).toBe(2);
     expect(await prisma.demandCloseReview.count({ where: { demandId: demand.id } })).toBe(2);
     expect(await prisma.demand.findUniqueOrThrow({ where: { id: demand.id } })).toMatchObject({ status: "COMPLETED", completedAt: expect.any(Date), completionBatchId: batchId });
+    expect(await prisma.demandOutcomePlan.findUniqueOrThrow({ where: { demandId: demand.id } })).toMatchObject({ trackingMode: "NONE", status: "NOT_TRACKED", dueVersion: 0 });
     await deliverLifecycleEvents(demand.id);
     await deliverLifecycleEvents(demand.id);
     expect(await prisma.message.count({ where: { aggregateId: demand.id, personId: admin.person.id, messageType: "DEMAND_CLOSE_SUBMITTED" } })).toBe(1);
@@ -252,7 +253,7 @@ describe("M1-006 real MySQL demand lifecycle", () => {
     await expect(lifecycle.addProgress({ actor: otherTownship.actor, demandId: demand.id, idempotencyKey: randomUUID(), body: { currentProgress: "越权", nextStep: "越权" } })).rejects.toMatchObject({ code: "DEMAND_PROGRESS_NOT_ALLOWED" });
     await expect(lifecycle.submitClose({ actor: townshipStaff.actor, demandId: demand.id, idempotencyKey: randomUUID(), body: { solution: "越权办结", connectedResources: "无" } })).rejects.toMatchObject({ code: "DEMAND_CLOSE_NOT_ALLOWED" });
     await lifecycle.submitClose({ actor: handler.actor, demandId: demand.id, idempotencyKey: randomUUID(), body: { solution: "往届专家已完成技术建议", connectedResources: "行业专家与高校资源" } });
-    await expect(lifecycle.reviewClose({ actor: admin.actor, demandId: demand.id, body: { decision: "APPROVE", townshipVerificationResult: "属地已核实完成" } })).resolves.toMatchObject({ status: "COMPLETED" });
+    await expect(lifecycle.reviewClose({ actor: admin.actor, demandId: demand.id, body: { decision: "APPROVE", townshipVerificationResult: "属地已核实完成", outcomePlan: { trackingMode: "NONE" } } })).resolves.toMatchObject({ status: "COMPLETED" });
     expect(await prisma.demand.findUniqueOrThrow({ where: { id: demand.id } })).toMatchObject({ status: "COMPLETED", currentOwnerPersonId: null });
     expect(await prisma.demandOwnerHistory.count({ where: { demandId: demand.id } })).toBe(0);
     expect(await prisma.demandTownshipHandler.findUniqueOrThrow({ where: { id: townshipHandler.id } })).toMatchObject({ activeKey: 1, expiredAt: null });

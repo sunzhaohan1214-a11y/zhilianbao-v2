@@ -100,11 +100,20 @@ export function DemandLifecyclePanel({ demandId, overview }: { demandId: string;
 
   function reviewClose(formElement: HTMLFormElement, decision: "APPROVE" | "RETURN") {
     const form = new FormData(formElement);
-    void run("review-close", () => post(`/api/v2/demands/${demandId}/review-close`, {
-      decision,
-      townshipVerificationResult: value(form, "townshipVerificationResult"),
-      reason: value(form, "reason") || undefined,
-    }));
+    void run("review-close", async () => {
+      const trackingMode = value(form, "trackingMode");
+      const outcomePlan = decision === "APPROVE"
+        ? trackingMode === "TRACKING"
+          ? { trackingMode, firstTrackingDate: value(form, "firstTrackingDate") }
+          : trackingMode === "NONE" ? { trackingMode } : undefined
+        : undefined;
+      return post(`/api/v2/demands/${demandId}/review-close`, {
+        decision,
+        townshipVerificationResult: value(form, "townshipVerificationResult"),
+        reason: value(form, "reason") || undefined,
+        outcomePlan,
+      });
+    });
   }
 
   function reviewExit(formElement: HTMLFormElement, decision: "APPROVE" | "REJECT") {
@@ -140,7 +149,7 @@ export function DemandLifecyclePanel({ demandId, overview }: { demandId: string;
 
       {overview.closeRequests.length > 0 && <article className={card}><h2 className="text-lg font-semibold">办结申请历史</h2><ol className="space-y-4">{overview.closeRequests.map((request) => <li key={request.id} className="rounded-xl border p-4"><p className="text-xs text-slate-500">第 {request.submissionNo} 次 · {request.submittedByPerson.name} · {shanghai(request.submittedAt)}</p><p className="mt-2 whitespace-pre-wrap text-sm"><span className="font-medium">解决情况：</span>{request.solution}</p><p className="mt-2 whitespace-pre-wrap text-sm"><span className="font-medium">对接资源：</span>{request.connectedResources}</p>{request.attachments.map((attachment) => <p key={attachment.id} className="mt-2 text-sm text-blue-700">附件：{attachment.originalFilename}</p>)}{request.reviews.map((review) => <div key={review.id} className="mt-3 rounded-lg bg-slate-50 p-3 text-sm"><p>{review.decision === "APPROVE" ? "审核通过" : "退回继续跟进"} · {review.reviewedByPerson.name} · {shanghai(review.reviewedAt)}</p><p className="mt-1 whitespace-pre-wrap">属地核验：{review.townshipVerificationResult}</p>{review.reason && <p className="mt-1 whitespace-pre-wrap text-red-700">原因：{review.reason}</p>}</div>)}</li>)}</ol></article>}
 
-      {overview.permissions.canReviewClose && <form onSubmit={(event) => { event.preventDefault(); reviewClose(event.currentTarget, "APPROVE"); }} className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><h2 className="text-lg font-semibold text-emerald-950">属地办结审核</h2><label className="block text-sm font-medium">核验情况<textarea name="townshipVerificationResult" required maxLength={5000} rows={4} className={field} /></label><label className="block text-sm font-medium">退回原因<textarea name="reason" maxLength={500} rows={2} className={field} /></label><div className="flex flex-wrap gap-3"><button disabled={pending} className="min-h-11 rounded-xl bg-emerald-700 px-5 py-3 font-medium text-white">确认办结</button><button type="button" disabled={pending} onClick={(event) => { if (event.currentTarget.form) reviewClose(event.currentTarget.form, "RETURN"); }} className="min-h-11 rounded-xl border border-red-300 bg-white px-5 py-3 font-medium text-red-700">退回继续跟进</button></div></form>}
+      {overview.permissions.canReviewClose && <form onSubmit={(event) => { event.preventDefault(); reviewClose(event.currentTarget, "APPROVE"); }} className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><h2 className="text-lg font-semibold text-emerald-950">属地办结审核</h2><label className="block text-sm font-medium">核验情况<textarea name="townshipVerificationResult" required maxLength={5000} rows={4} className={field} /></label><fieldset className="rounded-xl border border-emerald-200 bg-white p-4"><legend className="px-2 text-sm font-medium">成效跟踪（通过办结时必选）</legend><div className="mt-2 flex flex-wrap gap-5 text-sm"><label><input type="radio" name="trackingMode" value="NONE" required /> 不跟踪</label><label><input type="radio" name="trackingMode" value="TRACKING" required /> 需要跟踪</label></div><label className="mt-4 block text-sm font-medium">首次跟踪日期（需要跟踪时必填）<input name="firstTrackingDate" type="date" className={field} /></label></fieldset><label className="block text-sm font-medium">退回原因<textarea name="reason" maxLength={500} rows={2} className={field} /></label><div className="flex flex-wrap gap-3"><button disabled={pending} className="min-h-11 rounded-xl bg-emerald-700 px-5 py-3 font-medium text-white">确认办结并建立成效计划</button><button type="button" disabled={pending} onClick={(event) => { if (event.currentTarget.form) reviewClose(event.currentTarget.form, "RETURN"); }} className="min-h-11 rounded-xl border border-red-300 bg-white px-5 py-3 font-medium text-red-700">退回继续跟进</button></div></form>}
 
       {overview.permissions.canRequestOwnerExit && <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void run("exit", () => post(`/api/v2/demands/${demandId}/owner-exit`, { reason: value(form, "reason") }, key("exit"))); }} className={card}><h2 className="text-lg font-semibold">申请退出主责</h2><p className="text-sm text-slate-500">审核通过后需求回到待认领；主责历史保留，当前协同关系结束。</p><label className="block text-sm font-medium">退出原因<textarea name="reason" required maxLength={500} rows={3} className={field} /></label><button disabled={pending} className="min-h-11 rounded-xl border border-amber-400 bg-white px-5 py-3 font-medium text-amber-800">提交退出申请</button></form>}
 
