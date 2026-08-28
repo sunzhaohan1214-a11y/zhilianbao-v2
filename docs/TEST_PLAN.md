@@ -203,6 +203,34 @@ Playwright。
 
 > 只一个合法transition。
 
+## 7.1 M1-006 Progress / Close / Responsibility lifecycle
+
+验收计划必须覆盖：
+
+- Progress 同 key 20 路并发仅一条事实，不同 key 可产生多条真实进展；
+- 上海自然日第 30/31 天边界与零 Progress 的 OwnerHistory/TownshipHandler baseline；
+- 10 路 stale reminder 只有一条 Reminder/Outbox/Message/OPEN Todo，七天内再次提醒受限；
+- 只有 `UPLOADED + PASSED + objectKey` 的附件可正式关联，跨 Demand 伪造 link 拒绝；
+- close RETURN、补充、resubmit 保留多轮 immutable CloseRequest/Review/附件历史；
+- completion 写入 `completedAt` 与已验证的 `completionBatchId`；
+- close submit 与 owner-exit request 竞争只有一个合法结果；
+- SUPER preview/confirm、过期或上下文变化 token 拒绝、目标实时 current-member eligibility；
+- 同批次 `TRANSFER`、跨批次 `CROSS_BATCH_TRANSFER` 与 OwnerHistory/current pointer 一致；
+- cancel 结束 current relations/requests 且生命周期 Todo 全部 stale；
+- Worker 重复投递和失败重试不重复 Message/Todo。
+
+PR #22 当前自动化事实必须与“计划”分开表述。已有覆盖来自：
+
+```text
+tests/unit/demand-lifecycle.test.ts
+tests/database/demand-lifecycle.test.ts
+tests/e2e/demand-lifecycle.spec.ts
+```
+
+当前已实际覆盖上海自然日边界和 payload/capability；10 路 reminder exactly-once；20 路 Progress same-key replay；PASSED attachment、无权限下载和跨 Demand 关联拒绝；close return/resubmit/completion immutable history；close 与 owner-exit race；SUPER-only preview/confirm、execute replay 与 OwnerHistory 一致；ALUMNI_TOWNSHIP 无 fake owner；cancel cleanup；Worker 双次消费幂等；以及 Progress/Close、Owner Exit、SUPER Transfer、stale reminder 和 alumni township 的浏览器链路。
+
+当前三个文件没有单独声明“过期 transfer token”和“跨批次 transfer”的自动化 case；在补齐专门测试前，文档不得把这两项表述为已有自动化证明。
+
 ## 8. 消息待办
 
 验证：

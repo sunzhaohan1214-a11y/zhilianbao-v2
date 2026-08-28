@@ -356,6 +356,39 @@ AI推荐（有权时）
 
 按角色动态变化。
 
+### M1-006 lifecycle detail
+
+当前移动端与管理端详情共用单页生命周期面板，已实现：
+
+```text
+最新在前的 Progress 时间线
+当前进展 / 下一步提交
+上海自然日 stale 标签与团队协调提醒
+办结提交、历史 CloseRequest / Review
+ADMIN / SUPER 核验后退回或通过
+current owner 申请退出、ADMIN / SUPER 审核
+SUPER owner transfer preview / second confirm
+合法状态下取消
+completedAt / completionBatchId 或 canceled reason 展示
+```
+
+Progress 每条显示时间、真实提交人、来源、当前进展、下一步和附件。历史往届代理录入明确显示代理 actor 与 represented person，不冒充往届本人在线提交。
+
+动作按责任和状态动态出现：
+
+- current owner：新增进展、提交办结、申请退出；
+- active collaborator：仅补充进展；
+- ALUMNI_PLATFORM active helper：仅补充进展；
+- current township handler：新增进展、代理历史往届、提交办结；
+- 负责镇区其他 staff：补充进展，不能替 handler 提交办结；
+- GROUP_LEADER / MINISTER：仅 stale 时显示低强调提醒；
+- ADMIN / SUPER：办结审核、退出审核；
+- SUPER：管理区显示高风险转交，必须先生成影响预览，再二次确认。
+
+`PENDING_CLOSE_REVIEW` 显示“待办结审核”，CloseRequest 不可编辑且不开放普通 Progress。`COMPLETED` 显示已办结、办结时间/批次、最终核验和全部历史；`CANCELED` 显示取消事实。两种终态均不显示继续进展或再次提交办结。
+
+SUPER 转交预览展示 old/new owner、active collaborator 数、是否跨批次与责任影响；确认后立即生效，新 owner 无线上接受步骤。M1-006 页面不包含 Outcome 填报、审核或跟踪 UI。
+
 ---
 
 # 8. 资源中心
