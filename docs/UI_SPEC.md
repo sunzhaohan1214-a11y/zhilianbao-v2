@@ -909,4 +909,12 @@ canceled/withdrawn
 14. Logo与Mascot资产替换不能破坏布局；
 15. 所有重要页面必须有 Loading/Empty/Error/Forbidden。
 
+## M3-005 PC Admin 导入
+
+流程固定为：批次列表 → 上传 `.xlsx` → 选择 Sheet → Mapping → Preview/Resolve → 二次确认 → Result。手机端不增加入口。
+
+列表只展示文件、类型、状态、创建人、时间、行数和待处理数；Preview 默认脱敏手机号。人工消歧同时展示本次 Excel 关键值与候选的姓名/企业名/人才名及最小业务摘要，不以 UUID 作为主要标签；ARCHIVED 人员、DISABLED/MERGED 企业只能跳过并提示先走治理流程。
+
+首层“确认导入”只打开 Dialog；Dialog 必须展示创建/更新/关联/跳过数、总行数、Preview Version、整批回滚说明，并在管理员勾选已核对后才允许“确认执行导入”发起 POST。取消 Dialog 不产生业务写入；服务端 stale preview 仍返回 `IMPORT_PREVIEW_STALE`，前端关闭 Dialog 并刷新。
+
 **UI_SPEC.md DESIGN v1.1 END**

@@ -530,4 +530,8 @@ M1-008 home
 
 逐步推进更可靠。
 
+## M3.5 实现记录（2026-08-28）
+
+统一 Import Engine、Field Registry、EntityMatcher、企业/团员/人才 Adapter、逻辑快照、确认幂等，以及企业限域/人才管理员导出已进入本里程碑实现。M3.4 Reporting 与 M3.6 V1 Migration 未开始。
+
 **IMPLEMENTATION_PLAN.md v1.1 END**

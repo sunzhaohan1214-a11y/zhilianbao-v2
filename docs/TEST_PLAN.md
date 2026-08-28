@@ -499,4 +499,10 @@ P3 UI/文案/低频问题
 
 > P0=0，P1=0。
 
+## 22. M3-005 专项测试
+
+- Unit：aliases/ambiguous/required、mapping/fingerprint 版本、formula guard、三个 Matcher、ARCHIVED/DISABLED/MERGED 治理阻断、Candidate Summary 脱敏、phone/creditCode normalizer、输出公式转义与 scope resolver。
+- Real MySQL：空库与重复 migrate deploy、双 Confirm、mapping/旧 preview 竞争、信用代码/有账号与无账号手机号 race、ARCHIVED 人员与 DISABLED 企业不变、晚行失败全回滚、快照和幂等。
+- Critical E2E：管理员企业/团员导入与重复上传、可辨识候选摘要、首层确认不写库/取消不写库/Modal 二次确认后才 Apply；镇区/部门企业导出限域；成员导出拒绝；管理员人才导出。
+
 **TEST_PLAN.md v1.1 END**
