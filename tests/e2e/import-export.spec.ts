@@ -66,6 +66,7 @@ async function uploadResolveAndConfirm(page: Page, buffer: Buffer) {
   await expect(dialog).toBeHidden();
   expect(await getPrismaClient().importBatch.findUniqueOrThrow({ where: { id: batchId }, select: { status: true } })).toEqual({ status: "PREVIEW_READY" });
   await page.getByRole("button", { name: "确认导入" }).click();
+  await page.getByLabel("正式导入原因").fill("E2E 企业正式导入");
   await page.getByLabel("我已核对预览结果与正式候选").check();
   const confirmation = page.waitForResponse((response) => response.url().endsWith("/confirm") && response.request().method() === "POST");
   await page.getByRole("button", { name: "确认执行导入" }).click();
@@ -89,6 +90,7 @@ async function uploadMemberResolveAndConfirm(page: Page, buffer: Buffer) {
   expect((await resolution).status()).toBe(200);
   await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
   await page.getByRole("button", { name: "确认导入" }).click();
+  await page.getByLabel("正式导入原因").fill("E2E 成员正式导入");
   await page.getByLabel("我已核对预览结果与正式候选").check();
   const confirmation = page.waitForResponse((response) => response.url().endsWith("/confirm") && response.request().method() === "POST");
   await page.getByRole("button", { name: "确认执行导入" }).click();
