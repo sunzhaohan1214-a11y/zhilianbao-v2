@@ -58,10 +58,11 @@ export function DemandLifecyclePanel({ demandId, overview }: { demandId: string;
   async function run(action: string, operation: () => Promise<unknown>) {
     setPending(true);
     setMessage("");
+    if (action === "preview-transfer") setTransferPreview(null);
     try {
       await operation();
       delete keys.current[action];
-      setTransferPreview(null);
+      if (action !== "preview-transfer") setTransferPreview(null);
       setMessage("操作已完成。");
       router.refresh();
     } catch (error) {
