@@ -406,6 +406,13 @@ describe("M1-005 real MySQL recommendation", () => {
     const piiText = `智能制造 ${phone} ${identity} ${email}`;
     const demand = await publishedDemand(new Date(), piiText);
     await prisma.memberCapabilityProfile.update({ where: { personId: candidates[0].person.id }, data: { professionalDirection: piiText, coordinatableResources: piiText } });
+    await prisma.trip.create({ data: {
+      title: `M1-005 PII evidence ranking ${randomUUID()}`,
+      purpose: "确保含原始证据的候选人稳定进入规则兜底前三。",
+      createdByPersonId: admin.person.id,
+      participants: { create: { personId: candidates[0].person.id, addedByPersonId: admin.person.id } },
+      result: { create: { resultSummary: "测试近期活动证据", submittedByPersonId: admin.person.id, submittedAt: new Date() } },
+    } });
     const run = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT" }, idempotencyKey: randomUUID() });
     const invalid = { recommendations: [{ candidateId: randomUUID(), reason: "伪造的候选人不应被接受。", evidenceKeys: ["INDUSTRY"] }] };
     const fake = new FakeDemandMatchProvider([invalid, invalid]);
