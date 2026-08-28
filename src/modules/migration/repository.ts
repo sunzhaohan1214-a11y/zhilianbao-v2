@@ -22,7 +22,10 @@ export class MigrationRepository {
   async upsertMap(tx: MigrationTransaction, input: { sourceSystem: string; sourceEntity: string; sourceId: string; targetEntity: string; targetId: string; sourceFingerprint: string; immutableHistory: boolean; batchId: string }) {
     const key = { sourceSystem_sourceEntity_sourceId: { sourceSystem: input.sourceSystem, sourceEntity: input.sourceEntity, sourceId: input.sourceId } };
     const existing = await tx.legacyMigrationMap.findUnique({ where: key });
-    if (!existing) return tx.legacyMigrationMap.create({ data: { ...input, firstMigrationBatchId: input.batchId, lastMigrationBatchId: input.batchId } });
+    if (!existing) {
+      const { batchId, ...mapping } = input;
+      return tx.legacyMigrationMap.create({ data: { ...mapping, firstMigrationBatchId: batchId, lastMigrationBatchId: batchId } });
+    }
     if (existing.targetEntity !== input.targetEntity || existing.targetId !== input.targetId) throw new MigrationError("MIGRATION_TARGET_CONFLICT", "同一 V1 源记录不能改指向另一个 V2 目标");
     if (existing.immutableHistory && existing.sourceFingerprint !== input.sourceFingerprint) throw new MigrationError("MIGRATION_SOURCE_HISTORY_CHANGED", "不可变历史源记录内容发生变化，禁止覆盖");
     return tx.legacyMigrationMap.update({ where: { id: existing.id }, data: { sourceFingerprint: input.sourceFingerprint, lastMigrationBatchId: input.batchId } });
