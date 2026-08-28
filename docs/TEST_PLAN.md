@@ -243,6 +243,15 @@ Playwright。
 
 - 无依据拒答；
 - 推荐证据；
+- 在任候选完整资格、0/2 当前批次 fail-safe、20 人池与 3 人上限；
+- 非法 AI 候选 ID / evidence / 重复 / 百分比的一次修复与规则降级；
+- 新 Run 原子切换、失败保留旧 current、并发 Run 和幂等 Job；
+- 推荐本人 / 负责镇区 / 管理员 / 无关人员可见性；
+- CURRENT decline 后重跑排除，且其他在任人员仍可 claim；
+- 0 人或 30 天往届门槛、两类往届响应、激活事务与 claim 竞态；
+- Provider 自由文本手机号、身份证和 email 脱敏，且正式 evidence snapshot 不被改写；
+- 负责镇区完整可见、历史代录与 handler 均要求有效 `TOWNSHIP_STAFF` 角色及属地关系；
+- CURRENT 推荐 Message 且 Todo=0；ALUMNI_PLATFORM Message + 响应 Todo；历史往届无站内通知；响应完成、重跑 stale 与 Worker 重试 exactly-once；
 - 政策依据页；
 - 人才不抽结构化电话；
 - 打车票不自动差旅交通；

@@ -1035,6 +1035,19 @@ Item 保存：
 
 人员资料以后修改，不改变旧推荐依据。
 
+Run 使用 `CURRENT | ALUMNI` 阶段与
+`PENDING | RUNNING | SUCCEEDED | FALLBACK_SUCCEEDED | FAILED` 状态。只有成功或规则降级成功时
+才在事务内把旧 Run 的 `currentKey` 置空，再把新 Run 设为 `1`。
+
+往届正式协助使用独立关系：
+
+```text
+Demand 1 — N DemandAlumniHelper
+Demand 1 — N DemandTownshipHandler（同时最多 1 个 current）
+```
+
+`DemandAlumniHelper` 不是 Owner 或 Collaborator；`DemandTownshipHandler` 是往届路径的当前镇区责任人。
+
 ---
 
 ## 7.11 DemandStateHistory / DemandReview

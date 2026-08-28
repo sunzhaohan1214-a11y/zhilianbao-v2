@@ -7,11 +7,13 @@ import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attac
 import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/announcement-notification-handler";
 import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-notification-handler";
 import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
+import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
 import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
 import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
+import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation-handler";
 import { TripResultDueJobHandler } from "./handlers/trip-result-due-handler";
 import { JobHandlerRegistry } from "./handler-registry";
 import { JobRepository } from "./job-repository";
@@ -62,6 +64,7 @@ export class WorkerRuntime {
     const jobHandlers = new JobHandlerRegistry();
     jobHandlers.register("ATTACHMENT_SCAN", new AttachmentScanJobHandler(attachment.scanService));
     jobHandlers.register("ATTACHMENT_TEMP_CLEANUP", new AttachmentCleanupJobHandler(attachment.cleanupService));
+    jobHandlers.register("DEMAND_RECOMMENDATION_RUN", new DemandRecommendationJobHandler());
     jobHandlers.register("TRIP_RESULT_DUE", new TripResultDueJobHandler());
     this.runner = dependencies?.runner ?? new JobRunner(this.jobs, jobHandlers, config.heartbeatMs, logger);
 
@@ -76,6 +79,11 @@ export class WorkerRuntime {
     for (const eventType of ["DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED", "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED"] as const) {
       outboxHandlers.register(eventType, new DemandParticipationNotificationHandler(eventType));
     }
+    for (const eventType of ["DEMAND_RECOMMENDED_CURRENT", "DEMAND_RECOMMENDED_ALUMNI"] as const) {
+      outboxHandlers.register(eventType, new DemandRecommendationNotificationHandler(eventType));
+    }
+    outboxHandlers.register("DEMAND_ALUMNI_RESPONSE_RECORDED", new DemandAlumniResponseNotificationHandler());
+    outboxHandlers.register("DEMAND_ALUMNI_HELP_ACTIVATED", new DemandAlumniHelpActivatedNotificationHandler());
     outboxHandlers.register("TRIP_PARTICIPANT_ADDED", new TripParticipantAddedHandler());
     outboxHandlers.register("TRIP_UPDATED", new TripLifecycleHandler("TRIP_UPDATED"));
     outboxHandlers.register("TRIP_RESULT_DUE_SCHEDULED", new TripResultDueScheduledHandler(this.jobs));

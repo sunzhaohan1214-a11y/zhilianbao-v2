@@ -28,6 +28,8 @@ describe("C-M3-003 announcement and notification foundation", () => {
       "TRIP_CANCELED", "TRIP_RESULT_SUBMITTED",
       "DEMAND_CLAIMED", "COLLABORATION_APPLIED", "COLLABORATION_INVITED",
       "COLLABORATION_APPROVED", "COLLABORATION_ACCEPTED", "COLLABORATOR_LEFT", "COLLABORATOR_REMOVED",
+      "DEMAND_RECOMMENDED_CURRENT", "DEMAND_RECOMMENDED_ALUMNI",
+      "DEMAND_ALUMNI_RESPONSE_RECORDED", "DEMAND_ALUMNI_HELP_ACTIVATED",
     ]));
     expect(outboxPayloadSchemas.ANNOUNCEMENT_PUBLISHED.safeParse({
       announcementId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -40,6 +42,13 @@ describe("C-M3-003 announcement and notification foundation", () => {
       tripId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       dueAt: "2026-08-30T15:59:59.999Z",
       eventKey: "2026-08-30T15:59:59.999Z",
+    }).success).toBe(true);
+    expect(outboxPayloadSchemas.DEMAND_RECOMMENDED_ALUMNI.safeParse({
+      aggregateId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      recipientIds: ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+      todoRecipientIds: ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+      staleTodoRecipientIds: [],
+      eventKey: "recommendation-run:test",
     }).success).toBe(true);
   });
 

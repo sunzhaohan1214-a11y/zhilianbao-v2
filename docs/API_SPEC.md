@@ -232,9 +232,11 @@ formal-correction（根据字段）
 ## 7.4 Recommendations
 
 ```text
+GET  /demands/:id/recommendations
 POST /demands/:id/recommendations/run
 POST /demands/:id/recommendations/manual-add
 POST /demands/:id/recommendations/:itemId/respond
+POST /demands/:id/alumni-help/activate
 ```
 
 AI运行可返回：
@@ -242,6 +244,10 @@ AI运行可返回：
 ```text
 202 Accepted + jobId
 ```
+
+`run` 必须提供 `Idempotency-Key`，且只允许 ADMIN / SUPER_ADMIN。`GET`
+按对象级权限过滤：管理员以及同时具备有效 `TOWNSHIP_STAFF` 角色和负责区域范围的镇区人员可见完整名单，有账号的被推荐人只可见本人项。只有 Appointment/area mapping 而无有效角色的账号不得获得完整可见或历史往届代录能力。
+往届正式协助激活不写入 `currentOwnerPersonId`，必须同时建立有效的镇区经办关系。
 
 ---
 

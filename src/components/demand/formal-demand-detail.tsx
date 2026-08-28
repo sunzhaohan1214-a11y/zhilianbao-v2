@@ -1,9 +1,11 @@
-import type { FormalDemandService } from "@/modules/demand";
+import type { DemandRecommendationService, FormalDemandService } from "@/modules/demand";
 import { FormalDemandActions } from "./formal-demand-actions";
 import { FormalDemandParticipation } from "./formal-demand-participation";
+import { DemandRecommendations } from "./demand-recommendations";
 
 type Detail = Awaited<ReturnType<FormalDemandService["detail"]>>;
 type Timeline = Awaited<ReturnType<FormalDemandService["timeline"]>>;
+type Recommendations = Awaited<ReturnType<DemandRecommendationService["getRecommendations"]>>;
 
 const statusLabel: Record<string, string> = {
   DRAFT: "草稿",
@@ -42,6 +44,7 @@ export function FormalDemandDetail({
   demand,
   timeline,
   areas,
+  recommendations,
   canEdit,
   canSubmit,
   canReview,
@@ -55,6 +58,7 @@ export function FormalDemandDetail({
   demand: Detail;
   timeline: Timeline;
   areas: { id: string; name: string }[];
+  recommendations: Recommendations | null;
   canEdit: boolean;
   canSubmit: boolean;
   canReview: boolean;
@@ -74,6 +78,8 @@ export function FormalDemandDetail({
       </header>
 
       {(demand.firstPublishedAt || canClaim) && <FormalDemandParticipation demand={demand} canClaim={canClaim} canApplyCollaboration={canApplyCollaboration} canManageCollaboration={canManageCollaboration} canAcceptInvitation={canAcceptInvitation} canLeaveCollaboration={canLeaveCollaboration} />}
+
+      {recommendations && <DemandRecommendations demandId={demand.id} data={recommendations} />}
 
       {demand.latestReturnReason && <article className="rounded-2xl border border-red-200 bg-red-50 p-5"><p className="text-sm font-medium text-red-700">最新退回原因</p><p className="mt-2 whitespace-pre-wrap text-red-950">{demand.latestReturnReason}</p></article>}
 

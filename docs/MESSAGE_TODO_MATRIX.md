@@ -81,14 +81,18 @@ CANCEL/MERGE
 
 | Event | 消息接收人 | 待办 | 说明 |
 |---|---|---|---|
-| `DEMAND_RECOMMENDED_CURRENT` | 被推荐在任团员 | 可生成 `DEMAND_RECOMMENDED_ACTION` | 可查看详情、暂不参与；认领不是强制 |
+| `DEMAND_RECOMMENDED_CURRENT` | 被推荐在任团员 | 无 | 可查看详情、暂不参与；认领不是强制任务 |
 | `DEMAND_RECOMMENDED_ALUMNI` | 平台内往届 | `DEMAND_ALUMNI_RESPONSE` | 愿意协助/暂不参与 |
+| `DEMAND_ALUMNI_RESPONSE_RECORDED` | 无新增消息 | 精确关闭本人 `DEMAND_ALUMNI_RESPONSE` | 历史往届线下代录无站内 Todo |
+| `DEMAND_ALUMNI_HELP_ACTIVATED` | 当前属地经办人；平台内往届 helper 本人 | 无 | 历史往届无账号不发消息；本阶段不生成进展 Todo |
 | `DEMAND_CLAIMED` | 负责镇区、其他有效协同/推荐相关人员按规则 | 主责 `DEMAND_PROGRESS` 由业务节奏产生 | 需求进入对接中 |
 | `DEMAND_CLAIM_CONFLICT` | 不生成持久消息 | 无 | API即时409提示 |
 | `DEMAND_CLAIM_PERIOD_EXPIRED` | 管理员、负责镇区 | 管理员/镇区 `DEMAND_CLAIM_EXPIRED` | 每轮一次，触发往届补充推荐 |
 | `DEMAND_RECOMMENDATION_DECLINED` | 管理员/负责镇区可在详情查看 | 无 | 不重复提醒该人 |
 
 首页“最新需求”不是 Todo。
+
+ALUMNI 新 current run 会将被替换人员尚未处理的 `DEMAND_ALUMNI_RESPONSE` 标记为 `STALE`；同一需求、人员与 TodoType 最多一个 OPEN。人工 add/replace 只通知新加入人员，不给 retained items 重复发消息。
 
 ---
 
