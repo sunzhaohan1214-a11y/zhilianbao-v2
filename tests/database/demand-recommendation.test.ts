@@ -80,14 +80,14 @@ async function historicalPerson() {
   return person;
 }
 
-async function publishedDemand(firstPublishedAt = new Date()) {
+async function publishedDemand(firstPublishedAt = new Date(), originalDescription = "寻找熟悉工业自动化、工业软件与机器人的人才协助技术升级。") {
   const created = await prisma.demand.create({ data: {
     businessNo: `XQ2026${randomUUID().replaceAll("-", "").slice(0, 10)}`,
     enterpriseId,
     responsibleAreaId: areaId,
     selectedContactId: contactId,
     title: `智能制造产线技术升级 ${randomUUID()}`,
-    originalDescription: "寻找熟悉工业自动化、工业软件与机器人的人才协助技术升级。",
+    originalDescription,
     demandType: "TECHNICAL",
     urgency: "NORMAL",
     status: "PENDING_CLAIM",
@@ -400,12 +400,11 @@ describe("M1-005 real MySQL recommendation", () => {
   it("repairs illegal provider output once, persists an evidence-backed fallback, and sends no sensitive fields", async () => {
     const admin = await accountPerson(["ADMIN"]);
     const candidates = await Promise.all(Array.from({ length: 5 }, () => accountPerson(["MEMBER_CURRENT"], { current: true, profile: true })));
-    const demand = await publishedDemand();
     const phone = "13912345678";
     const identity = "32010219900101123X";
     const email = "mysql-pii@example.com";
     const piiText = `智能制造 ${phone} ${identity} ${email}`;
-    await prisma.demand.update({ where: { id: demand.id }, data: { originalDescription: piiText } });
+    const demand = await publishedDemand(new Date(), piiText);
     await prisma.memberCapabilityProfile.update({ where: { personId: candidates[0].person.id }, data: { professionalDirection: piiText, coordinatableResources: piiText } });
     const run = await service.createRun({ actor: admin.actor, demandId: demand.id, body: { stage: "CURRENT" }, idempotencyKey: randomUUID() });
     const invalid = { recommendations: [{ candidateId: randomUUID(), reason: "伪造的候选人不应被接受。", evidenceKeys: ["INDUSTRY"] }] };
