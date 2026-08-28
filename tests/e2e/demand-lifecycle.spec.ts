@@ -88,7 +88,7 @@ test("owner progress and close review are available in both mobile and admin det
   await page.goto(`/admin/demands/${demand.id}`);
   await expect(page.getByRole("heading", { name: "属地办结审核" })).toBeVisible();
   await page.locator('textarea[name="townshipVerificationResult"]').fill("已联系企业核验，需补充落地证明");
-  await page.locator('textarea[name="reason"]').fill("请补充企业确认材料");
+  await page.getByRole("textbox", { name: "退回原因" }).fill("请补充企业确认材料");
   await page.getByRole("button", { name: "退回继续跟进" }).click();
   await expect(page.getByText("对接中", { exact: true })).toBeVisible();
   await authenticated.context.close();
