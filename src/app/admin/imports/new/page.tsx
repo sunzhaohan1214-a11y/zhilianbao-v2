@@ -1,0 +1,2 @@
+import { ImportCreateForm } from "@/components/import-export/import-create-form";
+export default function NewImportPage() { return <section><p className="text-sm font-medium text-blue-600">M3-005 Import Engine</p><h1 className="mt-1 text-3xl font-semibold">新建数据导入</h1><p className="mt-2 text-sm text-slate-500">仅支持不超过 20MB 的 .xlsx；源文件会作为私有审计材料保留。</p><div className="mt-6"><ImportCreateForm /></div></section>; }

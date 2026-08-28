@@ -474,4 +474,11 @@ RESTRICT / NO ACTION
 9. 不在业务代码散落raw unsafe SQL；
 10. 任何唯一性规则都要有并发测试。
 
+## 25. M3-005 数据库约束
+
+- `ImportRow(batch_id,row_number)` 唯一；`ImportCommandIdempotency(actor_person_id,action,key_hash)` 唯一。
+- 所有 staging、快照、幂等和源附件外键使用 `ON DELETE RESTRICT`。
+- Confirm 锁定 `ImportBatch` 并在一个事务内写全部正式实体、Version、业务 Audit、逻辑快照、结果和幂等记录。
+- 企业信用代码和账号手机号继续由正式唯一约束承担并发最终防线；只捕获明确目标冲突。
+
 **DATABASE_CONSTRAINTS.md v1.0 END**

@@ -1354,4 +1354,12 @@ DemandOutcomeRound.review_status = APPROVED
 → 保留 rule_version
 ```
 
+## 23. M3-005 Import 字段补充
+
+`ImportBatch.status`：`UPLOADED/PARSING/MAPPING_REQUIRED/PREVIEW_READY/APPLYING/SUCCEEDED/FAILED/CANCELED`。正式 Apply 不存在 `PARTIAL_SUCCESS`。
+
+`ImportRow.action`：`CREATE/UPDATE/LINK_EXISTING/SKIP/MANUAL_REVIEW/INVALID`；`resolution_status`：`AUTO_RESOLVED/NEEDS_REVIEW/RESOLVED/BLOCKED`。
+
+`raw_json` 永不被人工修正覆盖；修正后的值写 `normalized_json`，决策与原因写 `resolution_json`。
+
 **DATA_DICTIONARY.md v1.1 END**

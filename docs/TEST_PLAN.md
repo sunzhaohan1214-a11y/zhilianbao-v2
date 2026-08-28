@@ -440,4 +440,10 @@ P3 UI/文案/低频问题
 
 > P0=0，P1=0。
 
+## 22. M3-005 专项测试
+
+- Unit：aliases/ambiguous/required、mapping/fingerprint 版本、formula guard、三个 Matcher、phone/creditCode normalizer、输出公式转义与 scope resolver。
+- Real MySQL：空库与重复 migrate deploy、双 Confirm、mapping/旧 preview 竞争、信用代码/手机号 race、晚行失败全回滚、快照和幂等。
+- Critical E2E：管理员企业/团员导入与重复上传；镇区/部门企业导出限域；成员导出拒绝；管理员人才导出。
+
 **TEST_PLAN.md v1.1 END**

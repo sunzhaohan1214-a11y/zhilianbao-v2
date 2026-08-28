@@ -287,4 +287,11 @@ CI建议检查：
 - 报销/求助可见性测试通过；
 - Restore权限测试通过。
 
+## 23. M3-005 Excel 安全
+
+- Import 源文件必须经 Attachment 完成、真实类型识别、恶意扫描 `PASSED` 后绑定 `IMPORT_BATCH/SOURCE_FILE`，并永久私有。
+- 关键身份字段公式单元格阻断；普通公式仅可使用缓存值并产生 warning。
+- 导出文本以 `= + - @` 开头时前置单引号，防止 Formula Injection。
+- Preview 手机号默认脱敏，结构化日志和批次 Audit 不记录 raw row 或完整手机号。
+
 **SECURITY_SPEC.md v1.0 END**

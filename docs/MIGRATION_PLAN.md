@@ -463,4 +463,10 @@ MigrationBatch
 9. 不用旧来离宝算新版当前在宝；
 10. 不在V1正式库执行清理/修改迁移脚本。
 
+## 24. M3-005 复用边界
+
+M3-005 已提供可复用 `EntityMatcher`（Person/Enterprise/Talent）。M3-006 必须调用该共享模块，不得重新实现另一套匹配规则。
+
+M3-006 V1 Migration 尚未开始，本文件其余迁移演练、对账和切换要求状态不变。
+
 **MIGRATION_PLAN.md v1.0 END**

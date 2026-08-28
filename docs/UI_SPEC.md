@@ -868,4 +868,10 @@ canceled/withdrawn
 14. Logo与Mascot资产替换不能破坏布局；
 15. 所有重要页面必须有 Loading/Empty/Error/Forbidden。
 
+## M3-005 PC Admin 导入
+
+流程固定为：批次列表 → 上传 `.xlsx` → 选择 Sheet → Mapping → Preview/Resolve → 二次确认 → Result。手机端不增加入口。
+
+列表只展示文件、类型、状态、创建人、时间、行数和待处理数；Preview 默认脱敏手机号，阻断行可选择匹配已有、创建新记录或跳过。
+
 **UI_SPEC.md DESIGN v1.1 END**

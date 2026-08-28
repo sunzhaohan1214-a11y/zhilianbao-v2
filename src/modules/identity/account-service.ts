@@ -3,22 +3,33 @@ import { AuthError } from "./errors";
 import { hashPassword, initialPasswordFromPhone } from "./password/password";
 import { normalizePhone } from "./phone";
 import { lockAccount, writeAudit } from "./repository/auth-repository";
+import type { Prisma } from "@/generated/prisma/client";
 
 function isUniqueConflict(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }
 
-export async function provisionAccount(input: { personId: string; phone: string }) {
+export async function prepareInitialAccountCredential(phoneInput: string) {
+  const phone = normalizePhone(phoneInput);
+  return { phone, passwordHash: await hashPassword(initialPasswordFromPhone(phone)) };
+}
+
+export async function provisionAccountInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { personId: string; phone: string; passwordHash: string; forcePasswordChange?: boolean; actorPersonId?: string; requestId?: string },
+) {
   const phone = normalizePhone(input.phone);
-  const passwordHash = await hashPassword(initialPasswordFromPhone(phone));
+  const account = await tx.account.create({ data: { personId: input.personId, phone, passwordHash: input.passwordHash, status: "PENDING_ENABLE", forcePasswordChange: input.forcePasswordChange ?? false } });
+  await tx.stateTransitionHistory.create({ data: { entityType: "ACCOUNT", entityId: account.id, toState: "PENDING_ENABLE", actionCode: "ACCOUNT_PROVISIONED", actorPersonId: input.actorPersonId, requestId: input.requestId } });
+  await writeAudit({ actionCode: "ACCOUNT_PROVISIONED", accountId: account.id, personId: input.personId, entityId: account.id }, tx);
+  return account;
+}
+
+export async function provisionAccount(input: { personId: string; phone: string }) {
+  const { phone, passwordHash } = await prepareInitialAccountCredential(input.phone);
   try {
     return await getPrismaClient().$transaction(async (tx) => {
-      const account = await tx.account.create({
-        data: { personId: input.personId, phone, passwordHash, status: "PENDING_ENABLE" },
-      });
-      await tx.stateTransitionHistory.create({ data: { entityType: "ACCOUNT", entityId: account.id, toState: "PENDING_ENABLE", actionCode: "ACCOUNT_PROVISIONED" } });
-      await writeAudit({ actionCode: "ACCOUNT_PROVISIONED", accountId: account.id, personId: input.personId, entityId: account.id }, tx);
-      return account;
+      return provisionAccountInTransaction(tx, { personId: input.personId, phone, passwordHash });
     });
   } catch (error) {
     if (isUniqueConflict(error)) throw new AuthError("ACCOUNT_CONFLICT", "人员或手机号已有账号", 409);

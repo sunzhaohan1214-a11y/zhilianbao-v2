@@ -443,111 +443,146 @@ enum TodoStatus {
   STALE
 }
 
+enum ImportType {
+  ENTERPRISE
+  MEMBER
+  TALENT
+}
+
+enum ImportBatchStatus {
+  UPLOADED
+  PARSING
+  MAPPING_REQUIRED
+  PREVIEW_READY
+  APPLYING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum ImportRowAction {
+  CREATE
+  UPDATE
+  LINK_EXISTING
+  SKIP
+  MANUAL_REVIEW
+  INVALID
+}
+
+enum ImportRowResolutionStatus {
+  AUTO_RESOLVED
+  NEEDS_REVIEW
+  RESOLVED
+  BLOCKED
+}
+
 model Person {
-  id                             String                       @id @default(uuid()) @db.Char(36)
-  name                           String                       @db.VarChar(80)
-  contactPhone                   String?                      @map("contact_phone") @db.VarChar(30)
-  personStatus                   PersonStatus                 @default(ACTIVE) @map("person_status")
-  createdAt                      DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                      DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  id                             String                            @id @default(uuid()) @db.Char(36)
+  name                           String                            @db.VarChar(80)
+  contactPhone                   String?                           @map("contact_phone") @db.VarChar(30)
+  personStatus                   PersonStatus                      @default(ACTIVE) @map("person_status")
+  createdAt                      DateTime                          @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                      DateTime                          @updatedAt @map("updated_at") @db.DateTime(3)
   account                        Account?
-  phoneChanges                   AccountPhoneHistory[]        @relation("PhoneChangeAccount")
+  phoneChanges                   AccountPhoneHistory[]             @relation("PhoneChangeAccount")
   appointments                   Appointment[]
-  roleAssignments                RoleAssignment[]             @relation("RoleAssignmentPerson")
-  grantedRoleAssignments         RoleAssignment[]             @relation("RoleAssignmentGrantor")
-  specialPermissionGrants        SpecialPermissionGrant[]     @relation("PermissionGrantPerson")
-  grantedSpecialPermissions      SpecialPermissionGrant[]     @relation("PermissionGrantGrantor")
+  roleAssignments                RoleAssignment[]                  @relation("RoleAssignmentPerson")
+  grantedRoleAssignments         RoleAssignment[]                  @relation("RoleAssignmentGrantor")
+  specialPermissionGrants        SpecialPermissionGrant[]          @relation("PermissionGrantPerson")
+  grantedSpecialPermissions      SpecialPermissionGrant[]          @relation("PermissionGrantGrantor")
   batchMemberships               BatchMembership[]
-  groupLeaderAssignments         GroupLeaderAssignment[]      @relation("GroupLeaderPerson")
-  grantedGroupLeaderAssignments  GroupLeaderAssignment[]      @relation("GroupLeaderGrantor")
-  memberCapabilityProfile        MemberCapabilityProfile?     @relation("MemberCapabilityPerson")
-  updatedMemberCapabilities      MemberCapabilityProfile[]    @relation("MemberCapabilityUpdater")
+  groupLeaderAssignments         GroupLeaderAssignment[]           @relation("GroupLeaderPerson")
+  grantedGroupLeaderAssignments  GroupLeaderAssignment[]           @relation("GroupLeaderGrantor")
+  memberCapabilityProfile        MemberCapabilityProfile?          @relation("MemberCapabilityPerson")
+  updatedMemberCapabilities      MemberCapabilityProfile[]         @relation("MemberCapabilityUpdater")
   auditLogs                      AuditLog[]
   stateTransitions               StateTransitionHistory[]
-  uploadedAttachments            Attachment[]                 @relation("AttachmentUploader")
-  createdAttachmentLinks         AttachmentLink[]             @relation("AttachmentLinkCreator")
-  attachmentAccessLogs           AttachmentAccessLog[]        @relation("AttachmentAccessPerson")
-  createdEnterprises             Enterprise[]                 @relation("EnterpriseCreator")
-  coordinatedEnterprises         Enterprise[]                 @relation("EnterpriseCoordinateUpdater")
+  uploadedAttachments            Attachment[]                      @relation("AttachmentUploader")
+  createdAttachmentLinks         AttachmentLink[]                  @relation("AttachmentLinkCreator")
+  attachmentAccessLogs           AttachmentAccessLog[]             @relation("AttachmentAccessPerson")
+  createdEnterprises             Enterprise[]                      @relation("EnterpriseCreator")
+  coordinatedEnterprises         Enterprise[]                      @relation("EnterpriseCoordinateUpdater")
   createdEnterpriseContacts      EnterpriseContact[]
-  submittedEnterpriseRequests    EnterpriseChangeRequest[]    @relation("EnterpriseRequestSubmitter")
-  reviewedEnterpriseRequests     EnterpriseChangeRequest[]    @relation("EnterpriseRequestReviewer")
+  submittedEnterpriseRequests    EnterpriseChangeRequest[]         @relation("EnterpriseRequestSubmitter")
+  reviewedEnterpriseRequests     EnterpriseChangeRequest[]         @relation("EnterpriseRequestReviewer")
   enterpriseVersions             EnterpriseVersion[]
   presenceReports                PresenceReport[]
-  createdPolicies                Policy[]                     @relation("PolicyCreator")
-  changedPolicyVersions          PolicyContentVersion[]       @relation("PolicyVersionChanger")
-  confirmedPolicyVersions        PolicyContentVersion[]       @relation("PolicyVersionConfirmer")
-  confirmedPolicyInterpretations PolicyAIInterpretation[]     @relation("PolicyInterpretationConfirmer")
-  createdPolicyReplacements      PolicyReplacementRelation[]  @relation("PolicyReplacementCreator")
-  endedPolicyReplacements        PolicyReplacementRelation[]  @relation("PolicyReplacementEnder")
-  sourcedDemandLeads             DemandLead[]                 @relation("DemandLeadSourcePerson")
-  createdDemandLeads             DemandLead[]                 @relation("DemandLeadCreator")
+  createdPolicies                Policy[]                          @relation("PolicyCreator")
+  changedPolicyVersions          PolicyContentVersion[]            @relation("PolicyVersionChanger")
+  confirmedPolicyVersions        PolicyContentVersion[]            @relation("PolicyVersionConfirmer")
+  confirmedPolicyInterpretations PolicyAIInterpretation[]          @relation("PolicyInterpretationConfirmer")
+  createdPolicyReplacements      PolicyReplacementRelation[]       @relation("PolicyReplacementCreator")
+  endedPolicyReplacements        PolicyReplacementRelation[]       @relation("PolicyReplacementEnder")
+  sourcedDemandLeads             DemandLead[]                      @relation("DemandLeadSourcePerson")
+  createdDemandLeads             DemandLead[]                      @relation("DemandLeadCreator")
   demandLeadSupplements          DemandLeadSupplement[]
-  createdDemands                 Demand[]                     @relation("DemandCreator")
-  createdMapBoundaryVersions     MapBoundaryVersion[]         @relation("MapBoundaryCreator")
-  createdTrips                   Trip[]                       @relation("TripCreator")
-  canceledTrips                  Trip[]                       @relation("TripCanceler")
-  tripParticipations             TripParticipant[]            @relation("TripParticipantPerson")
-  addedTripParticipations        TripParticipant[]            @relation("TripParticipantAdder")
-  submittedTripResults           TripResult[]                 @relation("TripResultSubmitter")
-  visitSupplements               VisitSupplement[]            @relation("VisitSupplementCreator")
-  tripIdempotencyRecords         TripIdempotency[]            @relation("TripIdempotencyActor")
-  visitLeadIdempotencyRecords    VisitDemandLeadIdempotency[] @relation("VisitLeadIdempotencyActor")
-  createdTalents                 Talent[]                     @relation("TalentCreator")
-  recommendedTalents             Talent[]                     @relation("TalentOriginalRecommender")
-  contactedTalents               Talent[]                     @relation("TalentCurrentContact")
-  submittedTalentRequests        TalentChangeRequest[]        @relation("TalentRequestSubmitter")
-  reviewedTalentRequests         TalentChangeRequest[]        @relation("TalentRequestReviewer")
-  changedTalentVersions          TalentVersion[]              @relation("TalentVersionChanger")
-  talentContactHistories         TalentContactPersonHistory[] @relation("TalentContactPerson")
-  changedTalentContacts          TalentContactPersonHistory[] @relation("TalentContactChanger")
-  startedTalentRounds            TalentTownshipRound[]        @relation("TalentRoundStarter")
-  handledTalentRounds            TalentTownshipRound[]        @relation("TalentRoundHandler")
-  voidedTalentRounds             TalentTownshipRound[]        @relation("TalentRoundVoider")
-  talentRoundProgresses          TalentTownshipProgress[]     @relation("TalentProgressCreator")
-  requestedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIRequester")
-  confirmedTalentAIExtractions   TalentAIExtraction[]         @relation("TalentAIConfirmer")
-  submittedHelpRequests          HelpRequest[]                 @relation("HelpSubmitter")
-  ownedHelpRequests              HelpRequest[]                 @relation("HelpCurrentOwner")
-  helpAssignments                HelpAssignmentHistory[]       @relation("HelpAssignmentPerson")
-  changedHelpAssignments         HelpAssignmentHistory[]       @relation("HelpAssignmentChanger")
-  helpProgresses                 HelpProgress[]                @relation("HelpProgressCreator")
-  helpCommandIdempotencies       HelpCommandIdempotency[]      @relation("HelpIdempotencyActor")
-  reimbursements                 Reimbursement[]               @relation("ReimbursementApplicant")
-  submittedReimbursementVersions ReimbursementSubmissionVersion[] @relation("ReimbursementVersionSubmitter")
-  confirmedReimbursementInvoices ReimbursementInvoice[]       @relation("ReimbursementInvoiceConfirmer")
-  receivedReimbursements         Reimbursement[]               @relation("ReimbursementPaperReceiver")
-  financeSubmittedReimbursements Reimbursement[]               @relation("ReimbursementFinanceSubmitter")
+  createdDemands                 Demand[]                          @relation("DemandCreator")
+  createdMapBoundaryVersions     MapBoundaryVersion[]              @relation("MapBoundaryCreator")
+  createdTrips                   Trip[]                            @relation("TripCreator")
+  canceledTrips                  Trip[]                            @relation("TripCanceler")
+  tripParticipations             TripParticipant[]                 @relation("TripParticipantPerson")
+  addedTripParticipations        TripParticipant[]                 @relation("TripParticipantAdder")
+  submittedTripResults           TripResult[]                      @relation("TripResultSubmitter")
+  visitSupplements               VisitSupplement[]                 @relation("VisitSupplementCreator")
+  tripIdempotencyRecords         TripIdempotency[]                 @relation("TripIdempotencyActor")
+  visitLeadIdempotencyRecords    VisitDemandLeadIdempotency[]      @relation("VisitLeadIdempotencyActor")
+  createdTalents                 Talent[]                          @relation("TalentCreator")
+  recommendedTalents             Talent[]                          @relation("TalentOriginalRecommender")
+  contactedTalents               Talent[]                          @relation("TalentCurrentContact")
+  submittedTalentRequests        TalentChangeRequest[]             @relation("TalentRequestSubmitter")
+  reviewedTalentRequests         TalentChangeRequest[]             @relation("TalentRequestReviewer")
+  changedTalentVersions          TalentVersion[]                   @relation("TalentVersionChanger")
+  talentContactHistories         TalentContactPersonHistory[]      @relation("TalentContactPerson")
+  changedTalentContacts          TalentContactPersonHistory[]      @relation("TalentContactChanger")
+  startedTalentRounds            TalentTownshipRound[]             @relation("TalentRoundStarter")
+  handledTalentRounds            TalentTownshipRound[]             @relation("TalentRoundHandler")
+  voidedTalentRounds             TalentTownshipRound[]             @relation("TalentRoundVoider")
+  talentRoundProgresses          TalentTownshipProgress[]          @relation("TalentProgressCreator")
+  requestedTalentAIExtractions   TalentAIExtraction[]              @relation("TalentAIRequester")
+  confirmedTalentAIExtractions   TalentAIExtraction[]              @relation("TalentAIConfirmer")
+  submittedHelpRequests          HelpRequest[]                     @relation("HelpSubmitter")
+  ownedHelpRequests              HelpRequest[]                     @relation("HelpCurrentOwner")
+  helpAssignments                HelpAssignmentHistory[]           @relation("HelpAssignmentPerson")
+  changedHelpAssignments         HelpAssignmentHistory[]           @relation("HelpAssignmentChanger")
+  helpProgresses                 HelpProgress[]                    @relation("HelpProgressCreator")
+  helpCommandIdempotencies       HelpCommandIdempotency[]          @relation("HelpIdempotencyActor")
+  reimbursements                 Reimbursement[]                   @relation("ReimbursementApplicant")
+  submittedReimbursementVersions ReimbursementSubmissionVersion[]  @relation("ReimbursementVersionSubmitter")
+  confirmedReimbursementInvoices ReimbursementInvoice[]            @relation("ReimbursementInvoiceConfirmer")
+  receivedReimbursements         Reimbursement[]                   @relation("ReimbursementPaperReceiver")
+  financeSubmittedReimbursements Reimbursement[]                   @relation("ReimbursementFinanceSubmitter")
   reimbursementIdempotencies     ReimbursementCommandIdempotency[] @relation("ReimbursementIdempotencyActor")
-  reimbursementExports           ReimbursementExportTask[]     @relation("ReimbursementExportCreator")
-  reviewedDemands                Demand[]                      @relation("DemandReviewer")
-  publishedDemands               Demand[]                      @relation("DemandPublisher")
+  reimbursementExports           ReimbursementExportTask[]         @relation("ReimbursementExportCreator")
+  reviewedDemands                Demand[]                          @relation("DemandReviewer")
+  publishedDemands               Demand[]                          @relation("DemandPublisher")
   demandReviews                  DemandReview[]
   demandCommandIdempotencies     DemandCommandIdempotency[]
-  createdAnnouncements           Announcement[]               @relation("AnnouncementCreator")
-  publishedAnnouncements         Announcement[]               @relation("AnnouncementPublisher")
-  withdrawnAnnouncements         Announcement[]               @relation("AnnouncementWithdrawer")
-  createdAnnouncementVersions    AnnouncementVersion[]        @relation("AnnouncementVersionCreator")
-  targetedAnnouncementRules      AnnouncementAudienceRule[]   @relation("AnnouncementAudiencePerson")
-  createdAnnouncementRules       AnnouncementAudienceRule[]   @relation("AnnouncementAudienceCreator")
+  createdAnnouncements           Announcement[]                    @relation("AnnouncementCreator")
+  publishedAnnouncements         Announcement[]                    @relation("AnnouncementPublisher")
+  withdrawnAnnouncements         Announcement[]                    @relation("AnnouncementWithdrawer")
+  createdAnnouncementVersions    AnnouncementVersion[]             @relation("AnnouncementVersionCreator")
+  targetedAnnouncementRules      AnnouncementAudienceRule[]        @relation("AnnouncementAudiencePerson")
+  createdAnnouncementRules       AnnouncementAudienceRule[]        @relation("AnnouncementAudienceCreator")
   announcementRecipientStates    AnnouncementRecipientState[]
   messages                       Message[]
   todos                          Todo[]
-  currentlyOwnedDemands          Demand[]                     @relation("DemandCurrentOwner")
-  demandOwnerHistories           DemandOwnerHistory[]         @relation("DemandOwnerPerson")
-  createdDemandOwnerHistories    DemandOwnerHistory[]         @relation("DemandOwnerHistoryCreator")
-  demandCollaborationRequests    DemandCollaborationRequest[] @relation("DemandCollaborationTarget")
-  requestedDemandCollaborations  DemandCollaborationRequest[] @relation("DemandCollaborationRequester")
-  decidedDemandCollaborations    DemandCollaborationRequest[] @relation("DemandCollaborationDecider")
-  demandCollaborations           DemandCollaborator[]         @relation("DemandCollaboratorPerson")
-  endedDemandCollaborations      DemandCollaborator[]         @relation("DemandCollaboratorEnder")
-  createdRecommendationRuns      DemandRecommendationRun[]    @relation("RecommendationRunCreator")
-  recommendationItems            DemandRecommendationItem[]   @relation("RecommendationCandidate")
-  recommendationResponses        DemandRecommendationItem[]   @relation("RecommendationResponder")
-  alumniHelpAssignments          DemandAlumniHelper[]          @relation("DemandAlumniHelperPerson")
-  createdAlumniHelpAssignments   DemandAlumniHelper[]          @relation("DemandAlumniHelperCreator")
-  townshipHandlerAssignments     DemandTownshipHandler[]       @relation("DemandTownshipHandlerPerson")
-  assignedTownshipHandlers       DemandTownshipHandler[]       @relation("DemandTownshipHandlerAssigner")
+  createdImportBatches           ImportBatch[]                     @relation("ImportBatchCreator")
+  importIdempotencies            ImportCommandIdempotency[]        @relation("ImportIdempotencyActor")
+  currentlyOwnedDemands          Demand[]                          @relation("DemandCurrentOwner")
+  demandOwnerHistories           DemandOwnerHistory[]              @relation("DemandOwnerPerson")
+  createdDemandOwnerHistories    DemandOwnerHistory[]              @relation("DemandOwnerHistoryCreator")
+  demandCollaborationRequests    DemandCollaborationRequest[]      @relation("DemandCollaborationTarget")
+  requestedDemandCollaborations  DemandCollaborationRequest[]      @relation("DemandCollaborationRequester")
+  decidedDemandCollaborations    DemandCollaborationRequest[]      @relation("DemandCollaborationDecider")
+  demandCollaborations           DemandCollaborator[]              @relation("DemandCollaboratorPerson")
+  endedDemandCollaborations      DemandCollaborator[]              @relation("DemandCollaboratorEnder")
+  createdRecommendationRuns      DemandRecommendationRun[]         @relation("RecommendationRunCreator")
+  recommendationItems            DemandRecommendationItem[]        @relation("RecommendationCandidate")
+  recommendationResponses        DemandRecommendationItem[]        @relation("RecommendationResponder")
+  alumniHelpAssignments          DemandAlumniHelper[]              @relation("DemandAlumniHelperPerson")
+  createdAlumniHelpAssignments   DemandAlumniHelper[]              @relation("DemandAlumniHelperCreator")
+  townshipHandlerAssignments     DemandTownshipHandler[]           @relation("DemandTownshipHandlerPerson")
+  assignedTownshipHandlers       DemandTownshipHandler[]           @relation("DemandTownshipHandlerAssigner")
 
   @@index([personStatus])
   @@map("persons")
@@ -627,27 +662,27 @@ model AuthRateLimitBucket {
 }
 
 model Organization {
-  id                       String                       @id @default(uuid()) @db.Char(36)
-  name                     String                       @db.VarChar(200)
-  type                     OrganizationType
-  parentId                 String?                      @map("parent_id") @db.Char(36)
-  status                   RecordStatus                 @default(ACTIVE)
-  phone                    String?                      @db.VarChar(30)
-  address                  String?                      @db.VarChar(500)
-  latitude                 Decimal?                     @db.Decimal(10, 7)
-  longitude                Decimal?                     @db.Decimal(11, 7)
-  createdAt                DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
-  parent                   Organization?                @relation("OrganizationHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
-  children                 Organization[]               @relation("OrganizationHierarchy")
-  areaMappings             OrganizationAreaMapping[]
-  appointments             Appointment[]
-  departmentAreaRelations  DepartmentTownshipRelation[]
-  dispatchBatchMemberships BatchMembership[]            @relation("DispatchOrganization")
-  postBatchMemberships     BatchMembership[]            @relation("PostOrganization")
-  transferredHelpRequests  HelpRequest[]                 @relation("HelpTransferredOrganization")
-  helpAssignments          HelpAssignmentHistory[]       @relation("HelpAssignmentOrganization")
-  demandTownshipHandlers   DemandTownshipHandler[]
+  id                        String                       @id @default(uuid()) @db.Char(36)
+  name                      String                       @db.VarChar(200)
+  type                      OrganizationType
+  parentId                  String?                      @map("parent_id") @db.Char(36)
+  status                    RecordStatus                 @default(ACTIVE)
+  phone                     String?                      @db.VarChar(30)
+  address                   String?                      @db.VarChar(500)
+  latitude                  Decimal?                     @db.Decimal(10, 7)
+  longitude                 Decimal?                     @db.Decimal(11, 7)
+  createdAt                 DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                 DateTime                     @updatedAt @map("updated_at") @db.DateTime(3)
+  parent                    Organization?                @relation("OrganizationHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children                  Organization[]               @relation("OrganizationHierarchy")
+  areaMappings              OrganizationAreaMapping[]
+  appointments              Appointment[]
+  departmentAreaRelations   DepartmentTownshipRelation[]
+  dispatchBatchMemberships  BatchMembership[]            @relation("DispatchOrganization")
+  postBatchMemberships      BatchMembership[]            @relation("PostOrganization")
+  transferredHelpRequests   HelpRequest[]                @relation("HelpTransferredOrganization")
+  helpAssignments           HelpAssignmentHistory[]      @relation("HelpAssignmentOrganization")
+  demandTownshipHandlers    DemandTownshipHandler[]
   announcementAudienceRules AnnouncementAudienceRule[]
 
   @@index([parentId])
@@ -1213,8 +1248,9 @@ model Attachment {
   links                 AttachmentLink[]
   accessLogs            AttachmentAccessLog[]
   talentAIExtractions   TalentAIExtraction[]
-  reimbursementInvoice ReimbursementInvoice?
-  reimbursementExports ReimbursementExportTask[] @relation("ReimbursementExportOutput")
+  reimbursementInvoice  ReimbursementInvoice?
+  reimbursementExports  ReimbursementExportTask[] @relation("ReimbursementExportOutput")
+  importSourceBatches   ImportBatch[]             @relation("ImportBatchSourceAttachment")
 
   @@index([uploadedByPersonId, isTemporary, uploadStatus])
   @@index([uploadStatus, scanStatus])
@@ -1257,6 +1293,99 @@ model AttachmentAccessLog {
   @@index([personId, createdAt])
   @@index([requestId])
   @@map("attachment_access_logs")
+}
+
+model ImportBatch {
+  id                 String                     @id @default(uuid()) @db.Char(36)
+  importType         ImportType                 @map("import_type")
+  status             ImportBatchStatus          @default(UPLOADED)
+  sourceAttachmentId String                     @unique @map("source_attachment_id") @db.Char(36)
+  sourceSha256       String                     @map("source_sha256") @db.Char(64)
+  originalFilename   String                     @map("original_filename") @db.VarChar(255)
+  sheetName          String?                    @map("sheet_name") @db.VarChar(255)
+  mappingJson        Json?                      @map("mapping_json")
+  mappingVersion     Int                        @default(1) @map("mapping_version") @db.UnsignedInt
+  previewVersion     Int                        @default(0) @map("preview_version") @db.UnsignedInt
+  rowCount           Int                        @default(0) @map("row_count") @db.UnsignedInt
+  validRowCount      Int                        @default(0) @map("valid_row_count") @db.UnsignedInt
+  blockingRowCount   Int                        @default(0) @map("blocking_row_count") @db.UnsignedInt
+  warningRowCount    Int                        @default(0) @map("warning_row_count") @db.UnsignedInt
+  resultJson         Json?                      @map("result_json")
+  createdByPersonId  String                     @map("created_by_person_id") @db.Char(36)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.DateTime(3)
+  parsedAt           DateTime?                  @map("parsed_at") @db.DateTime(3)
+  appliedAt          DateTime?                  @map("applied_at") @db.DateTime(3)
+  failedAt           DateTime?                  @map("failed_at") @db.DateTime(3)
+  errorCode          String?                    @map("error_code") @db.VarChar(100)
+  sourceAttachment   Attachment                 @relation("ImportBatchSourceAttachment", fields: [sourceAttachmentId], references: [id], onDelete: Restrict)
+  createdByPerson    Person                     @relation("ImportBatchCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  rows               ImportRow[]
+  idempotencies      ImportCommandIdempotency[]
+  snapshots          ImportApplySnapshot[]
+
+  @@index([createdByPersonId, createdAt])
+  @@index([status, createdAt])
+  @@index([importType, createdAt])
+  @@index([sourceSha256])
+  @@map("import_batches")
+}
+
+model ImportRow {
+  id               String                    @id @default(uuid()) @db.Char(36)
+  batchId          String                    @map("batch_id") @db.Char(36)
+  rowNumber        Int                       @map("row_number") @db.UnsignedInt
+  rawJson          Json                      @map("raw_json")
+  normalizedJson   Json?                     @map("normalized_json")
+  rowFingerprint   String?                   @map("row_fingerprint") @db.Char(64)
+  action           ImportRowAction
+  resolutionStatus ImportRowResolutionStatus @map("resolution_status")
+  matchedEntityId  String?                   @map("matched_entity_id") @db.Char(36)
+  candidateJson    Json?                     @map("candidate_json")
+  issuesJson       Json?                     @map("issues_json")
+  resolutionJson   Json?                     @map("resolution_json")
+  createdAt        DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt        DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  batch            ImportBatch               @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, resolutionStatus, rowNumber])
+  @@index([batchId, action, rowNumber])
+  @@index([rowFingerprint])
+  @@map("import_rows")
+}
+
+model ImportCommandIdempotency {
+  id             String      @id @default(uuid()) @db.Char(36)
+  actorPersonId  String      @map("actor_person_id") @db.Char(36)
+  action         String      @db.VarChar(64)
+  keyHash        String      @map("key_hash") @db.Char(64)
+  payloadHash    String      @map("payload_hash") @db.Char(64)
+  batchId        String      @map("batch_id") @db.Char(36)
+  previewVersion Int         @map("preview_version") @db.UnsignedInt
+  responseJson   Json        @map("response_json")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.DateTime(3)
+  actorPerson    Person      @relation("ImportIdempotencyActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
+  batch          ImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([actorPersonId, action, keyHash])
+  @@index([batchId, createdAt])
+  @@map("import_command_idempotency")
+}
+
+model ImportApplySnapshot {
+  id              String      @id @default(uuid()) @db.Char(36)
+  batchId         String      @map("batch_id") @db.Char(36)
+  entityType      String      @map("entity_type") @db.VarChar(100)
+  entityId        String?     @map("entity_id") @db.Char(36)
+  beforeJson      Json?       @map("before_json")
+  createdEntityId String?     @map("created_entity_id") @db.Char(36)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.DateTime(3)
+  batch           ImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([batchId, createdAt])
+  @@index([entityType, entityId])
+  @@map("import_apply_snapshots")
 }
 
 model Enterprise {
@@ -1728,7 +1857,7 @@ model DemandRecommendationRun {
   id                String                          @id @default(uuid()) @db.Char(36)
   demandId          String                          @map("demand_id") @db.Char(36)
   stage             DemandRecommendationStage
-  status            DemandRecommendationRunStatus  @default(PENDING)
+  status            DemandRecommendationRunStatus   @default(PENDING)
   triggerType       DemandRecommendationTriggerType @map("trigger_type")
   rulesVersion      String                          @map("rules_version") @db.VarChar(100)
   promptVersion     String?                         @map("prompt_version") @db.VarChar(100)
@@ -1754,22 +1883,22 @@ model DemandRecommendationRun {
 }
 
 model DemandRecommendationItem {
-  id                   String                                      @id @default(uuid()) @db.Char(36)
-  runId                String                                      @map("run_id") @db.Char(36)
-  personId             String                                      @map("person_id") @db.Char(36)
-  candidateKind        DemandRecommendationCandidateKind           @map("candidate_kind")
-  rank                 Int                                         @db.UnsignedTinyInt
+  id                   String                              @id @default(uuid()) @db.Char(36)
+  runId                String                              @map("run_id") @db.Char(36)
+  personId             String                              @map("person_id") @db.Char(36)
+  candidateKind        DemandRecommendationCandidateKind   @map("candidate_kind")
+  rank                 Int                                 @db.UnsignedTinyInt
   source               DemandRecommendationSource
-  reason               String                                      @db.VarChar(500)
-  evidenceSnapshotJson Json                                        @map("evidence_snapshot_json")
-  responseStatus       DemandRecommendationResponseStatus?         @map("response_status")
-  respondedAt          DateTime?                                   @map("responded_at") @db.DateTime(3)
-  respondedByPersonId  String?                                     @map("responded_by_person_id") @db.Char(36)
-  responseNote         String?                                     @map("response_note") @db.VarChar(500)
-  createdAt            DateTime                                    @default(now()) @map("created_at") @db.DateTime(3)
-  run                  DemandRecommendationRun                     @relation(fields: [runId], references: [id], onDelete: Restrict)
-  person               Person                                      @relation("RecommendationCandidate", fields: [personId], references: [id], onDelete: Restrict)
-  respondedByPerson    Person?                                     @relation("RecommendationResponder", fields: [respondedByPersonId], references: [id], onDelete: Restrict)
+  reason               String                              @db.VarChar(500)
+  evidenceSnapshotJson Json                                @map("evidence_snapshot_json")
+  responseStatus       DemandRecommendationResponseStatus? @map("response_status")
+  respondedAt          DateTime?                           @map("responded_at") @db.DateTime(3)
+  respondedByPersonId  String?                             @map("responded_by_person_id") @db.Char(36)
+  responseNote         String?                             @map("response_note") @db.VarChar(500)
+  createdAt            DateTime                            @default(now()) @map("created_at") @db.DateTime(3)
+  run                  DemandRecommendationRun             @relation(fields: [runId], references: [id], onDelete: Restrict)
+  person               Person                              @relation("RecommendationCandidate", fields: [personId], references: [id], onDelete: Restrict)
+  respondedByPerson    Person?                             @relation("RecommendationResponder", fields: [respondedByPersonId], references: [id], onDelete: Restrict)
   alumniHelper         DemandAlumniHelper?
 
   @@unique([runId, rank])
@@ -2071,30 +2200,30 @@ model TalentAIExtraction {
 }
 
 model HelpRequest {
-  id                        String                  @id @default(uuid()) @db.Char(36)
-  businessNo                String                  @unique @map("business_no") @db.VarChar(32)
-  submitterPersonId         String                  @map("submitter_person_id") @db.Char(36)
+  id                        String                   @id @default(uuid()) @db.Char(36)
+  businessNo                String                   @unique @map("business_no") @db.VarChar(32)
+  submitterPersonId         String                   @map("submitter_person_id") @db.Char(36)
   category                  HelpCategory
-  title                     String                  @db.VarChar(200)
-  description               String                  @db.Text
-  urgency                   HelpUrgency             @default(NORMAL)
-  status                    HelpRequestStatus       @default(PENDING)
-  currentOwnerPersonId      String?                 @map("current_owner_person_id") @db.Char(36)
-  transferredOrganizationId String?                 @map("transferred_organization_id") @db.Char(36)
-  expectedCompleteAt        DateTime?               @map("expected_complete_at") @db.DateTime(3)
-  completedAt               DateTime?               @map("completed_at") @db.DateTime(3)
-  completionSummary         String?                 @map("completion_summary") @db.VarChar(5000)
-  withdrawnAt               DateTime?               @map("withdrawn_at") @db.DateTime(3)
-  withdrawReason            String?                 @map("withdraw_reason") @db.VarChar(500)
-  reopenedAt                DateTime?               @map("reopened_at") @db.DateTime(3)
-  reopenReason              String?                 @map("reopen_reason") @db.VarChar(500)
-  sourceSystem              String                  @default("V2") @map("source_system") @db.VarChar(50)
-  sourceRecordId            String?                 @map("source_record_id") @db.VarChar(191)
-  createdAt                 DateTime                @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                 DateTime                @updatedAt @map("updated_at") @db.DateTime(3)
-  submitter                 Person                  @relation("HelpSubmitter", fields: [submitterPersonId], references: [id], onDelete: Restrict)
-  currentOwner              Person?                 @relation("HelpCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  transferredOrganization   Organization?           @relation("HelpTransferredOrganization", fields: [transferredOrganizationId], references: [id], onDelete: Restrict)
+  title                     String                   @db.VarChar(200)
+  description               String                   @db.Text
+  urgency                   HelpUrgency              @default(NORMAL)
+  status                    HelpRequestStatus        @default(PENDING)
+  currentOwnerPersonId      String?                  @map("current_owner_person_id") @db.Char(36)
+  transferredOrganizationId String?                  @map("transferred_organization_id") @db.Char(36)
+  expectedCompleteAt        DateTime?                @map("expected_complete_at") @db.DateTime(3)
+  completedAt               DateTime?                @map("completed_at") @db.DateTime(3)
+  completionSummary         String?                  @map("completion_summary") @db.VarChar(5000)
+  withdrawnAt               DateTime?                @map("withdrawn_at") @db.DateTime(3)
+  withdrawReason            String?                  @map("withdraw_reason") @db.VarChar(500)
+  reopenedAt                DateTime?                @map("reopened_at") @db.DateTime(3)
+  reopenReason              String?                  @map("reopen_reason") @db.VarChar(500)
+  sourceSystem              String                   @default("V2") @map("source_system") @db.VarChar(50)
+  sourceRecordId            String?                  @map("source_record_id") @db.VarChar(191)
+  createdAt                 DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                 DateTime                 @updatedAt @map("updated_at") @db.DateTime(3)
+  submitter                 Person                   @relation("HelpSubmitter", fields: [submitterPersonId], references: [id], onDelete: Restrict)
+  currentOwner              Person?                  @relation("HelpCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  transferredOrganization   Organization?            @relation("HelpTransferredOrganization", fields: [transferredOrganizationId], references: [id], onDelete: Restrict)
   assignments               HelpAssignmentHistory[]
   progresses                HelpProgress[]
   commandIdempotencies      HelpCommandIdempotency[]
@@ -2164,31 +2293,31 @@ model HelpCommandIdempotency {
 }
 
 model Reimbursement {
-  id                         String              @id @default(uuid()) @db.Char(36)
-  businessNo                 String              @unique @map("business_no") @db.VarChar(32)
-  applicantPersonId          String              @map("applicant_person_id") @db.Char(36)
+  id                         String                            @id @default(uuid()) @db.Char(36)
+  businessNo                 String                            @unique @map("business_no") @db.VarChar(32)
+  applicantPersonId          String                            @map("applicant_person_id") @db.Char(36)
   type                       ReimbursementType
-  reason                     String              @db.VarChar(2000)
-  linkedTripId               String?             @map("linked_trip_id") @db.Char(36)
-  status                     ReimbursementStatus @default(DRAFT)
-  currentSubmissionVersionId String?             @unique @map("current_submission_version_id") @db.Char(36)
-  totalAmount                Decimal             @default(0) @map("total_amount") @db.Decimal(18, 2)
-  firstSubmittedAt           DateTime?           @map("first_submitted_at") @db.DateTime(3)
-  lastSubmittedAt            DateTime?           @map("last_submitted_at") @db.DateTime(3)
-  paperReceivedAt            DateTime?           @map("paper_received_at") @db.DateTime(3)
-  paperReceivedByPersonId    String?             @map("paper_received_by_person_id") @db.Char(36)
-  financeSubmittedAt         DateTime?           @map("finance_submitted_at") @db.DateTime(3)
-  financeSubmittedByPersonId String?             @map("finance_submitted_by_person_id") @db.Char(36)
-  sourceSystem               String              @default("V2") @map("source_system") @db.VarChar(50)
-  sourceRecordId             String?             @map("source_record_id") @db.VarChar(191)
-  createdAt                  DateTime            @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt                  DateTime            @updatedAt @map("updated_at") @db.DateTime(3)
-  applicant                  Person              @relation("ReimbursementApplicant", fields: [applicantPersonId], references: [id], onDelete: Restrict)
-  linkedTrip                 Trip?               @relation(fields: [linkedTripId], references: [id], onDelete: Restrict)
-  paperReceivedByPerson      Person?             @relation("ReimbursementPaperReceiver", fields: [paperReceivedByPersonId], references: [id], onDelete: Restrict)
-  financeSubmittedByPerson   Person?             @relation("ReimbursementFinanceSubmitter", fields: [financeSubmittedByPersonId], references: [id], onDelete: Restrict)
-  currentSubmissionVersion   ReimbursementSubmissionVersion? @relation("CurrentReimbursementSubmissionVersion", fields: [currentSubmissionVersionId], references: [id], onDelete: Restrict)
-  submissionVersions         ReimbursementSubmissionVersion[] @relation("ReimbursementSubmissionVersions")
+  reason                     String                            @db.VarChar(2000)
+  linkedTripId               String?                           @map("linked_trip_id") @db.Char(36)
+  status                     ReimbursementStatus               @default(DRAFT)
+  currentSubmissionVersionId String?                           @unique @map("current_submission_version_id") @db.Char(36)
+  totalAmount                Decimal                           @default(0) @map("total_amount") @db.Decimal(18, 2)
+  firstSubmittedAt           DateTime?                         @map("first_submitted_at") @db.DateTime(3)
+  lastSubmittedAt            DateTime?                         @map("last_submitted_at") @db.DateTime(3)
+  paperReceivedAt            DateTime?                         @map("paper_received_at") @db.DateTime(3)
+  paperReceivedByPersonId    String?                           @map("paper_received_by_person_id") @db.Char(36)
+  financeSubmittedAt         DateTime?                         @map("finance_submitted_at") @db.DateTime(3)
+  financeSubmittedByPersonId String?                           @map("finance_submitted_by_person_id") @db.Char(36)
+  sourceSystem               String                            @default("V2") @map("source_system") @db.VarChar(50)
+  sourceRecordId             String?                           @map("source_record_id") @db.VarChar(191)
+  createdAt                  DateTime                          @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                  DateTime                          @updatedAt @map("updated_at") @db.DateTime(3)
+  applicant                  Person                            @relation("ReimbursementApplicant", fields: [applicantPersonId], references: [id], onDelete: Restrict)
+  linkedTrip                 Trip?                             @relation(fields: [linkedTripId], references: [id], onDelete: Restrict)
+  paperReceivedByPerson      Person?                           @relation("ReimbursementPaperReceiver", fields: [paperReceivedByPersonId], references: [id], onDelete: Restrict)
+  financeSubmittedByPerson   Person?                           @relation("ReimbursementFinanceSubmitter", fields: [financeSubmittedByPersonId], references: [id], onDelete: Restrict)
+  currentSubmissionVersion   ReimbursementSubmissionVersion?   @relation("CurrentReimbursementSubmissionVersion", fields: [currentSubmissionVersionId], references: [id], onDelete: Restrict)
+  submissionVersions         ReimbursementSubmissionVersion[]  @relation("ReimbursementSubmissionVersions")
   expenses                   ReimbursementExpense[]
   invoices                   ReimbursementInvoice[]
   commandIdempotencies       ReimbursementCommandIdempotency[]
@@ -2203,19 +2332,19 @@ model Reimbursement {
 }
 
 model ReimbursementSubmissionVersion {
-  id                  String        @id @default(uuid()) @db.Char(36)
-  reimbursementId     String        @map("reimbursement_id") @db.Char(36)
-  versionNo           Int           @map("version_no") @db.UnsignedInt
-  reasonSnapshot      String        @map("reason_snapshot") @db.VarChar(2000)
-  tripSnapshotJson    Json?         @map("trip_snapshot_json")
-  expenseSnapshotJson Json          @map("expense_snapshot_json")
-  invoiceSnapshotJson Json          @map("invoice_snapshot_json")
-  totalAmount         Decimal       @map("total_amount") @db.Decimal(18, 2)
-  submittedByPersonId String        @map("submitted_by_person_id") @db.Char(36)
-  submittedAt         DateTime      @map("submitted_at") @db.DateTime(3)
-  reimbursement       Reimbursement @relation("ReimbursementSubmissionVersions", fields: [reimbursementId], references: [id], onDelete: Restrict)
+  id                  String          @id @default(uuid()) @db.Char(36)
+  reimbursementId     String          @map("reimbursement_id") @db.Char(36)
+  versionNo           Int             @map("version_no") @db.UnsignedInt
+  reasonSnapshot      String          @map("reason_snapshot") @db.VarChar(2000)
+  tripSnapshotJson    Json?           @map("trip_snapshot_json")
+  expenseSnapshotJson Json            @map("expense_snapshot_json")
+  invoiceSnapshotJson Json            @map("invoice_snapshot_json")
+  totalAmount         Decimal         @map("total_amount") @db.Decimal(18, 2)
+  submittedByPersonId String          @map("submitted_by_person_id") @db.Char(36)
+  submittedAt         DateTime        @map("submitted_at") @db.DateTime(3)
+  reimbursement       Reimbursement   @relation("ReimbursementSubmissionVersions", fields: [reimbursementId], references: [id], onDelete: Restrict)
   currentFor          Reimbursement[] @relation("CurrentReimbursementSubmissionVersion")
-  submittedByPerson   Person        @relation("ReimbursementVersionSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
+  submittedByPerson   Person          @relation("ReimbursementVersionSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
 
   @@unique([reimbursementId, versionNo], map: "reimbursement_version_no_key")
   @@index([submittedByPersonId, submittedAt], map: "reimbursement_version_submitter_idx")
@@ -2247,26 +2376,26 @@ model ReimbursementExpense {
 }
 
 model ReimbursementInvoice {
-  id                   String                     @id @default(uuid()) @db.Char(36)
-  reimbursementId      String                     @map("reimbursement_id") @db.Char(36)
-  attachmentId         String                     @unique @map("attachment_id") @db.Char(36)
-  ocrStatus            ReimbursementOcrStatus     @default(NOT_REQUESTED) @map("ocr_status")
+  id                   String                    @id @default(uuid()) @db.Char(36)
+  reimbursementId      String                    @map("reimbursement_id") @db.Char(36)
+  attachmentId         String                    @unique @map("attachment_id") @db.Char(36)
+  ocrStatus            ReimbursementOcrStatus    @default(NOT_REQUESTED) @map("ocr_status")
   suggestedExpenseType ReimbursementExpenseType? @map("suggested_expense_type")
-  ocrRawJson           Json?                      @map("ocr_raw_json")
-  ocrWarning           String?                    @map("ocr_warning") @db.VarChar(500)
+  ocrRawJson           Json?                     @map("ocr_raw_json")
+  ocrWarning           String?                   @map("ocr_warning") @db.VarChar(500)
   confirmedExpenseType ReimbursementExpenseType? @map("confirmed_expense_type")
-  confirmedInvoiceDate DateTime?                  @map("confirmed_invoice_date") @db.Date
-  confirmedAmount      Decimal?                   @map("confirmed_amount") @db.Decimal(18, 2)
-  confirmedSeller      String?                    @map("confirmed_seller") @db.VarChar(300)
-  confirmedInvoiceNo   String?                    @map("confirmed_invoice_no") @db.VarChar(100)
-  invoiceNoNormalized  String?                    @map("invoice_no_normalized") @db.VarChar(100)
-  confirmedAt          DateTime?                  @map("confirmed_at") @db.DateTime(3)
-  confirmedByPersonId  String?                    @map("confirmed_by_person_id") @db.Char(36)
-  createdAt            DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt            DateTime                   @updatedAt @map("updated_at") @db.DateTime(3)
-  reimbursement        Reimbursement              @relation(fields: [reimbursementId], references: [id], onDelete: Restrict)
-  attachment           Attachment                 @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
-  confirmedByPerson    Person?                    @relation("ReimbursementInvoiceConfirmer", fields: [confirmedByPersonId], references: [id], onDelete: Restrict)
+  confirmedInvoiceDate DateTime?                 @map("confirmed_invoice_date") @db.Date
+  confirmedAmount      Decimal?                  @map("confirmed_amount") @db.Decimal(18, 2)
+  confirmedSeller      String?                   @map("confirmed_seller") @db.VarChar(300)
+  confirmedInvoiceNo   String?                   @map("confirmed_invoice_no") @db.VarChar(100)
+  invoiceNoNormalized  String?                   @map("invoice_no_normalized") @db.VarChar(100)
+  confirmedAt          DateTime?                 @map("confirmed_at") @db.DateTime(3)
+  confirmedByPersonId  String?                   @map("confirmed_by_person_id") @db.Char(36)
+  createdAt            DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime                  @updatedAt @map("updated_at") @db.DateTime(3)
+  reimbursement        Reimbursement             @relation(fields: [reimbursementId], references: [id], onDelete: Restrict)
+  attachment           Attachment                @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  confirmedByPerson    Person?                   @relation("ReimbursementInvoiceConfirmer", fields: [confirmedByPersonId], references: [id], onDelete: Restrict)
   expenses             ReimbursementExpense[]
 
   @@index([reimbursementId, createdAt])
@@ -2292,20 +2421,20 @@ model ReimbursementCommandIdempotency {
 }
 
 model ReimbursementExportTask {
-  id                    String                    @id @default(uuid()) @db.Char(36)
-  createdByPersonId     String                    @map("created_by_person_id") @db.Char(36)
-  requiredPermission    String                    @default("reimbursement.manage") @map("required_permission") @db.VarChar(100)
+  id                   String                    @id @default(uuid()) @db.Char(36)
+  createdByPersonId    String                    @map("created_by_person_id") @db.Char(36)
+  requiredPermission   String                    @default("reimbursement.manage") @map("required_permission") @db.VarChar(100)
   reimbursementIdsJson Json                      @map("reimbursement_ids_json")
-  format                ReimbursementExportFormat
-  status                ReimbursementExportStatus @default(WAITING)
-  outputAttachmentId    String?                   @map("output_attachment_id") @db.Char(36)
-  errorCode             String?                   @map("error_code") @db.VarChar(100)
-  createdAt             DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
-  startedAt             DateTime?                 @map("started_at") @db.DateTime(3)
-  finishedAt            DateTime?                 @map("finished_at") @db.DateTime(3)
-  expiresAt             DateTime?                 @map("expires_at") @db.DateTime(3)
-  createdByPerson       Person                    @relation("ReimbursementExportCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
-  outputAttachment      Attachment?               @relation("ReimbursementExportOutput", fields: [outputAttachmentId], references: [id], onDelete: Restrict)
+  format               ReimbursementExportFormat
+  status               ReimbursementExportStatus @default(WAITING)
+  outputAttachmentId   String?                   @map("output_attachment_id") @db.Char(36)
+  errorCode            String?                   @map("error_code") @db.VarChar(100)
+  createdAt            DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  startedAt            DateTime?                 @map("started_at") @db.DateTime(3)
+  finishedAt           DateTime?                 @map("finished_at") @db.DateTime(3)
+  expiresAt            DateTime?                 @map("expires_at") @db.DateTime(3)
+  createdByPerson      Person                    @relation("ReimbursementExportCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  outputAttachment     Attachment?               @relation("ReimbursementExportOutput", fields: [outputAttachmentId], references: [id], onDelete: Restrict)
 
   @@index([createdByPersonId, createdAt])
   @@index([status, createdAt])
@@ -2314,25 +2443,25 @@ model ReimbursementExportTask {
 }
 
 model Announcement {
-  id                  String              @id @default(uuid()) @db.Char(36)
-  status              AnnouncementStatus  @default(DRAFT)
-  currentVersionId    String?             @unique @map("current_version_id") @db.Char(36)
-  isPinned            Boolean             @default(false) @map("is_pinned")
-  pinnedKey           Int?                @unique @map("pinned_key") @db.UnsignedTinyInt
-  publishedAt         DateTime?           @map("published_at") @db.DateTime(3)
-  publishedByPersonId String?             @map("published_by_person_id") @db.Char(36)
-  withdrawnAt         DateTime?           @map("withdrawn_at") @db.DateTime(3)
-  withdrawnByPersonId String?             @map("withdrawn_by_person_id") @db.Char(36)
-  withdrawReason      String?             @map("withdraw_reason") @db.VarChar(500)
-  createdByPersonId   String              @map("created_by_person_id") @db.Char(36)
-  createdAt           DateTime            @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt           DateTime            @updatedAt @map("updated_at") @db.DateTime(3)
-  currentVersion      AnnouncementVersion? @relation("AnnouncementCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  versions            AnnouncementVersion[] @relation("AnnouncementVersions")
+  id                  String                     @id @default(uuid()) @db.Char(36)
+  status              AnnouncementStatus         @default(DRAFT)
+  currentVersionId    String?                    @unique @map("current_version_id") @db.Char(36)
+  isPinned            Boolean                    @default(false) @map("is_pinned")
+  pinnedKey           Int?                       @unique @map("pinned_key") @db.UnsignedTinyInt
+  publishedAt         DateTime?                  @map("published_at") @db.DateTime(3)
+  publishedByPersonId String?                    @map("published_by_person_id") @db.Char(36)
+  withdrawnAt         DateTime?                  @map("withdrawn_at") @db.DateTime(3)
+  withdrawnByPersonId String?                    @map("withdrawn_by_person_id") @db.Char(36)
+  withdrawReason      String?                    @map("withdraw_reason") @db.VarChar(500)
+  createdByPersonId   String                     @map("created_by_person_id") @db.Char(36)
+  createdAt           DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt           DateTime                   @updatedAt @map("updated_at") @db.DateTime(3)
+  currentVersion      AnnouncementVersion?       @relation("AnnouncementCurrentVersion", fields: [currentVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  versions            AnnouncementVersion[]      @relation("AnnouncementVersions")
   audienceRules       AnnouncementAudienceRule[]
-  createdByPerson     Person              @relation("AnnouncementCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
-  publishedByPerson   Person?             @relation("AnnouncementPublisher", fields: [publishedByPersonId], references: [id], onDelete: Restrict)
-  withdrawnByPerson   Person?             @relation("AnnouncementWithdrawer", fields: [withdrawnByPersonId], references: [id], onDelete: Restrict)
+  createdByPerson     Person                     @relation("AnnouncementCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  publishedByPerson   Person?                    @relation("AnnouncementPublisher", fields: [publishedByPersonId], references: [id], onDelete: Restrict)
+  withdrawnByPerson   Person?                    @relation("AnnouncementWithdrawer", fields: [withdrawnByPersonId], references: [id], onDelete: Restrict)
 
   @@index([status, isPinned, publishedAt])
   @@index([createdByPersonId, createdAt])
@@ -2361,22 +2490,22 @@ model AnnouncementVersion {
 }
 
 model AnnouncementAudienceRule {
-  id                String                       @id @default(uuid()) @db.Char(36)
-  announcementId    String                       @map("announcement_id") @db.Char(36)
-  audienceType      AnnouncementAudienceType     @map("audience_type")
-  roleCode          RoleCode?                    @map("role_code")
-  areaId            String?                      @map("area_id") @db.Char(36)
-  organizationId    String?                      @map("organization_id") @db.Char(36)
-  personId          String?                      @map("person_id") @db.Char(36)
-  effectiveAt       DateTime                     @map("effective_at") @db.DateTime(3)
-  expiredAt         DateTime?                    @map("expired_at") @db.DateTime(3)
-  createdByPersonId String                       @map("created_by_person_id") @db.Char(36)
-  createdAt         DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
-  announcement      Announcement                 @relation(fields: [announcementId], references: [id], onDelete: Restrict)
-  area              AdministrativeArea?          @relation(fields: [areaId], references: [id], onDelete: Restrict)
-  organization      Organization?                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  person            Person?                      @relation("AnnouncementAudiencePerson", fields: [personId], references: [id], onDelete: Restrict)
-  createdByPerson   Person                       @relation("AnnouncementAudienceCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  id                String                   @id @default(uuid()) @db.Char(36)
+  announcementId    String                   @map("announcement_id") @db.Char(36)
+  audienceType      AnnouncementAudienceType @map("audience_type")
+  roleCode          RoleCode?                @map("role_code")
+  areaId            String?                  @map("area_id") @db.Char(36)
+  organizationId    String?                  @map("organization_id") @db.Char(36)
+  personId          String?                  @map("person_id") @db.Char(36)
+  effectiveAt       DateTime                 @map("effective_at") @db.DateTime(3)
+  expiredAt         DateTime?                @map("expired_at") @db.DateTime(3)
+  createdByPersonId String                   @map("created_by_person_id") @db.Char(36)
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  announcement      Announcement             @relation(fields: [announcementId], references: [id], onDelete: Restrict)
+  area              AdministrativeArea?      @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  organization      Organization?            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  person            Person?                  @relation("AnnouncementAudiencePerson", fields: [personId], references: [id], onDelete: Restrict)
+  createdByPerson   Person                   @relation("AnnouncementAudienceCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
 
   @@index([announcementId, effectiveAt, expiredAt])
   @@index([audienceType, roleCode, areaId, organizationId, personId])
@@ -2401,20 +2530,20 @@ model AnnouncementRecipientState {
 }
 
 model Message {
-  id            String   @id @default(uuid()) @db.Char(36)
-  personId      String   @map("person_id") @db.Char(36)
-  messageType   String   @map("message_type") @db.VarChar(100)
-  title         String   @db.VarChar(200)
-  summary       String   @db.VarChar(500)
-  aggregateType String?  @map("aggregate_type") @db.VarChar(100)
-  aggregateId   String?  @map("aggregate_id") @db.Char(36)
-  actionUrl     String?  @map("action_url") @db.VarChar(500)
-  dedupeKey     String   @unique @map("dedupe_key") @db.VarChar(191)
-  eventAt       DateTime @map("event_at") @db.DateTime(3)
+  id            String    @id @default(uuid()) @db.Char(36)
+  personId      String    @map("person_id") @db.Char(36)
+  messageType   String    @map("message_type") @db.VarChar(100)
+  title         String    @db.VarChar(200)
+  summary       String    @db.VarChar(500)
+  aggregateType String?   @map("aggregate_type") @db.VarChar(100)
+  aggregateId   String?   @map("aggregate_id") @db.Char(36)
+  actionUrl     String?   @map("action_url") @db.VarChar(500)
+  dedupeKey     String    @unique @map("dedupe_key") @db.VarChar(191)
+  eventAt       DateTime  @map("event_at") @db.DateTime(3)
   readAt        DateTime? @map("read_at") @db.DateTime(3)
-  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
-  person        Person   @relation(fields: [personId], references: [id], onDelete: Restrict)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+  person        Person    @relation(fields: [personId], references: [id], onDelete: Restrict)
 
   @@index([personId, readAt, eventAt])
   @@index([aggregateType, aggregateId])

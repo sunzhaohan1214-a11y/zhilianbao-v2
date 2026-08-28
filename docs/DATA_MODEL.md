@@ -2756,4 +2756,11 @@ DATA_DICTIONARY.md
 
 ---
 
+## 23. M3-005 Import staging
+
+- `ImportBatch` 保存源附件 SHA、Sheet、mapping/preview 版本、汇总和状态。
+- `ImportRow` 保存不可覆盖的原始行、标准化值、匹配候选、问题与人工 resolution；正式业务不得读取其作为业务数据。
+- `ImportCommandIdempotency` 固化同 actor/key/batch/preview 的确认结果。
+- `ImportApplySnapshot` 保存 Apply 前逻辑快照或 CREATE 产生的实体 ID，不提供任意一键生产回滚。
+
 **DATA_MODEL.md v1.2 END**
