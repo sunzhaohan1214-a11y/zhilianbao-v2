@@ -714,4 +714,14 @@ POST /api/v2/admin/talents/export
 
 Confirm 必须同时提供 `Idempotency-Key`、`confirm=true` 和 `expectedPreviewVersion`。同步导出上限 5000 行，二进制响应不得缓存。
 
+## C-M3-004 月度工作台账 API
+
+```text
+GET  /api/v2/reports/monthly?month=YYYY-MM&batchId=&areaId=
+POST /api/v2/reports/monthly/exports            Idempotency-Key required
+GET  /api/v2/reports/monthly/exports/:id
+```
+
+Preview 只返回指标、五表行数、最多十行预览与数据质量 warning。POST 固化 query/scope snapshot 并返回 202；输出通过 `Attachment` 短时签名 URL 下载，不返回公开永久 URL。越权 task id 使用不可探测错误。
+
 **API_SPEC.md v1.1 END**

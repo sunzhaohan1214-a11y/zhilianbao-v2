@@ -1438,4 +1438,12 @@ DemandOutcomeRound.review_status = APPROVED
 
 `PersonImportIdentityLock.phone_hash`：`CHAR(64)` 主键，仅保存 `SHA-256("PHONE:" + normalizedPhone)`，用于跨 ImportBatch 的正式 Apply 串行化。
 
+## C-M3-004 Reporting 字段
+
+- `monthly_report_export_tasks.month`：上海自然月 `YYYY-MM`。
+- `query_snapshot`：month/batchId/areaId 的不可变请求事实；`scope_snapshot`：创建时 county/area 上限。
+- `idempotency_key_hash + payload_hash`：同 actor/key 同 payload 重放；不同 payload 冲突。
+- `output_attachment_id`：唯一私有 XLSX；AttachmentLink parent=`MONTHLY_REPORT_EXPORT_TASK`, relation=`OUTPUT`。
+- `presence_reports.source_system`：`V2` 才进入首期 Presence 月报；V1 历史记录明确排除。
+
 **DATA_DICTIONARY.md v1.1 END**

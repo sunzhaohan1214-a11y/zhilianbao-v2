@@ -19,6 +19,7 @@ import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation
 import { DemandOutcomeDueJobHandler } from "./handlers/demand-outcome-due-handler";
 import { ReimbursementOcrJobHandler } from "./handlers/reimbursement-ocr-handler";
 import { ReimbursementExportJobHandler } from "./handlers/reimbursement-export-handler";
+import { MonthlyReportExportJobHandler } from "./handlers/monthly-report-export-handler";
 import { TripResultDueJobHandler } from "./handlers/trip-result-due-handler";
 import { JobHandlerRegistry } from "./handler-registry";
 import { JobRepository } from "./job-repository";
@@ -73,6 +74,7 @@ export class WorkerRuntime {
     jobHandlers.register("DEMAND_OUTCOME_DUE", new DemandOutcomeDueJobHandler());
     jobHandlers.register("REIMBURSEMENT_INVOICE_OCR", new ReimbursementOcrJobHandler());
     jobHandlers.register("REIMBURSEMENT_EXPORT", new ReimbursementExportJobHandler());
+    jobHandlers.register("MONTHLY_REPORT_EXPORT", new MonthlyReportExportJobHandler());
     jobHandlers.register("TRIP_RESULT_DUE", new TripResultDueJobHandler());
     this.runner = dependencies?.runner ?? new JobRunner(this.jobs, jobHandlers, config.heartbeatMs, logger);
 

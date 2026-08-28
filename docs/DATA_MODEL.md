@@ -2826,4 +2826,10 @@ DATA_DICTIONARY.md
 - `PersonImportIdentityLock` 仅以标准化手机号的 SHA-256 作为持久 guard key，在正式 Apply 事务内串行化无 Account 人员的身份复核；它不是 Person 主键，也不替代 EntityMatcher。
 - `candidate_json` 可同时保存 `candidateIds` 与最小脱敏 `candidates` 摘要；人员包含姓名、脱敏手机号和档案/账号状态，企业包含区域、部分信用代码和状态，人才不包含本人电话、邮箱或简历链接。
 
+## C-M3-004 MonthlyReportExportTask
+
+`MonthlyReportExportTask` 保存自然月、可选批次、query/scope snapshot、创建人、持久幂等 hash、WAITING/RUNNING/SUCCEEDED/FAILED 状态与唯一输出 Attachment。`PresenceReport.sourceSystem/sourceRecordId` 用于明确排除 V1 历史 Presence，不以创建时间猜来源。
+
+Reporting 不复制业务真源：Demand 状态读取 StateTransitionHistory，责任/批次读取 OwnerHistory 与正式转交事实，企业历史状态读取 EnterpriseVersion，成效只读 APPROVED `DemandOutcomeRound` 的 increment、trackingDate、trackingBatchId。
+
 **DATA_MODEL.md v1.2 END**
