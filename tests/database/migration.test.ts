@@ -129,7 +129,8 @@ describe("M3-006 Actual Apply on real MySQL", () => {
     expect(await uniqueTargetCount("DEMAND")).toBe(3);
     expect(await uniqueTargetCount("DEMAND_PROGRESS")).toBe(1);
     expect(await uniqueTargetCount("REIMBURSEMENT")).toBe(3);
-    expect(await uniqueTargetCount("HELP_REQUEST")).toBe(1);
+    expect(await uniqueTargetCount("HELP_REQUEST")).toBe(0);
+    expect(firstResult.records).toEqual(expect.arrayContaining([expect.objectContaining({ sourceEntity: "HELP", sourceId: "HELP-001", action: "REVIEW" })]));
     expect(await uniqueTargetCount("ANNOUNCEMENT")).toBe(1);
     expect(await uniqueTargetCount("ATTACHMENT")).toBe(1);
     const attachmentMap = await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "ATTACHMENT", sourceId: "ATTACHMENT-001" } } });

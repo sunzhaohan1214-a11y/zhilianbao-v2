@@ -335,13 +335,13 @@ export class MigrationAdapterRegistry {
   }
 
   private async help(record: LegacyRecord, context: ApplyAdapterContext): Promise<AdapterResult> {
+    if (record.payload.status !== "待受理") return { action: "REVIEW", targetEntity: "HELP_REQUEST", immutableHistory: record.payload.status === "已办结", issues: [issue(record, "MIGRATION_APPLY_UNSUPPORTED", "REVIEW", "处理中/已办结 Help 缺少可靠 owner、expectedCompleteAt 或 completedAt，未写目标记录")] };
     const submitterPersonId = await sourceTarget(context.tx, context.sourceSystem, "PERSON", String(record.payload.submitterPersonSourceId), "PERSON");
     if (!submitterPersonId) return { action: "REVIEW", targetEntity: "HELP_REQUEST", issues: [issue(record, "HELP_SUBMITTER_UNRESOLVED", "REVIEW", "求助提交人尚无有效 Person map")] };
-    const status = record.payload.status === "已办结" ? "COMPLETED" : record.payload.status === "处理中" ? "IN_PROGRESS" : "PENDING";
-    const created = await context.tx.helpRequest.create({ data: { businessNo: businessNo("V1H", record.sourceId), submitterPersonId, category: "OTHER", title: String(record.payload.title), description: String(record.payload.description), status, completionSummary: record.payload.result ? String(record.payload.result) : undefined, sourceSystem: context.sourceSystem, sourceRecordId: record.sourceId } });
-    await context.tx.stateTransitionHistory.create({ data: { entityType: "HELP_REQUEST", entityId: created.id, toState: status, actionCode: "HELP_IMPORTED_FROM_V1", actorPersonId: context.actor.personId, metadataJson: json({ legacyCategory: record.payload.legacyCategory }) } });
+    const created = await context.tx.helpRequest.create({ data: { businessNo: businessNo("V1H", record.sourceId), submitterPersonId, category: "OTHER", title: String(record.payload.title), description: String(record.payload.description), status: "PENDING", sourceSystem: context.sourceSystem, sourceRecordId: record.sourceId } });
+    await context.tx.stateTransitionHistory.create({ data: { entityType: "HELP_REQUEST", entityId: created.id, toState: "PENDING", actionCode: "HELP_IMPORTED_FROM_V1", actorPersonId: context.actor.personId, metadataJson: json({ legacyCategory: record.payload.legacyCategory }) } });
     await context.tx.auditLog.create({ data: { actorPersonId: context.actor.personId, actorAccountId: context.actor.accountId, actionCode: "HELP_IMPORTED_FROM_V1", entityType: "HELP_REQUEST", entityId: created.id, afterJson: json(record.payload), reason: "V1 migration" } });
-    return { action: "CREATE", targetEntity: "HELP_REQUEST", targetId: created.id, immutableHistory: status === "COMPLETED", issues: [issue(record, "HELP_CATEGORY_MAPPED_TO_OTHER", "WARNING", "旧类别映射 OTHER，原值保留在迁移审计")] };
+    return { action: "CREATE", targetEntity: "HELP_REQUEST", targetId: created.id, issues: [issue(record, "HELP_CATEGORY_MAPPED_TO_OTHER", "WARNING", "旧类别映射 OTHER，原值保留在迁移审计")] };
   }
 
   private async announcement(record: LegacyRecord, context: ApplyAdapterContext): Promise<AdapterResult> {

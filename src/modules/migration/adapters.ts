@@ -75,7 +75,8 @@ export function analyzeLegacyRecord(record: LegacyRecord, context: MigrationMatc
       return { classification: "SUCCESS", targetEntity: "REIMBURSEMENT", immutableHistory: value.legacyStatus === "已通过", issues: value.legacyStatus === "已通过" ? [issue(record, "REIMBURSEMENT_LEGACY_VERIFIED_TERMINAL", "WARNING", "V1 已通过映射历史只读终态，绝不进入纸质/财务流转")] : [] };
     case "HELP": {
       const known = HELP_CATEGORIES.has(String(value.legacyCategory));
-      return { classification: "SUCCESS", targetEntity: "HELP_REQUEST", immutableHistory: value.status === "已办结", issues: known ? [] : [issue(record, "HELP_CATEGORY_MAPPED_TO_OTHER", "WARNING", "未知 V1 求助类别映射为 OTHER，并保留原类别快照", "legacyCategory")] };
+      if (value.status !== "待受理") return { classification: "REVIEW", targetEntity: "HELP_REQUEST", immutableHistory: value.status === "已办结", issues: [issue(record, "MIGRATION_APPLY_UNSUPPORTED", "REVIEW", "处理中/已办结 Help 缺少可靠 owner 与时间字段，禁止伪造 V2 状态约束")] };
+      return { classification: "SUCCESS", targetEntity: "HELP_REQUEST", issues: known ? [] : [issue(record, "HELP_CATEGORY_MAPPED_TO_OTHER", "WARNING", "未知 V1 求助类别映射为 OTHER，并保留原类别快照", "legacyCategory")] };
     }
     case "ANNOUNCEMENT":
       return { classification: "SUCCESS", targetEntity: "ANNOUNCEMENT", immutableHistory: true, issues: value.hasReliableConfirmations === true ? [] : [issue(record, "ANNOUNCEMENT_CONFIRMATIONS_NOT_MIGRATED", "WARNING", "V1 无可靠确认记录，不伪造确认且不回放历史通知")] };

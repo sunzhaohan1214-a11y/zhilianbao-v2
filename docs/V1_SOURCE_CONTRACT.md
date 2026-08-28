@@ -63,7 +63,7 @@ Key semantics:
 - Demand maps `待对接/已对接/已解决` to `PENDING_CLAIM/IN_PROGRESS/COMPLETED`; historical completed demand does not re-run close review or invent Outcome/timeline.
 - Presence/Trip/Visit are `MIGRATION_APPLY_UNSUPPORTED` review items until V2 has a safe historical representation; they are never counted as apply success without target rows.
 - `已通过` reimbursement maps only to `LEGACY_VERIFIED_TERMINAL`, a read-only terminal; it never maps to `FINANCE_SUBMITTED`.
-- Unknown Help categories map to `OTHER` while the source snapshot is retained.
+- PENDING Help can be created with an `OTHER` category while retaining the source category snapshot. Non-PENDING Help without reliable current owner and required lifecycle timestamps is `MIGRATION_APPLY_UNSUPPORTED` review-only; those facts are never invented to satisfy V2 state constraints.
 - Historical announcements do not fabricate confirmations or replay Message/Todo/Outbox.
 - High-privilege roles require explicit auditable evidence.
 

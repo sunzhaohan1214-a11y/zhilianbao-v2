@@ -296,6 +296,8 @@ OTHER
 + 保留原类别快照
 ```
 
+只有具备 V2 安全状态表示的待受理记录可直接写入。处理中/已办结记录若缺少可靠当前处理人、预计完成时间或实际完成时间，必须进入 `MIGRATION_APPLY_UNSUPPORTED` 人工治理，不得用提交人或迁移时间伪造历史事实。
+
 ## 15. 公告
 
 迁移历史公告时：
@@ -469,6 +471,6 @@ M3-005 已提供可复用 `EntityMatcher`（Person/Enterprise/Talent）。M3-006
 
 Person Matcher 的 exact-phone 候选覆盖 ACTIVE/ARCHIVED，ARCHIVED 命中进入治理清单而非 CREATE；正式写入前的手机号复核与 `PersonImportIdentityLock` guard 也应复用，不能依赖 Account unique 或另写一套判断。
 
-M3-006 已实现版本化 snapshot source contract、Actual Apply Runner、MigrationBatch/Map/Issue/ModuleResult/AttachmentResult、共享 Matcher 复用、严格 source/path/hash 校验、resolution 版本/SHA、样本 fixture、CLI 和 JSON/XLSX 对账。`--dry-run` 为 0 业务写入；`--apply` 按 source aggregate 事务写业务目标 + Audit/Version/History + Map，附件在目标重读校验和正式 Link 后才记 `COPIED`。Person、Organization、Enterprise、Talent、Policy、Demand/Progress、Reimbursement、Help、Announcement 已接 actual adapters；Presence/Trip/Visit/Role 未有安全历史表示时固定 REVIEW。当前仍没有真实 V1 schema 或受控 full snapshot，full rehearsal 状态为 `FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT`，不得表述为正式迁移或全量演练已完成。
+M3-006 已实现版本化 snapshot source contract、Actual Apply Runner、MigrationBatch/Map/Issue/ModuleResult/AttachmentResult、共享 Matcher 复用、严格 source/path/hash 校验、resolution 版本/SHA、样本 fixture、CLI 和 JSON/XLSX 对账。`--dry-run` 为 0 业务写入；`--apply` 按 source aggregate 事务写业务目标 + Audit/Version/History + Map，附件在目标重读校验和正式 Link 后才记 `COPIED`。Person、Organization、Enterprise、Talent、Policy、Demand/Progress、Reimbursement、PENDING Help、Announcement 已接 actual adapters；缺可靠 owner/时间的非 PENDING Help 以及 Presence/Trip/Visit/Role 固定 REVIEW。当前仍没有真实 V1 schema 或受控 full snapshot，full rehearsal 状态为 `FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT`，不得表述为正式迁移或全量演练已完成。
 
 **MIGRATION_PLAN.md v1.0 END**
