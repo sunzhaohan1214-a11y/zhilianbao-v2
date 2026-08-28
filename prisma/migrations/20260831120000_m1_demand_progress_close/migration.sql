@@ -72,10 +72,6 @@ CREATE TABLE `demand_close_requests` (
   CONSTRAINT `demand_close_requests_active_check` CHECK (
     (`active_key` = 1 AND `ended_at` IS NULL) OR (`active_key` IS NULL AND `ended_at` IS NOT NULL)
   ),
-  CONSTRAINT `demand_close_requests_handler_check` CHECK (
-    (`responsibility_mode` = 'CURRENT_OWNER' AND `township_handler_person_id` IS NULL)
-    OR (`responsibility_mode` = 'ALUMNI_TOWNSHIP' AND `township_handler_person_id` IS NOT NULL)
-  ),
   CONSTRAINT `demand_close_requests_demand_fkey`
     FOREIGN KEY (`demand_id`) REFERENCES `demands`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `demand_close_requests_submitter_fkey`
@@ -124,8 +120,8 @@ CREATE TABLE `demand_owner_exit_requests` (
   INDEX `demand_owner_exit_requests_owner_requested_idx` (`owner_person_id`, `requested_at`),
   INDEX `demand_owner_exit_requests_reviewer_reviewed_idx` (`reviewed_by_person_id`, `reviewed_at`),
   CONSTRAINT `demand_owner_exit_requests_active_check` CHECK (
-    (`status` = 'PENDING' AND `active_key` = 1 AND `reviewed_at` IS NULL AND `reviewed_by_person_id` IS NULL)
-    OR (`status` IN ('APPROVED', 'REJECTED') AND `active_key` IS NULL AND `reviewed_at` IS NOT NULL AND `reviewed_by_person_id` IS NOT NULL)
+    (`status` = 'PENDING' AND `active_key` = 1 AND `reviewed_at` IS NULL)
+    OR (`status` IN ('APPROVED', 'REJECTED') AND `active_key` IS NULL AND `reviewed_at` IS NOT NULL)
   ),
   CONSTRAINT `demand_owner_exit_requests_demand_fkey`
     FOREIGN KEY (`demand_id`) REFERENCES `demands`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
