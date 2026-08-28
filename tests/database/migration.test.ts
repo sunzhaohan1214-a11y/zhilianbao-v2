@@ -27,7 +27,8 @@ let firstResult: Awaited<ReturnType<MigrationService["applySnapshot"]>>;
 
 function actorFor(personId: string, role: "SUPER_ADMIN" | "ADMIN" | "MEMBER_ALUMNI_PLATFORM", accountId = operatorAccountId): PermissionActor {
   const roles = [role];
-  return { personId, accountId, accountStatus: "NORMAL", permissionVersion: BigInt(1), effectiveRoles: roles, capabilities: resolveCapabilities(roles, new Set()), specialPermissions: new Set(), selfPersonId: personId, townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true, hasGlobalOperational: role === "SUPER_ADMIN" || role === "ADMIN", hasSystem: role === "SUPER_ADMIN", currentBatchMember: role === "SUPER_ADMIN", configurationIssues: [] };
+  const specialPermissions = new Set(role === "SUPER_ADMIN" ? ["reimbursement.manage"] : []);
+  return { personId, accountId, accountStatus: "NORMAL", permissionVersion: BigInt(1), effectiveRoles: roles, capabilities: resolveCapabilities(roles, specialPermissions), specialPermissions, selfPersonId: personId, townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true, hasGlobalOperational: role === "SUPER_ADMIN" || role === "ADMIN", hasSystem: role === "SUPER_ADMIN", currentBatchMember: role === "SUPER_ADMIN", configurationIssues: [] };
 }
 
 async function apply(root = fixture) {
