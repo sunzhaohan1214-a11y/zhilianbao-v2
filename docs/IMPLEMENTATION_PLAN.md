@@ -228,7 +228,7 @@ AI失败不阻止业务。
 
 ## M1.7 Outcome
 
-状态：A-M1-007 已实现，当前 PR 待创建并合并前保持开放。
+状态：M1.7 Outcome implemented in PR #24，pending merge（保持开放，未合并）。
 
 - 办结 APPROVE 原子创建 NONE/TRACKING Plan，历史 COMPLETED 可一次补建；
 - 多轮 DRAFT/RETURNED/PENDING_REVIEW/APPROVED、editVersion 与 activeKey 并发保护；
