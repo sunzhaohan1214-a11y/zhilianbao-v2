@@ -44,6 +44,10 @@ async function targetIds(entity: string): Promise<string[]> {
   return (await prisma.legacyMigrationMap.findMany({ where: { sourceSystem: "ZHILIANBAO_V1", targetEntity: entity }, select: { targetId: true } })).map((value) => value.targetId);
 }
 
+async function uniqueTargetCount(entity: string): Promise<number> {
+  return new Set(await targetIds(entity)).size;
+}
+
 beforeAll(async () => {
   previousCurrentBatchIds.push(...(await prisma.batch.findMany({ where: { isCurrent: true }, select: { id: true } })).map((value) => value.id));
   await prisma.batch.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
@@ -117,11 +121,17 @@ describe("M3-006 Actual Apply on real MySQL", () => {
     expect(firstResult.actionCounts.CREATE).toBeGreaterThan(0);
     expect(await prisma.outboxEvent.count()).toBe(outboxBefore);
     expect(await prisma.migrationBatch.findUniqueOrThrow({ where: { id: firstResult.batchId } })).toMatchObject({ status: "REVIEW_REQUIRED", resolutionVersion: "sample-resolution-v1" });
-    expect(await targetIds("PERSON")).not.toHaveLength(0);
-    expect(await targetIds("ORGANIZATION")).not.toHaveLength(0);
-    expect(await targetIds("ENTERPRISE")).not.toHaveLength(0);
-    expect(await targetIds("DEMAND")).toHaveLength(3);
-    expect(await targetIds("REIMBURSEMENT")).toHaveLength(3);
+    expect(await uniqueTargetCount("PERSON")).toBe(2);
+    expect(await uniqueTargetCount("ORGANIZATION")).toBe(2);
+    expect(await uniqueTargetCount("ENTERPRISE")).toBe(2);
+    expect(await uniqueTargetCount("TALENT")).toBe(1);
+    expect(await uniqueTargetCount("POLICY")).toBe(1);
+    expect(await uniqueTargetCount("DEMAND")).toBe(3);
+    expect(await uniqueTargetCount("DEMAND_PROGRESS")).toBe(1);
+    expect(await uniqueTargetCount("REIMBURSEMENT")).toBe(3);
+    expect(await uniqueTargetCount("HELP_REQUEST")).toBe(1);
+    expect(await uniqueTargetCount("ANNOUNCEMENT")).toBe(1);
+    expect(await uniqueTargetCount("ATTACHMENT")).toBe(1);
     const attachmentMap = await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "ATTACHMENT", sourceId: "ATTACHMENT-001" } } });
     const attachment = await prisma.attachment.findUniqueOrThrow({ where: { id: attachmentMap.targetId }, include: { links: true } });
     expect(attachment).toMatchObject({ isTemporary: false, uploadStatus: "UPLOADED", scanStatus: "PASSED", sha256: "097eeb44ffadee75a67047df670c0956bc20786f85deb6906baef66df6529ed6" });
