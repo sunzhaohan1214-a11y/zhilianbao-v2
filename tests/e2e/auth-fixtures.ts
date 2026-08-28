@@ -93,10 +93,27 @@ export async function seedAuthFixtures() {
     },
     select: { id: true },
   })).map(({ id }) => id);
+  const e2eProgressIds = (await prisma.demandProgress.findMany({ where: { demandId: { in: e2eDemandIds } }, select: { id: true } })).map(({ id }) => id);
+  const e2eCloseRequestIds = (await prisma.demandCloseRequest.findMany({ where: { demandId: { in: e2eDemandIds } }, select: { id: true } })).map(({ id }) => id);
+  const e2eLifecycleAttachmentIds = (await prisma.attachmentLink.findMany({ where: { OR: [
+    { entityType: "DEMAND_PROGRESS", entityId: { in: e2eProgressIds } },
+    { entityType: "DEMAND_CLOSE_REQUEST", entityId: { in: e2eCloseRequestIds } },
+  ] }, select: { attachmentId: true } })).map(({ attachmentId }) => attachmentId);
   await prisma.todo.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: e2eDemandIds } } });
   await prisma.message.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: e2eDemandIds } } });
   await prisma.outboxEvent.deleteMany({ where: { aggregateType: "DEMAND", aggregateId: { in: e2eDemandIds } } });
   await prisma.demand.updateMany({ where: { id: { in: e2eDemandIds } }, data: { status: "RETURNED", currentOwnerPersonId: null } });
+  await prisma.attachmentLink.deleteMany({ where: { OR: [
+    { entityType: "DEMAND_PROGRESS", entityId: { in: e2eProgressIds } },
+    { entityType: "DEMAND_CLOSE_REQUEST", entityId: { in: e2eCloseRequestIds } },
+  ] } });
+  await prisma.demandCloseReview.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandProgressReminder.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandOwnerExitRequest.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandProgress.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.demandCloseRequest.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: e2eLifecycleAttachmentIds } } });
+  await prisma.attachment.deleteMany({ where: { id: { in: e2eLifecycleAttachmentIds } } });
   await prisma.demandAlumniHelper.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandTownshipHandler.deleteMany({ where: { demandId: { in: e2eDemandIds } } });
   await prisma.demandRecommendationItem.deleteMany({ where: { run: { demandId: { in: e2eDemandIds } } } });

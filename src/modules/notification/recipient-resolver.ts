@@ -2,7 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 
 const active = {
   personStatus: "ACTIVE" as const,
-  account: { is: { status: { not: "DISABLED" as const } } },
+  account: { is: { status: "NORMAL" as const, forcePasswordChange: false, confidentialityConfirmedAt: { not: null } } },
 };
 
 export async function activeAdministrators(tx: Prisma.TransactionClient, now = new Date()) {
@@ -20,6 +20,11 @@ export async function activeAreaStaff(tx: Prisma.TransactionClient, areaId: stri
   const people = await tx.person.findMany({
     where: {
       ...active,
+      roleAssignments: { some: {
+        roleCode: "TOWNSHIP_STAFF",
+        effectiveAt: { lte: now },
+        OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
+      } },
       appointments: { some: {
         effectiveAt: { lte: now },
         OR: [{ expiredAt: null }, { expiredAt: { gt: now } }],
