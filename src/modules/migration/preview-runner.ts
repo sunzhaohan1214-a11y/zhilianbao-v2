@@ -55,7 +55,7 @@ export async function runMigrationPreview(provider: LegacySourceProvider, input:
     const result = await reconcileSourceAttachment(provider, item.record);
     attachmentResults.push(result);
     if (result.issue) issues.push(result.issue);
-    if (result.status === "COPIED") { attachmentModule.successCount += 1; attachmentModule.attachmentSuccessCount += 1; }
+    if (result.status === "VALIDATED") { attachmentModule.successCount += 1; attachmentModule.attachmentSuccessCount += 1; }
     else { attachmentModule.failedCount += 1; attachmentModule.attachmentIssueCount += 1; }
   }
   modules.push(attachmentModule);

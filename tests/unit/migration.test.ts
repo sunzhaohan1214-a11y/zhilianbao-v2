@@ -6,6 +6,7 @@ import { sourceFingerprint } from "@/modules/migration/fingerprint";
 import { runMigrationPreview } from "@/modules/migration/preview-runner";
 import { emptyModule, reconciliationFormulaPass } from "@/modules/migration/reconciliation";
 import { SnapshotDirectoryLegacySourceProvider } from "@/modules/migration/snapshot-provider";
+import { loadMigrationResolutions } from "@/modules/migration/resolutions";
 import { snapshotManifestSchema, validateLegacyPayload, type LegacyAttachmentManifestRecord } from "@/modules/migration/source-contract";
 
 const fixture = path.resolve("tests/fixtures/v1-migration/sample-v1");
@@ -35,6 +36,13 @@ describe("M3-006 source contract and snapshot safety", () => {
     expect(sourceFingerprint({ b: 2, a: { d: 4, c: 3 } })).toBe(sourceFingerprint({ a: { c: 3, d: 4 }, b: 2 }));
     expect(sourceFingerprint({ a: 1 })).not.toBe(sourceFingerprint({ a: 2 }));
   });
+
+  it("strictly loads reusable resolutions with version and SHA lineage", async () => {
+    const loaded = await loadMigrationResolutions(fixture);
+    expect(loaded.version).toBe("sample-resolution-v1");
+    expect(loaded.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(loaded.resolutions.get("ENTERPRISE:ENTERPRISE-003")).toMatchObject({ action: "CREATE" });
+  });
 });
 
 describe("M3-006 shared matchers and fixed legacy semantics", () => {
@@ -60,8 +68,9 @@ describe("M3-006 shared matchers and fixed legacy semantics", () => {
     expect(role).toMatchObject({ classification: "REVIEW" });
   });
 
-  it("marks legacy presence historical and non-mappable trips for review", () => {
-    expect(analyzeLegacyRecord({ sourceId: "P", entityType: "PRESENCE", payload: { sourceId: "P" } })).toMatchObject({ classification: "SUCCESS", immutableHistory: true });
+  it("does not classify entities without actual apply adapters as success", () => {
+    expect(analyzeLegacyRecord({ sourceId: "P", entityType: "PRESENCE", payload: { sourceId: "P" } })).toMatchObject({ classification: "REVIEW", immutableHistory: true });
+    expect(analyzeLegacyRecord({ sourceId: "V", entityType: "VISIT", payload: { sourceId: "V" } })).toMatchObject({ classification: "REVIEW" });
     expect(analyzeLegacyRecord({ sourceId: "T", entityType: "TRIP", payload: { sourceId: "T", stableV2Nodes: false } })).toMatchObject({ classification: "REVIEW", targetEntity: "HISTORICAL_WORK_RECORD" });
   });
 });
@@ -79,6 +88,8 @@ describe("M3-006 sample rehearsal and reconciliation", () => {
       expect.objectContaining({ code: "MIGRATION_ATTACHMENT_HASH_MISMATCH" }),
       expect.objectContaining({ code: "REIMBURSEMENT_LEGACY_VERIFIED_TERMINAL" }),
     ]));
+    expect(result.attachmentResults[0]).toMatchObject({ status: "VALIDATED" });
+    expect(result.attachmentResults.map(({ status }) => status)).not.toContain("COPIED");
   });
 
   it("refuses a full rehearsal when the source is only the sample fixture", async () => {

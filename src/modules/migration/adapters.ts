@@ -66,13 +66,11 @@ export function analyzeLegacyRecord(record: LegacyRecord, context: MigrationMatc
       return { classification: issues.some(({ severity }) => severity === "REVIEW") ? "REVIEW" : "SUCCESS", targetEntity: "DEMAND", immutableHistory: value.legacyStatus === "已解决", issues };
     }
     case "PRESENCE":
-      return { classification: "SUCCESS", targetEntity: "PRESENCE_REPORT", immutableHistory: true, issues: [issue(record, "PRESENCE_LEGACY_HISTORY_ONLY", "WARNING", "V1 来离宝仅作为历史，不进入 V2 当前在宝统计")] };
+      return { classification: "REVIEW", targetEntity: "PRESENCE_REPORT", immutableHistory: true, issues: [issue(record, "MIGRATION_APPLY_UNSUPPORTED", "REVIEW", "当前 Presence schema 无法表达不参与 current presence 的历史记录")] };
     case "TRIP":
-      return value.stableV2Nodes === true
-        ? { classification: "SUCCESS", targetEntity: "TRIP", immutableHistory: true, issues: [] }
-        : { classification: "REVIEW", targetEntity: "HISTORICAL_WORK_RECORD", immutableHistory: true, issues: [issue(record, "MIGRATION_STATE_UNMAPPABLE", "REVIEW", "V1 行程无法稳定映射 V2 多节点结构，保留为历史工作记录")] };
+      return { classification: "REVIEW", targetEntity: value.stableV2Nodes === true ? "TRIP" : "HISTORICAL_WORK_RECORD", immutableHistory: true, issues: [issue(record, value.stableV2Nodes === true ? "MIGRATION_APPLY_UNSUPPORTED" : "MIGRATION_STATE_UNMAPPABLE", "REVIEW", "当前行程写入链不能安全证明完整多节点历史语义")] };
     case "VISIT":
-      return { classification: "SUCCESS", targetEntity: "ENTERPRISE_VISIT", immutableHistory: true, issues: [] };
+      return { classification: "REVIEW", targetEntity: "ENTERPRISE_VISIT", immutableHistory: true, issues: [issue(record, "MIGRATION_APPLY_UNSUPPORTED", "REVIEW", "当前 Visit schema 依赖 TripResult，未实现安全历史写入 adapter")] };
     case "REIMBURSEMENT":
       return { classification: "SUCCESS", targetEntity: "REIMBURSEMENT", immutableHistory: value.legacyStatus === "已通过", issues: value.legacyStatus === "已通过" ? [issue(record, "REIMBURSEMENT_LEGACY_VERIFIED_TERMINAL", "WARNING", "V1 已通过映射历史只读终态，绝不进入纸质/财务流转")] : [] };
     case "HELP": {
@@ -84,7 +82,7 @@ export function analyzeLegacyRecord(record: LegacyRecord, context: MigrationMatc
     case "ROLE": {
       const high = HIGH_PRIVILEGE.has(String(value.roleCode));
       if (high && value.explicitlyAuditable !== true) return { classification: "REVIEW", targetEntity: "ROLE_ASSIGNMENT", issues: [issue(record, "HIGH_PRIVILEGE_SOURCE_EVIDENCE_REQUIRED", "REVIEW", "高权限角色没有明确可审计来源，禁止自动赋权", "roleCode")] };
-      return { classification: "SUCCESS", targetEntity: "ROLE_ASSIGNMENT", issues: [] };
+      return { classification: "REVIEW", targetEntity: "ROLE_ASSIGNMENT", issues: [issue(record, "MIGRATION_APPLY_UNSUPPORTED", "REVIEW", "RoleAssignment 尚无 migration-specific 审批证据写入 adapter")] };
     }
   }
 }

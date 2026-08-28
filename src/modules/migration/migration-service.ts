@@ -6,6 +6,11 @@ import type { SnapshotManifest } from "./source-contract";
 import type { AttachmentPreviewResult } from "./attachment-reconciliation";
 import { MigrationError } from "./errors";
 import { MigrationRepository } from "./repository";
+import { getAttachmentRuntime } from "@/modules/attachment/runtime";
+import type { StorageAdapter } from "@/modules/attachment/storage/storage-adapter";
+import { MigrationApplyRunner } from "./apply-runner";
+import type { LegacySourceProvider } from "./snapshot-provider";
+import type { LoadedMigrationResolutions } from "./resolutions";
 
 type PersistInput = {
   actor: PermissionActor;
@@ -21,11 +26,29 @@ type PersistInput = {
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 
 export class MigrationService {
-  constructor(private readonly repository = new MigrationRepository()) {}
+  constructor(
+    private readonly repository = new MigrationRepository(),
+    private readonly storage: StorageAdapter = getAttachmentRuntime().storage,
+  ) {}
 
   private async authorize(actor: PermissionActor, action: "migration.execute" | "migration.view") {
     if (actor.accountStatus !== "NORMAL" || !actor.effectiveRoles.includes("SUPER_ADMIN") || !actor.hasSystem) throw new MigrationError("MIGRATION_FORBIDDEN", "仅 active SUPER_ADMIN 可执行迁移", 403);
     await authorizeActor({ actor, action, resource: { resourceType: "migration_batch", requiredScope: "SYSTEM" } });
+  }
+
+  async applySnapshot(input: {
+    actor: PermissionActor;
+    provider: LegacySourceProvider;
+    manifest: SnapshotManifest;
+    manifestSha256: string;
+    codeVersion: string;
+    mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL";
+    resolutions: LoadedMigrationResolutions;
+  }) {
+    await this.authorize(input.actor, "migration.execute");
+    if (process.env.APP_ENV === "production") throw new MigrationError("MIGRATION_PRODUCTION_REFUSED", "本版本拒绝在 production 执行迁移");
+    if (input.mode === "FULL_REHEARSAL" && input.manifest.snapshotKind !== "FULL") throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
+    return new MigrationApplyRunner(this.repository, this.storage).run(input);
   }
 
   async persistRehearsal(input: PersistInput) {
@@ -55,7 +78,7 @@ export class MigrationService {
           code: value.code, severity: value.severity, field: value.field, message: value.message, candidateJson: value.candidates ? json(value.candidates) : undefined,
           sourceSnapshotJson: value.sourceSnapshot ? json(value.sourceSnapshot) : undefined } });
         for (const value of input.attachmentResults) await tx.migrationAttachmentResult.create({ data: { migrationBatchId: batchId, sourceEntity: value.record.sourceEntity,
-          sourceId: value.record.sourceId, sourceAttachmentKey: value.record.sourceAttachmentId, status: value.status, sourceSha256: value.record.sha256,
+          sourceId: value.record.sourceId, sourceAttachmentKey: value.record.sourceAttachmentId, status: value.status === "VALIDATED" ? "SKIPPED" : value.status, sourceSha256: value.record.sha256,
           targetSha256: value.actualSha256, sourceSize: BigInt(value.record.size), targetSize: value.actualSize === undefined ? undefined : BigInt(value.actualSize), errorCode: value.issue?.code } });
         const hasReview = input.issues.some(({ severity }) => severity === "BLOCKER" || severity === "REVIEW");
         const finalStatus = !input.reconciliation.formulaPass ? "FAILED" : hasReview ? "REVIEW_REQUIRED" : "SUCCEEDED";

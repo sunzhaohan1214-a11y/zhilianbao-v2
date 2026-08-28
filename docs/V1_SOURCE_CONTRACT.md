@@ -61,7 +61,7 @@ Key semantics:
 - Talent matching uses shared `matchTalent`; resume text never creates structured phone/email. Missing recommender is review-only.
 - Policy uses the shared four-key matcher: title + publishing department + date + primary-file SHA-256.
 - Demand maps `待对接/已对接/已解决` to `PENDING_CLAIM/IN_PROGRESS/COMPLETED`; historical completed demand does not re-run close review or invent Outcome/timeline.
-- Presence is historical only. Unstable legacy trips remain historical work records instead of fabricated V2 nodes.
+- Presence/Trip/Visit are `MIGRATION_APPLY_UNSUPPORTED` review items until V2 has a safe historical representation; they are never counted as apply success without target rows.
 - `已通过` reimbursement maps only to `LEGACY_VERIFIED_TERMINAL`, a read-only terminal; it never maps to `FINANCE_SUBMITTED`.
 - Unknown Help categories map to `OTHER` while the source snapshot is retained.
 - Historical announcements do not fabricate confirmations or replay Message/Todo/Outbox.
@@ -69,7 +69,11 @@ Key semantics:
 
 ## 5. Attachments
 
-Each attachment manifest row includes source identity, owner entity/source ID, path relative to `attachments/blobs`, expected SHA-256, expected size, original filename, and declared MIME type. Preview verifies source existence, size, and hash. Apply implementations must copy to private target storage, re-read the target, verify size/hash, create `Attachment` and `AttachmentLink`, and record `MigrationAttachmentResult`. Missing, corrupt, copy-failed, hash-mismatch, scan-rejected, and skipped results remain auditable.
+Each attachment manifest row includes source identity, owner entity/source ID, path relative to `attachments/blobs`, expected SHA-256, expected size, original filename, and declared MIME type. Preview returns source `VALIDATED`, never `COPIED`. Apply copies to private temporary target storage, applies the migration scan allowlist, re-reads the target, verifies size/hash, and only then atomically creates the formal `AttachmentLink`, attachment Map, and `MigrationAttachmentResult(COPIED)` with non-null target fields. Missing, corrupt, parent-unresolved, copy-failed, hash-mismatch, scan-rejected, and skipped results remain auditable.
+
+## 6.1 Resolution contract
+
+`migration-resolutions.json` is strict and versioned. Duplicate source keys or malformed LINK targets fail before apply. CREATE/LINK/SKIP/WAIVE are adapter-governed: WAIVE cannot manufacture success, LINK must point to the expected live entity, and ARCHIVED Person, DISABLED/MERGED Enterprise, and RoleAssignment governance cannot be bypassed. The JSON `operator` is retained only as source lineage.
 
 ## 6. Fingerprint and rerun
 

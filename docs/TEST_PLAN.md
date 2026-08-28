@@ -477,7 +477,7 @@ P3 UI/文案/低频问题
 ## 23. M3-006 automated coverage
 
 - Unit/sample: strict manifest/source contract, deterministic fingerprint, traversal guard, shared Person/Enterprise/Talent/Policy matchers, fixed Demand/reimbursement mapping, no historical account/high-privilege invention, presence/trip historical semantics, reconciliation formula, missing/hash-mismatch attachments, full-snapshot gate.
-- Real MySQL: one active batch per source system, unique source mapping, same-snapshot rerun identity, and changed immutable-history rejection. CI also applies all expand-only migrations twice through the existing database gate.
+- Real MySQL: provider-driven dry-run with zero business/Map writes; Actual Apply creates real Person/Organization/Enterprise/Demand/Reimbursement and supported targets; Map IDs reference real rows; same-snapshot rerun preserves counts/IDs; changed DemandProgress is rejected through the real pipeline; copied Attachment/object/Link/hash/size reruns without duplication; historical Outbox delta is zero; legacy reimbursement remains private/read-only; historical COMPLETED Demand has no fake close rows. CI also applies all expand-only migrations twice through the existing database gate.
 - The sanitized fixture contains 26 business records plus three attachment rows and intentionally ends `REVIEW_REQUIRED`; it is not a false all-success sample.
 - Full rehearsal is not automated or claimed until a controlled real V1 full snapshot/schema is supplied.
 

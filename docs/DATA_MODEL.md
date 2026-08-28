@@ -2834,6 +2834,9 @@ DATA_DICTIONARY.md
 - `MigrationIssue` is append-only governance evidence with WARNING/REVIEW/BLOCKER, OPEN/RESOLVED/WAIVED, source snapshot, candidates, and actor/time/reason resolution.
 - `MigrationModuleResult` stores one explained reconciliation row per batch/module.
 - `MigrationAttachmentResult` stores source/target hash and size lineage and all copy outcomes.
+- Actual Apply is source-aggregate transactional: the target business row, its domain audit/version/history, and the corresponding Map commit together. DemandProgress and Attachment have independent immutable source maps.
+- Resolution version is stored on `MigrationBatch`; resolution SHA-256 and actual CREATE/LINK/UPDATE/SKIP/REVIEW/FAILED counts are stored in `reconciliationJson`.
+- `MigrationAttachmentResult.status=COPIED` requires a non-temporary PASSED target Attachment, private target object re-read, matching target SHA/size, a formal parent `AttachmentLink`, and an Attachment source map.
 - All migration foreign keys use `ON DELETE RESTRICT`; migration history is never physically deleted by business runtime.
 
 **DATA_MODEL.md v1.2 END**

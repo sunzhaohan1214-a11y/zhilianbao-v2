@@ -14,7 +14,7 @@
     "entities/helps.ndjson": { "count": 1, "sha256": "d254abe554314fcf0bd4de24e63b1d451cf9aa746d4b20cba6bb6cbaeec8a842" },
     "entities/organizations.ndjson": { "count": 2, "sha256": "2feedd1af0fa31482f2f2e49a470e82fe4bdea7f8603fa769e78bd46830f3366" },
     "entities/persons.ndjson": { "count": 5, "sha256": "f06b2ff7ec71261da514e3e84fd8fc4d68ccf04afd993546fc5b36a48e323265" },
-    "entities/policies.ndjson": { "count": 2, "sha256": "ec99c8d574ef53dd6624d0c094c69eacde57c632df5054687cd882767032b6fe" },
+    "entities/policies.ndjson": { "count": 2, "sha256": "7adeb3306b81d7bedef7d1a0f8523403321ae34d91bbaed08314db0edcb06cd4" },
     "entities/presence.ndjson": { "count": 1, "sha256": "b101ce7640864a23ac2c2879ac609b008bbe2e06db90ec4accf1dd0608559df9" },
     "entities/reimbursements.ndjson": { "count": 3, "sha256": "5bfb37a96903b53a6a8db3d27dcd4b4c86811022e81f0dd08a447530e5ab3394" },
     "entities/roles.ndjson": { "count": 1, "sha256": "ba289758c3f0ba61d6f0ef75377620afb3fbafa1aec563775eb0aed4e5e23dc9" },

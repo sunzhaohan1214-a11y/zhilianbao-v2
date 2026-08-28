@@ -69,3 +69,14 @@ export type MigrationResolution = {
   reason: string;
   operator: string;
 };
+
+export type MigrationApplyAction = "CREATE" | "LINK" | "UPDATE" | "SKIP" | "REVIEW" | "FAILED";
+
+export type MigrationAppliedRecord = {
+  sourceEntity: LegacyEntityType | "ATTACHMENT";
+  sourceId: string;
+  action: MigrationApplyAction;
+  targetEntity?: string;
+  targetId?: string;
+  issues: MigrationPreviewIssue[];
+};

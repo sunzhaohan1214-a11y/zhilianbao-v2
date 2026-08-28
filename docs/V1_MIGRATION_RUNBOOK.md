@@ -31,9 +31,14 @@ npm run migration:v1 -- \
   --source <approved-snapshot-root> \
   --mode sample \
   --apply \
+  --resolutions <approved-migration-resolutions.json> \
   --operator <active-super-admin-person-id> \
   --confirm MIGRATE_TO_V2
 ```
+
+If `--resolutions` is omitted, the runner strictly loads `<snapshot-root>/migration-resolutions.json`. The file's version and SHA-256 are recorded in batch reconciliation; its `operator` field is lineage only and never replaces the authenticated active `SUPER_ADMIN`.
+
+`--apply` starts `MigrationApplyRunner` against the dedicated V2 Migration DB. Each source aggregate writes the target business row, required audit/version/history, and `LegacyMigrationMap` in one transaction. It does not persist preview `SUCCESS` as an apply result. Modules without a safe apply adapter remain `REVIEW/MIGRATION_APPLY_UNSUPPORTED`.
 
 The sample contains 26 sanitized business records and three attachment cases. It intentionally includes normal, merge/link, REVIEW, BLOCKER, missing attachment, and hash-mismatch outcomes. A sample batch with unresolved review/blocker issues finishes as `REVIEW_REQUIRED`, not `SUCCEEDED`.
 
@@ -67,6 +72,8 @@ For the same snapshot verify:
 - accounts, attachments, versions, histories, and demand progress do not duplicate;
 - no historical Message/Todo/Outbox is created;
 - all module equations remain balanced.
+
+For attachments, `COPIED` means the private target object was written, scanned/verified, re-read, hash/size checked, formally linked, assigned a non-null `targetAttachmentId`, and mapped. Source-only validation is reported as planned validation during dry-run and never as `COPIED`.
 
 For a new snapshot, changed mutable current fields keep the same target ID and use formal version/audit helpers. Changed immutable history must raise `MIGRATION_SOURCE_HISTORY_CHANGED`.
 

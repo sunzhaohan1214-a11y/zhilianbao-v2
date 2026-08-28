@@ -1436,5 +1436,8 @@ M3-006 dictionary additions:
 - `MigrationIssue.severity`: `WARNING | REVIEW | BLOCKER`; unresolved BLOCKER prevents success.
 - `MigrationAttachmentResult.status`: `PENDING | COPIED | MISSING | CORRUPTED | COPY_FAILED | HASH_MISMATCH | SKIPPED`.
 - `ReimbursementStatus.LEGACY_VERIFIED_TERMINAL`: migrated V1 verified history, visible under normal reimbursement privacy rules and excluded from every paper/finance transition.
+- `MigrationBatch.reconciliation_json.phase`: `ACTUAL_APPLY` for a persisted apply; dry-run reports are `PLANNED_PREVIEW` and create no batch or business rows.
+- `MigrationBatch.reconciliation_json.resolutionSha256`: SHA-256 of the strictly validated resolution file; `resolution_version` stores its declared version.
+- `LegacyMigrationMap.source_entity=DEMAND_PROGRESS|ATTACHMENT`: independent immutable lineage for nested progress and copied attachments.
 
 **DATA_DICTIONARY.md v1.1 END**
