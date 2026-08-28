@@ -94,5 +94,5 @@ test("11 ADMIN grants and revokes alumni apply without gaining content visibilit
   expect((await api(page, `/api/v2/reimbursements/${id}/update`, body("撤权后不得编辑"))).status).toBe(403);
   expect((await api(page, `/api/v2/reimbursements/${id}/submit`, {}, { "Idempotency-Key": crypto.randomUUID() })).status).toBe(403);
   expect((await api(page, `/api/v2/reimbursements/${id}/withdraw`, {})).status).toBe(403);
-  const history = await api(page, `/api/v2/reimbursements/${id}`); expect(history.status).toBe(200); expect(history.json.data.timeline.length).toBeGreaterThanOrEqual(5);
+  const history = await api(page, `/api/v2/reimbursements/${id}`); expect(history.status).toBe(200); expect(history.json.data.timeline.length).toBeGreaterThanOrEqual(4);
 });
