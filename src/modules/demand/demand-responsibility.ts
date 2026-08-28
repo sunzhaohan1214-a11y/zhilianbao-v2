@@ -115,6 +115,16 @@ export function shanghaiDateFromNaturalDayNumber(dayNumber: number): Date {
   return new Date(dayNumber * DAY_MS - SHANGHAI_OFFSET_MS);
 }
 
+export function demandProgressStaleCutoff(now: Date): Date {
+  return shanghaiDateFromNaturalDayNumber(shanghaiNaturalDayNumber(now) - 30);
+}
+
+export function isDemandProgressStale(input: { status: string; freshnessBaseAt: Date | null; now: Date }): boolean {
+  return input.status === "IN_PROGRESS"
+    && input.freshnessBaseAt !== null
+    && input.freshnessBaseAt < demandProgressStaleCutoff(input.now);
+}
+
 export async function getDemandProgressFreshnessInTransaction(
   tx: Prisma.TransactionClient,
   demandId: string,
@@ -131,10 +141,7 @@ export async function getDemandProgressFreshnessInTransaction(
   if (demand.status === "IN_PROGRESS" && !responsibility) invalid();
   const responsibilityStartedAt = responsibility?.responsibilityStartedAt ?? null;
   const freshnessBaseAt = latest?.createdAt ?? responsibilityStartedAt;
-  const elapsedNaturalDays = freshnessBaseAt
-    ? shanghaiNaturalDayNumber(now) - shanghaiNaturalDayNumber(freshnessBaseAt)
-    : 0;
-  const stale = demand.status === "IN_PROGRESS" && freshnessBaseAt !== null && elapsedNaturalDays > 30;
+  const stale = isDemandProgressStale({ status: demand.status, freshnessBaseAt, now });
   return {
     lastProgressAt: latest?.createdAt ?? null,
     responsibilityStartedAt,
