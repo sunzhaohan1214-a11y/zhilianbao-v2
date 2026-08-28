@@ -126,7 +126,8 @@ test("owner exit review and SUPER transfer use the guarded responsibility workfl
   await page.goto(`/demands/${exitDemand.id}`);
   await page.locator("form").filter({ hasText: "申请退出主责" }).locator('textarea[name="reason"]').fill("岗位调整，申请退出主责");
   await page.getByRole("button", { name: "提交退出申请" }).click();
-  await expect(page.getByText("PENDING", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
+  expect(await prisma.demandOwnerExitRequest.count({ where: { demandId: exitDemand.id, status: "PENDING", activeKey: 1 } })).toBe(1);
   await authenticated.context.close();
 
   authenticated = await login(browser, e2eUsers.admin);
