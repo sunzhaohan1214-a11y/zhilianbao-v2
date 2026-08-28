@@ -59,6 +59,23 @@ C  可正式纠错（需原因/版本/审计）
 
 客户端永远不能直接 W `status/current_owner_id`。
 
+## 2.1 M1-006 生命周期字段边界
+
+| 字段/事实 | MEMBER_CURRENT | MEMBER_ALUMNI_PLATFORM | 负责镇区 staff | ADMIN | SUPER |
+|---|---|---|---|---|---|
+| Progress 正文 | 对象级 owner/collaborator S | 仅 active PLATFORM helper S | 本区 S | S | S |
+| Progress 历史 | R | R | R | R | R |
+| 历史往届代理字段 | — | — | current handler 可 S | S | S |
+| CloseRequest | 仅 current owner S | — | 仅 current handler S | R | R |
+| CloseReview 核验结果 | R | R | R | W（审核动作） | W（审核动作） |
+| OwnerExitRequest | 仅 current owner S | — | — | R/W（审核） | R/W（审核） |
+| current owner / OwnerHistory | 只读；认领/退出动作触发 | R | R | R，不可强制转交 | preview+confirm 正式转交 |
+| completed/canceled facts | R | R | 合法取消动作触发 | 审核/取消动作触发 | 审核/取消动作触发 |
+
+表中 capability 仍需与状态、责任模式、active relation 和数据范围合并校验，不能解释为对任意 Demand 的字段写权限。
+
+`DemandProgress`、`DemandCloseRequest`、`DemandCloseReview` 和 `DemandOwnerExitRequest` 均为历史事实，不提供普通字段覆盖。Progress/Close 附件为 Private Attachment；只有 `scanStatus=PASSED` 后可正式 link，每次下载重新执行 Demand parent visibility，不能暴露永久对象存储 URL。
+
 ---
 
 # 3. Demand Lead

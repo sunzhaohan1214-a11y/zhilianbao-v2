@@ -295,6 +295,35 @@ enum DemandAlumniHelperStatus {
   ENDED
 }
 
+enum DemandResponsibilityMode {
+  CURRENT_OWNER
+  ALUMNI_TOWNSHIP
+}
+
+enum DemandProgressSourceType {
+  CURRENT_OWNER
+  COLLABORATOR
+  ALUMNI_PLATFORM
+  TOWNSHIP_STAFF
+  TOWNSHIP_PROXY
+  ADMIN
+}
+
+enum DemandProgressReminderType {
+  PROGRESS_STALE
+}
+
+enum DemandCloseReviewDecision {
+  APPROVE
+  RETURN
+}
+
+enum DemandOwnerExitStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum TalentScopeType {
   DOMESTIC
   OVERSEAS
@@ -548,6 +577,15 @@ model Person {
   createdAlumniHelpAssignments   DemandAlumniHelper[]          @relation("DemandAlumniHelperCreator")
   townshipHandlerAssignments     DemandTownshipHandler[]       @relation("DemandTownshipHandlerPerson")
   assignedTownshipHandlers       DemandTownshipHandler[]       @relation("DemandTownshipHandlerAssigner")
+  demandProgresses               DemandProgress[]              @relation("DemandProgressCreator")
+  representedDemandProgresses    DemandProgress[]              @relation("DemandProgressRepresentedPerson")
+  sentDemandProgressReminders    DemandProgressReminder[]      @relation("DemandProgressReminderSender")
+  receivedDemandProgressReminders DemandProgressReminder[]     @relation("DemandProgressReminderRecipient")
+  submittedDemandCloseRequests   DemandCloseRequest[]          @relation("DemandCloseRequestSubmitter")
+  handledDemandCloseRequests     DemandCloseRequest[]          @relation("DemandCloseRequestTownshipHandler")
+  reviewedDemandCloseRequests    DemandCloseReview[]           @relation("DemandCloseReviewer")
+  requestedDemandOwnerExits      DemandOwnerExitRequest[]      @relation("DemandOwnerExitOwner")
+  reviewedDemandOwnerExits       DemandOwnerExitRequest[]      @relation("DemandOwnerExitReviewer")
 
   @@index([personStatus])
   @@map("persons")
@@ -801,6 +839,7 @@ model Batch {
   groupLeaderAssignments GroupLeaderAssignment[]
   createdDemands         Demand[]                @relation("DemandCreationBatch")
   followedDemands        Demand[]                @relation("DemandFollowBatch")
+  completedDemands       Demand[]                @relation("DemandCompletionBatch")
   demandOwnerHistories   DemandOwnerHistory[]
 
   @@index([status, isCurrent])
@@ -1618,6 +1657,10 @@ model Demand {
   reviewedByPersonId    String?                      @map("reviewed_by_person_id") @db.Char(36)
   publishedByPersonId   String?                      @map("published_by_person_id") @db.Char(36)
   currentOwnerPersonId  String?                      @map("current_owner_person_id") @db.Char(36)
+  completedAt           DateTime?                    @map("completed_at") @db.DateTime(3)
+  completionBatchId     String?                      @map("completion_batch_id") @db.Char(36)
+  canceledAt            DateTime?                    @map("canceled_at") @db.DateTime(3)
+  canceledReason        String?                      @map("canceled_reason") @db.VarChar(500)
   internalNote          String?                      @map("internal_note") @db.VarChar(2000)
   createdByPersonId     String                       @map("created_by_person_id") @db.Char(36)
   createdAt             DateTime                     @default(now()) @map("created_at") @db.DateTime(3)
@@ -1631,6 +1674,7 @@ model Demand {
   reviewedByPerson      Person?                      @relation("DemandReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
   publishedByPerson     Person?                      @relation("DemandPublisher", fields: [publishedByPersonId], references: [id], onDelete: Restrict)
   currentOwnerPerson    Person?                      @relation("DemandCurrentOwner", fields: [currentOwnerPersonId], references: [id], onDelete: Restrict)
+  completionBatch       Batch?                       @relation("DemandCompletionBatch", fields: [completionBatchId], references: [id], onDelete: Restrict)
   convertedLeads        DemandLead[]                 @relation("ConvertedDemand")
   provenances           DemandProvenance[]
   contactSnapshot       DemandContactSnapshot?
@@ -1642,6 +1686,11 @@ model Demand {
   recommendationRuns    DemandRecommendationRun[]
   alumniHelpers         DemandAlumniHelper[]
   townshipHandlers      DemandTownshipHandler[]
+  progresses            DemandProgress[]
+  progressReminders     DemandProgressReminder[]
+  closeRequests         DemandCloseRequest[]
+  closeReviews          DemandCloseReview[]
+  ownerExitRequests     DemandOwnerExitRequest[]
 
   @@index([responsibleAreaId, status, createdAt])
   @@index([enterpriseId, status])
@@ -1651,6 +1700,7 @@ model Demand {
   @@index([reviewedByPersonId, reviewedAt])
   @@index([publishedByPersonId, firstPublishedAt])
   @@index([currentOwnerPersonId, status])
+  @@index([completionBatchId, completedAt])
   @@map("demands")
 }
 
@@ -1670,6 +1720,7 @@ model DemandOwnerHistory {
   person            Person                @relation("DemandOwnerPerson", fields: [personId], references: [id], onDelete: Restrict)
   batch             Batch                 @relation(fields: [batchId], references: [id], onDelete: Restrict)
   createdByPerson   Person                @relation("DemandOwnerHistoryCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  exitRequests      DemandOwnerExitRequest[]
 
   @@unique([demandId, activeKey])
   @@index([personId, effectiveAt, expiredAt])
@@ -1888,6 +1939,110 @@ model DemandCommandIdempotency {
   @@unique([actorPersonId, action, keyHash])
   @@index([demandId, createdAt])
   @@map("demand_command_idempotency")
+}
+
+model DemandProgress {
+  id                    String                   @id @default(uuid()) @db.Char(36)
+  demandId              String                   @map("demand_id") @db.Char(36)
+  currentProgress       String                   @map("current_progress") @db.Text
+  nextStep              String                   @map("next_step") @db.Text
+  createdByPersonId     String                   @map("created_by_person_id") @db.Char(36)
+  sourceType            DemandProgressSourceType @map("source_type")
+  representedPersonId   String?                  @map("represented_person_id") @db.Char(36)
+  createdAt             DateTime                 @default(now()) @map("created_at") @db.DateTime(3)
+  demand                Demand                   @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  createdByPerson       Person                   @relation("DemandProgressCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  representedPerson     Person?                  @relation("DemandProgressRepresentedPerson", fields: [representedPersonId], references: [id], onDelete: Restrict)
+
+  @@index([demandId, createdAt])
+  @@index([createdByPersonId, createdAt])
+  @@index([representedPersonId, createdAt])
+  @@map("demand_progresses")
+}
+
+model DemandProgressReminder {
+  id                  String                     @id @default(uuid()) @db.Char(36)
+  demandId            String                     @map("demand_id") @db.Char(36)
+  reminderType        DemandProgressReminderType @map("reminder_type")
+  sentByPersonId      String                     @map("sent_by_person_id") @db.Char(36)
+  recipientPersonId   String                     @map("recipient_person_id") @db.Char(36)
+  responsibilityMode DemandResponsibilityMode    @map("responsibility_mode")
+  sentAt              DateTime                   @default(now()) @map("sent_at") @db.DateTime(3)
+  demand              Demand                     @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  sentByPerson        Person                     @relation("DemandProgressReminderSender", fields: [sentByPersonId], references: [id], onDelete: Restrict)
+  recipientPerson     Person                     @relation("DemandProgressReminderRecipient", fields: [recipientPersonId], references: [id], onDelete: Restrict)
+
+  @@index([demandId, reminderType, sentAt])
+  @@index([recipientPersonId, sentAt])
+  @@map("demand_progress_reminders")
+}
+
+model DemandCloseRequest {
+  id                    String                   @id @default(uuid()) @db.Char(36)
+  demandId              String                   @map("demand_id") @db.Char(36)
+  submissionNo          Int                      @map("submission_no") @db.UnsignedInt
+  solution              String                   @db.Text
+  connectedResources    String                   @map("connected_resources") @db.Text
+  submittedByPersonId   String                   @map("submitted_by_person_id") @db.Char(36)
+  responsibilityMode    DemandResponsibilityMode @map("responsibility_mode")
+  townshipHandlerPersonId String?                @map("township_handler_person_id") @db.Char(36)
+  submittedAt           DateTime                 @default(now()) @map("submitted_at") @db.DateTime(3)
+  endedAt               DateTime?                @map("ended_at") @db.DateTime(3)
+  activeKey             Int?                     @default(1) @map("active_key") @db.UnsignedTinyInt
+  demand                Demand                   @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  submittedByPerson     Person                   @relation("DemandCloseRequestSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
+  townshipHandlerPerson Person?                  @relation("DemandCloseRequestTownshipHandler", fields: [townshipHandlerPersonId], references: [id], onDelete: Restrict)
+  reviews               DemandCloseReview[]
+
+  @@unique([demandId, submissionNo])
+  @@unique([demandId, activeKey])
+  @@index([demandId, submittedAt])
+  @@index([submittedByPersonId, submittedAt])
+  @@index([townshipHandlerPersonId, submittedAt])
+  @@map("demand_close_requests")
+}
+
+model DemandCloseReview {
+  id                         String                    @id @default(uuid()) @db.Char(36)
+  closeRequestId             String                    @map("close_request_id") @db.Char(36)
+  demandId                   String                    @map("demand_id") @db.Char(36)
+  decision                   DemandCloseReviewDecision
+  townshipVerificationResult String                    @map("township_verification_result") @db.Text
+  reason                     String?                   @db.VarChar(500)
+  reviewedByPersonId         String                    @map("reviewed_by_person_id") @db.Char(36)
+  reviewedAt                 DateTime                  @default(now()) @map("reviewed_at") @db.DateTime(3)
+  closeRequest               DemandCloseRequest        @relation(fields: [closeRequestId], references: [id], onDelete: Restrict)
+  demand                     Demand                    @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  reviewedByPerson           Person                    @relation("DemandCloseReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([closeRequestId])
+  @@index([demandId, reviewedAt])
+  @@index([reviewedByPersonId, reviewedAt])
+  @@map("demand_close_reviews")
+}
+
+model DemandOwnerExitRequest {
+  id                 String                @id @default(uuid()) @db.Char(36)
+  demandId           String                @map("demand_id") @db.Char(36)
+  ownerPersonId      String                @map("owner_person_id") @db.Char(36)
+  ownerHistoryId     String                @map("owner_history_id") @db.Char(36)
+  reason             String                @db.VarChar(500)
+  status             DemandOwnerExitStatus @default(PENDING)
+  requestedAt        DateTime              @default(now()) @map("requested_at") @db.DateTime(3)
+  reviewedAt         DateTime?             @map("reviewed_at") @db.DateTime(3)
+  reviewedByPersonId String?               @map("reviewed_by_person_id") @db.Char(36)
+  reviewReason       String?               @map("review_reason") @db.VarChar(500)
+  activeKey          Int?                  @default(1) @map("active_key") @db.UnsignedTinyInt
+  demand             Demand                @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  ownerPerson        Person                @relation("DemandOwnerExitOwner", fields: [ownerPersonId], references: [id], onDelete: Restrict)
+  ownerHistory       DemandOwnerHistory    @relation(fields: [ownerHistoryId], references: [id], onDelete: Restrict)
+  reviewedByPerson   Person?               @relation("DemandOwnerExitReviewer", fields: [reviewedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, activeKey])
+  @@index([demandId, status, requestedAt])
+  @@index([ownerPersonId, requestedAt])
+  @@index([reviewedByPersonId, reviewedAt])
+  @@map("demand_owner_exit_requests")
 }
 
 model Talent {

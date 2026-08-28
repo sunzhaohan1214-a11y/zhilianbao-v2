@@ -213,6 +213,54 @@ export const activateDemandAlumniHelpSchema = z.object({
   reason: plainText(500),
 }).strict();
 
+export const addDemandProgressSchema = z.object({
+  currentProgress: plainText(5000),
+  nextStep: plainText(5000),
+  attachmentIds,
+  representedPersonId: z.uuid().optional(),
+}).strict();
+
+export const demandProgressReminderSchema = z.object({}).strict();
+
+export const submitDemandCloseSchema = z.object({
+  solution: plainText(5000),
+  connectedResources: plainText(5000),
+  attachmentIds,
+}).strict();
+
+export const reviewDemandCloseSchema = z.object({
+  decision: z.enum(["APPROVE", "RETURN"]),
+  townshipVerificationResult: plainText(5000),
+  reason: optionalPlainText(500),
+}).strict().superRefine((value, context) => {
+  if (value.decision === "RETURN" && !value.reason) {
+    context.addIssue({ code: "custom", path: ["reason"], message: "退回时必须填写原因" });
+  }
+});
+
+export const requestDemandOwnerExitSchema = z.object({ reason: plainText(500) }).strict();
+
+export const reviewDemandOwnerExitSchema = z.object({
+  decision: z.enum(["APPROVE", "REJECT"]),
+  reviewReason: optionalPlainText(500),
+}).strict().superRefine((value, context) => {
+  if (value.decision === "REJECT" && !value.reviewReason) {
+    context.addIssue({ code: "custom", path: ["reviewReason"], message: "拒绝时必须填写审核原因" });
+  }
+});
+
+export const previewDemandOwnerTransferSchema = z.object({
+  newOwnerPersonId: z.uuid(),
+  reason: plainText(500),
+}).strict();
+
+export const transferDemandOwnerSchema = previewDemandOwnerTransferSchema.extend({
+  impactToken: trimmed(4000, 32),
+  confirmation: z.literal("CONFIRM"),
+}).strict();
+
+export const cancelDemandSchema = z.object({ reason: plainText(500) }).strict();
+
 export const demandListQuerySchema = z.object({
   status: optionalQueryString.pipe(z.enum([
     "DRAFT", "PENDING_REVIEW", "RETURNED", "PENDING_CLAIM", "IN_PROGRESS",

@@ -1,6 +1,8 @@
 export { DemandLeadService } from "./demand-lead-service";
 export { FormalDemandService, isDeterministicDuplicateTitle } from "./formal-demand-service";
 export { DemandRecommendationService, isResponsibleTownshipStaff } from "./demand-recommendation-service";
+export { DemandLifecycleService } from "./demand-lifecycle-service";
+export * from "./demand-responsibility";
 export * from "./recommendation-config";
 export * from "./recommendation-rules";
 export * from "./formal-demand-access";

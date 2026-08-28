@@ -41,10 +41,13 @@ describe("permission capability foundation", () => {
     expect(member.capabilities.has("demand.claim")).toBe(true);
     expect(member.capabilities.has("reimbursement.create")).toBe(true);
     expect(member.capabilities.has("help.create")).toBe(true);
+    expect(member.capabilities.has("demand.progress.add")).toBe(true);
+    expect(member.capabilities.has("demand.owner.exit_request")).toBe(true);
     expect(alumni.capabilities.has("demand.claim")).toBe(false);
     expect(alumni.capabilities.has("reimbursement.create")).toBe(false);
     expect(alumni.capabilities.has("help.create")).toBe(false);
     expect(alumni.capabilities.has("reimbursement.view.self")).toBe(true);
+    expect(alumni.capabilities.has("demand.progress.add")).toBe(true);
   });
 
   it("shares coordinator capabilities while preserving minister boundaries", () => {
@@ -80,6 +83,7 @@ describe("permission capability foundation", () => {
     expect(admin.capabilities.has("audit.full_view")).toBe(false);
     expect(admin.capabilities.has("backup.restore")).toBe(false);
     expect(admin.capabilities.has("demand.owner.transfer")).toBe(false);
+    expect(admin.capabilities.has("demand.owner.exit_review")).toBe(true);
     expect(admin.capabilities.has("ai.conversation.other_full_view")).toBe(false);
   });
 

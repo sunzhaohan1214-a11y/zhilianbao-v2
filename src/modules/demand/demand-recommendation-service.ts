@@ -17,6 +17,7 @@ import type { PermissionActor } from "@/modules/permissions/types";
 import { writeDemandAudit, writeDemandTransition, type DemandMutationContext } from "./audit";
 import { DEMAND_PUBLISHED_STATUSES } from "./constants";
 import { DemandError } from "./errors";
+import { getCurrentDemandResponsibility } from "./demand-responsibility";
 import {
   getClaimDeadline,
   getDemandClaimPeriodDays,
@@ -959,26 +960,7 @@ export class DemandRecommendationService {
     | { mode: "ALUMNI_TOWNSHIP"; townshipHandlerPersonId: string; alumniHelperPersonIds: string[] }
     | null
   > {
-    const demand = await this.repository.transaction((tx) => tx.demand.findUnique({
-      where: { id: demandId },
-      select: {
-        currentOwnerPersonId: true,
-        ownerHistories: { where: { activeKey: 1, expiredAt: null }, select: { personId: true }, take: 2 },
-        townshipHandlers: { where: { activeKey: 1, expiredAt: null }, select: { personId: true }, take: 2 },
-        alumniHelpers: { where: { activeKey: 1, status: "ACTIVE", expiredAt: null }, select: { personId: true }, orderBy: { effectiveAt: "asc" } },
-      },
-    }));
-    if (!demand) throw new DemandError("DEMAND_NOT_FOUND", "需求不存在");
-    if (demand.currentOwnerPersonId) {
-      if (demand.ownerHistories.length !== 1 || demand.ownerHistories[0].personId !== demand.currentOwnerPersonId || demand.townshipHandlers.length > 0) {
-        throw new DemandError("DEMAND_STATE_CONFLICT", "需求责任关系不一致");
-      }
-      return { mode: "CURRENT_OWNER", ownerPersonId: demand.currentOwnerPersonId };
-    }
-    if (demand.townshipHandlers.length === 1 && demand.alumniHelpers.length > 0) {
-      return { mode: "ALUMNI_TOWNSHIP", townshipHandlerPersonId: demand.townshipHandlers[0].personId, alumniHelperPersonIds: demand.alumniHelpers.map(({ personId }) => personId) };
-    }
-    return null;
+    return getCurrentDemandResponsibility(demandId);
   }
 }
 

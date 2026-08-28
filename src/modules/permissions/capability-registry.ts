@@ -29,6 +29,8 @@ export const ACTION_REGISTRY = {
   "demand.correct_formal": { defaultScope: "GLOBAL_OPERATIONAL" },
   "demand.recommendation.manage": { defaultScope: "GLOBAL_OPERATIONAL" },
   "demand.owner.transfer": { defaultScope: "SYSTEM", superAdminOnly: true },
+  "demand.owner.exit_request": {},
+  "demand.owner.exit_review": { defaultScope: "GLOBAL_OPERATIONAL" },
   "demand.team_coordinator.remind": { defaultScope: "GLOBAL_PUBLISHED" },
   "demand.outcome.fill": { defaultScope: "TOWNSHIP" },
   "demand.outcome.review": { defaultScope: "GLOBAL_OPERATIONAL" },
