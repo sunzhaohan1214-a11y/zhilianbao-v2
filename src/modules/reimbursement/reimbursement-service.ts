@@ -211,6 +211,38 @@ export class ReimbursementService {
     });
   }
 
+  async removeInvoice(input: Input & { reimbursementId: string; invoiceId: string }) {
+    if (!input.actor.capabilities.has("reimbursement.edit.self")) {
+      throw new ReimbursementError("REIMBURSEMENT_NOT_FOUND", "报销单不存在或无权查看");
+    }
+    await authorizeActor({ actor: input.actor, action: "reimbursement.edit.self" });
+    return this.repository.transaction(async (tx) => {
+      const item = await this.locked(tx, input.reimbursementId); this.ensureOwner(item, input.actor);
+      if (!EDITABLE_STATUSES.includes(item.status as typeof EDITABLE_STATUSES[number])) throw new ReimbursementError("REIMBURSEMENT_STATE_CONFLICT", "仅草稿或退回状态可移除票据");
+      const invoices = await tx.$queryRaw<Array<{ id: string; attachmentId: string; ocrStatus: string }>>`
+        SELECT id, attachment_id AS attachmentId, ocr_status AS ocrStatus
+        FROM reimbursement_invoices WHERE id = ${input.invoiceId} AND reimbursement_id = ${item.id} FOR UPDATE
+      `;
+      const invoice = invoices[0];
+      if (!invoice) throw new ReimbursementError("REIMBURSEMENT_NOT_FOUND", "票据不存在或无权访问");
+      await tx.$queryRaw`SELECT id FROM attachments WHERE id = ${invoice.attachmentId} FOR UPDATE`;
+      if (["QUEUED", "PROCESSING"].includes(invoice.ocrStatus)) throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "票据识别处理中，暂不能移除");
+      const activeExpenses = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM reimbursement_expenses
+        WHERE reimbursement_id = ${item.id} AND invoice_id = ${invoice.id} AND is_active = TRUE FOR UPDATE
+      `;
+      if (activeExpenses.length) throw new ReimbursementError("REIMBURSEMENT_INVOICE_IN_USE", "请先移除或修改引用该票据的费用明细");
+      await tx.reimbursementExpense.updateMany({ where: { reimbursementId: item.id, invoiceId: invoice.id, isActive: false }, data: { invoiceId: null } });
+      await tx.attachmentLink.deleteMany({ where: { attachmentId: invoice.attachmentId, entityType: "REIMBURSEMENT_INVOICE", entityId: item.id, relationType: "INVOICE" } });
+      await tx.reimbursementInvoice.delete({ where: { id: invoice.id } });
+      if (!await tx.attachmentLink.count({ where: { attachmentId: invoice.attachmentId } })) {
+        await tx.attachment.update({ where: { id: invoice.attachmentId }, data: { isTemporary: true } });
+      }
+      await writeReimbursementAudit(tx, { ...input, entityId: item.id, actionCode: "REIMBURSEMENT_INVOICE_REMOVED", after: { invoiceId: invoice.id, attachmentId: invoice.attachmentId } });
+      return { invoiceId: invoice.id, attachmentId: invoice.attachmentId, removed: true as const };
+    });
+  }
+
   async confirmInvoice(input: Input & { reimbursementId: string; invoiceId: string; body: unknown }) {
     await authorizeActor({ actor: input.actor, action: "reimbursement.edit.self" });
     const body = confirmInvoiceSchema.parse(input.body);

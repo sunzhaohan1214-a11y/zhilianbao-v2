@@ -66,7 +66,7 @@ export class ReimbursementNotificationHandler<T extends ReimbursementEventType> 
         aggregateType: "REIMBURSEMENT",
         aggregateId: payload.reimbursementId,
         actionUrl: personId === payload.applicantPersonId ? `/reimbursements/${payload.reimbursementId}` : `/reimbursement-admin/${payload.reimbursementId}`,
-        dedupeKey: `${this.eventType}:${payload.reimbursementId}:${personId}:${payload.eventKey}`,
+        dedupeKey: `${this.eventType}:${payload.reimbursementId}:${personId}`,
         eventAt: event.occurredAt,
       });
     }

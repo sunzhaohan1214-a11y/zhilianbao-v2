@@ -96,3 +96,18 @@ test("11 ADMIN grants and revokes alumni apply without gaining content visibilit
   expect((await api(page, `/api/v2/reimbursements/${id}/withdraw`, {})).status).toBe(403);
   const history = await api(page, `/api/v2/reimbursements/${id}`); expect(history.status).toBe(200); expect(history.json.data.timeline.length).toBeGreaterThanOrEqual(4);
 });
+
+test("12 draft UI removes a failed-scan invoice before submit and formal state hides removal", async ({ page }) => {
+  await login(page, e2eUsers.normal); const item = await create(page, "移除失败票据"); const prisma = getPrismaClient(); const id = item.json.data.id;
+  const attachment = await prisma.attachment.create({ data: { originalFilename: "failed-scan.pdf", extension: "pdf", declaredMimeType: "application/pdf", expectedSizeBytes: BigInt(8), actualSizeBytes: BigInt(8), bucket: "test", region: "test", objectKey: `failed/${crypto.randomUUID()}.pdf`, uploadStatus: "UPLOADED", scanStatus: "FAILED", scanReason: "e2e rejected", isTemporary: false, permissionLevel: "SENSITIVE_PARENT", uploadedByPersonId: e2eUsers.normal.personId } });
+  const invoice = await prisma.reimbursementInvoice.create({ data: { reimbursementId: id, attachmentId: attachment.id, ocrStatus: "FAILED" } });
+  await prisma.attachmentLink.create({ data: { attachmentId: attachment.id, entityType: "REIMBURSEMENT_INVOICE", entityId: id, relationType: "INVOICE", createdByPersonId: e2eUsers.normal.personId } });
+  await page.goto(`/reimbursements/${id}`); await expect(page.getByRole("button", { name: "移除", exact: true })).toBeVisible();
+  page.once("dialog", async dialog => { expect(dialog.message()).toBe("确认移除这张票据？"); await dialog.accept(); });
+  await page.getByRole("button", { name: "移除", exact: true }).click();
+  await expect(page.getByText("failed-scan.pdf")).toHaveCount(0);
+  await page.getByRole("button", { name: "提交线上核验" }).click();
+  await expect(page.getByText("待线上核对", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "移除", exact: true })).toHaveCount(0);
+  expect(await prisma.reimbursementInvoice.findUnique({ where: { id: invoice.id } })).toBeNull();
+});

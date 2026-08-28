@@ -28,6 +28,14 @@ const travelBody = (reason = "赴外招商差旅") => ({ type: "TRAVEL" as const
   expenses: [{ expenseType: "TRAVEL_TRANSPORT_ACTUAL" as const, amount: "188.50", source: "MANUAL" as const },
     { expenseType: "TRAVEL_MEAL_SUBSIDY" as const, amount: "200.00", source: "MANUAL" as const, referenceRate: "100", claimedDays: "2" }] });
 
+async function addInvoice(itemId: string, status: "NOT_REQUESTED" | "READY" | "DEGRADED" | "FAILED" | "CONFIRMED" = "NOT_REQUESTED") {
+  const attachment = await prisma.attachment.create({ data: { originalFilename: `remove-${randomUUID()}.pdf`, extension: "pdf", declaredMimeType: "application/pdf", expectedSizeBytes: BigInt(8), actualSizeBytes: BigInt(8), bucket: "test", region: "test", objectKey: `reimbursement/${randomUUID()}.pdf`, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: true, uploadedByPersonId: applicant.personId } });
+  attachments.push(attachment.id);
+  const invoice = await service.addInvoice({ actor: applicant, reimbursementId: itemId, body: { attachmentId: attachment.id } });
+  if (status !== "NOT_REQUESTED") await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: status } });
+  return { attachment, invoice };
+}
+
 const reimbursementEvents = ["REIMBURSEMENT_SUBMITTED", "REIMBURSEMENT_RETURNED", "REIMBURSEMENT_VERIFIED", "REIMBURSEMENT_PAPER_RECEIVED", "REIMBURSEMENT_PAPER_INCOMPLETE", "REIMBURSEMENT_FINANCE_SUBMITTED", "REIMBURSEMENT_WITHDRAWN", "REIMBURSEMENT_STATE_CORRECTED"] as const satisfies readonly ReimbursementEventType[];
 async function dispatchReimbursementEvents(reimbursementId: string, replay = false) {
   const registry = new OutboxHandlerRegistry();
@@ -161,6 +169,71 @@ describe("B-M3-001 real MySQL reimbursement workflow", () => {
     await expect(service.submit({ actor: applicant, reimbursementId: second.id, idempotencyKey: `invoice-${randomUUID()}` })).rejects.toMatchObject({ code: "REIMBURSEMENT_DUPLICATE_INVOICE", status: 409 });
   });
 
+  it("removes failed-scan invoices safely and leaves the attachment temporary without deleting its object", async () => {
+    const item = await service.create({ actor: applicant, body: travelBody("失败票据移除") }); if (!item) throw new Error("fixture");
+    const { attachment, invoice } = await addInvoice(item.id, "FAILED");
+    await prisma.attachment.update({ where: { id: attachment.id }, data: { scanStatus: "FAILED", scanReason: "test rejection" } });
+    await expect(service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `blocked-${randomUUID()}` })).rejects.toMatchObject({ code: "REIMBURSEMENT_INVOICE_INVALID" });
+    await expect(service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id })).resolves.toMatchObject({ removed: true, invoiceId: invoice.id, attachmentId: attachment.id });
+    expect(await prisma.reimbursementInvoice.findUnique({ where: { id: invoice.id } })).toBeNull();
+    expect(await prisma.attachmentLink.count({ where: { attachmentId: attachment.id } })).toBe(0);
+    expect(await prisma.attachment.findUniqueOrThrow({ where: { id: attachment.id } })).toMatchObject({ isTemporary: true, objectKey: attachment.objectKey, permissionLevel: "SENSITIVE_PARENT" });
+    await expect(service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `after-remove-${randomUUID()}` })).resolves.toMatchObject({ status: "PENDING_ONLINE_REVIEW" });
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { entityType: "REIMBURSEMENT", entityId: item.id, actionCode: "REIMBURSEMENT_INVOICE_REMOVED" } });
+    expect(audit.afterJson).toEqual({ invoiceId: invoice.id, attachmentId: attachment.id });
+  });
+
+  it("rejects removal while an active expense uses the invoice and nulls only inactive historical references", async () => {
+    const item = await service.create({ actor: applicant, body: travelBody("活动费用引用") }); if (!item) throw new Error("fixture");
+    const { attachment, invoice } = await addInvoice(item.id);
+    await service.update({ actor: applicant, reimbursementId: item.id, body: { ...travelBody("活动费用引用"), expenses: [{ expenseType: "TRAVEL_TRANSPORT_ACTUAL", amount: "88.00", source: "MANUAL", invoiceId: invoice.id }] } });
+    await expect(service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id })).rejects.toMatchObject({ code: "REIMBURSEMENT_INVOICE_IN_USE", status: 409, message: "请先移除或修改引用该票据的费用明细" });
+    expect(await prisma.reimbursementInvoice.findUnique({ where: { id: invoice.id } })).not.toBeNull();
+    expect(await prisma.attachmentLink.count({ where: { attachmentId: attachment.id } })).toBe(1);
+    expect(await prisma.attachment.findUniqueOrThrow({ where: { id: attachment.id } })).toMatchObject({ isTemporary: false });
+    await service.update({ actor: applicant, reimbursementId: item.id, body: travelBody("移除活动引用") });
+    const historical = await prisma.reimbursementExpense.findFirstOrThrow({ where: { reimbursementId: item.id, invoiceId: invoice.id, isActive: false } });
+    await service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id });
+    expect(await prisma.reimbursementExpense.findUniqueOrThrow({ where: { id: historical.id } })).toMatchObject({ invoiceId: null, isActive: false });
+  });
+
+  it("keeps removal owner-only and editable-state-only with non-discoverable cross-person responses", async () => {
+    const item = await service.create({ actor: applicant, body: travelBody("删除权限") }); if (!item) throw new Error("fixture");
+    const { invoice } = await addInvoice(item.id);
+    for (const blocked of [outsider, manager, admin, minister]) await expect(service.removeInvoice({ actor: blocked, reimbursementId: item.id, invoiceId: invoice.id })).rejects.toMatchObject({ code: "REIMBURSEMENT_NOT_FOUND", status: 404 });
+    await service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `formal-${randomUUID()}` });
+    await expect(service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id })).rejects.toMatchObject({ code: "REIMBURSEMENT_STATE_CONFLICT", status: 409 });
+    expect(await prisma.reimbursementInvoice.findUnique({ where: { id: invoice.id } })).not.toBeNull();
+  });
+
+  it("removes current material after return without mutating the immutable first submission snapshot", async () => {
+    const item = await service.create({ actor: applicant, body: travelBody("退回票据") }); if (!item) throw new Error("fixture");
+    const { invoice } = await addInvoice(item.id, "CONFIRMED");
+    await service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `returned-v1-${randomUUID()}` });
+    const version = await prisma.reimbursementSubmissionVersion.findFirstOrThrow({ where: { reimbursementId: item.id, versionNo: 1 } });
+    const snapshot = version.invoiceSnapshotJson;
+    await service.returnForRevision({ actor: manager, reimbursementId: item.id, body: { reason: "移除错误票据" } });
+    await service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id });
+    expect((await prisma.reimbursementSubmissionVersion.findUniqueOrThrow({ where: { id: version.id } })).invoiceSnapshotJson).toEqual(snapshot);
+    expect(await prisma.reimbursementInvoice.findUnique({ where: { id: invoice.id } })).toBeNull();
+    await service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `returned-v2-${randomUUID()}` });
+    const second = await prisma.reimbursementSubmissionVersion.findFirstOrThrow({ where: { reimbursementId: item.id, versionNo: 2 } });
+    expect(second.invoiceSnapshotJson).toEqual([]);
+  });
+
+  it("blocks invoice removal during queued and processing OCR without side effects", async () => {
+    const item = await service.create({ actor: applicant, body: travelBody("OCR 删除锁") }); if (!item) throw new Error("fixture");
+    const { attachment, invoice } = await addInvoice(item.id);
+    for (const ocrStatus of ["QUEUED", "PROCESSING"] as const) {
+      await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus } });
+      await expect(service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id })).rejects.toMatchObject({ code: "REIMBURSEMENT_INVOICE_INVALID", status: 422 });
+      expect(await prisma.reimbursementInvoice.findUnique({ where: { id: invoice.id } })).not.toBeNull();
+      expect(await prisma.attachmentLink.count({ where: { attachmentId: attachment.id } })).toBe(1);
+    }
+    await prisma.reimbursementInvoice.update({ where: { id: invoice.id }, data: { ocrStatus: "FAILED" } });
+    await expect(service.removeInvoice({ actor: applicant, reimbursementId: item.id, invoiceId: invoice.id })).resolves.toMatchObject({ removed: true });
+  });
+
   it("writes privacy-minimal outbox events and idempotent reimbursement messages/todos for the full lifecycle", async () => {
     const item = await service.create({ actor: applicant, body: travelBody("通知全链路") }); if (!item) throw new Error("fixture");
     const key = `notify-${randomUUID()}`;
@@ -172,6 +245,8 @@ describe("B-M3-001 real MySQL reimbursement workflow", () => {
     await dispatchReimbursementEvents(item.id, true);
     expect(await prisma.todo.count({ where: { aggregateId: item.id, personId: { in: [manager.personId, managerOnly.personId] }, todoType: "REIMBURSEMENT_REVIEW", status: "OPEN" } })).toBe(2);
     expect(await prisma.message.count({ where: { aggregateId: item.id, personId: { in: [manager.personId, managerOnly.personId] }, messageType: "REIMBURSEMENT_SUBMITTED" } })).toBe(2);
+    const submittedMessage = await prisma.message.findFirstOrThrow({ where: { aggregateId: item.id, personId: manager.personId, messageType: "REIMBURSEMENT_SUBMITTED" } });
+    await prisma.message.update({ where: { id: submittedMessage.id }, data: { readAt: new Date() } });
 
     await service.returnForRevision({ actor: manager, reimbursementId: item.id, body: { reason: "补充材料" } }); await dispatchReimbursementEvents(item.id, true);
     expect(await prisma.todo.count({ where: { aggregateId: item.id, personId: { in: [manager.personId, managerOnly.personId] }, todoType: "REIMBURSEMENT_REVIEW", status: "STALE" } })).toBe(2);
@@ -179,8 +254,12 @@ describe("B-M3-001 real MySQL reimbursement workflow", () => {
     expect(await prisma.message.findFirst({ where: { aggregateId: item.id, personId: applicant.personId, messageType: "REIMBURSEMENT_RETURNED" } })).toMatchObject({ summary: "你的报销已退回修改" });
 
     await service.update({ actor: applicant, reimbursementId: item.id, body: travelBody("通知重新提交") });
-    await service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `resubmit-${randomUUID()}` }); await dispatchReimbursementEvents(item.id, true);
+    await service.submit({ actor: applicant, reimbursementId: item.id, idempotencyKey: `resubmit-${randomUUID()}` });
+    const resubmittedEvent = await prisma.outboxEvent.findFirstOrThrow({ where: { aggregateId: item.id, eventType: "REIMBURSEMENT_SUBMITTED", publishedAt: null } });
+    await dispatchReimbursementEvents(item.id, true);
     expect(await prisma.todo.count({ where: { aggregateId: item.id, todoType: "REIMBURSEMENT_REVISE", status: "STALE" } })).toBe(1);
+    expect(await prisma.message.count({ where: { aggregateId: item.id, personId: { in: [manager.personId, managerOnly.personId] }, messageType: "REIMBURSEMENT_SUBMITTED" } })).toBe(2);
+    expect(await prisma.message.findUniqueOrThrow({ where: { id: submittedMessage.id } })).toMatchObject({ readAt: null, eventAt: resubmittedEvent.occurredAt });
     await service.verify({ actor: manager, reimbursementId: item.id }); await dispatchReimbursementEvents(item.id, true);
     expect(await prisma.todo.count({ where: { aggregateId: item.id, status: "OPEN" } })).toBe(0);
     expect(await prisma.message.findFirst({ where: { aggregateId: item.id, messageType: "REIMBURSEMENT_VERIFIED" } })).toMatchObject({ summary: "报销线上核对已完成" });
@@ -191,10 +270,11 @@ describe("B-M3-001 real MySQL reimbursement workflow", () => {
     expect(await prisma.todo.count({ where: { aggregateId: item.id, personId: { in: [manager.personId, managerOnly.personId] }, todoType: "REIMBURSEMENT_SUBMIT_FINANCE", status: "STALE" } })).toBe(2);
     expect(await prisma.todo.count({ where: { aggregateId: item.id, personId: applicant.personId, todoType: { contains: "PAPER" } } })).toBe(0);
     await service.paperReceived({ actor: manager, reimbursementId: item.id }); await dispatchReimbursementEvents(item.id, true);
+    expect(await prisma.message.count({ where: { aggregateId: item.id, personId: applicant.personId, messageType: "REIMBURSEMENT_PAPER_RECEIVED" } })).toBe(1);
     await service.financeSubmitted({ actor: manager, reimbursementId: item.id }); await dispatchReimbursementEvents(item.id, true);
     expect(await prisma.todo.count({ where: { aggregateId: item.id, status: "OPEN" } })).toBe(0);
     expect(await prisma.message.findFirst({ where: { aggregateId: item.id, messageType: "REIMBURSEMENT_FINANCE_SUBMITTED" } })).toMatchObject({ summary: expect.stringMatching(/不代表审批通过或已经付款/) });
-    expect(await prisma.message.count({ where: { aggregateId: item.id, personId: { in: [applicant.personId, manager.personId, managerOnly.personId] }, messageType: { startsWith: "REIMBURSEMENT_" } } })).toBe(10);
+    expect(await prisma.message.count({ where: { aggregateId: item.id, personId: { in: [applicant.personId, manager.personId, managerOnly.personId] }, messageType: { startsWith: "REIMBURSEMENT_" } } })).toBe(7);
   });
 
   it("blocks risky taxi/dining warnings from every travel expense and enforces OCR confirmation states", async () => {
@@ -237,6 +317,10 @@ describe("B-M3-001 real MySQL reimbursement workflow", () => {
     await service.correctState({ actor: manager, reimbursementId: item.id, body: { fromState: "FINANCE_SUBMITTED", toState: "PAPER_RECEIVED", reason: "回退核对" } });
     const backward = await prisma.reimbursement.findUniqueOrThrow({ where: { id: item.id } });
     expect(backward.financeSubmittedAt?.getTime()).toBe(finance.financeSubmittedAt?.getTime()); expect(backward.financeSubmittedByPersonId).toBe(managerOnly.personId);
+    await dispatchReimbursementEvents(item.id, true);
+    expect(await prisma.message.count({ where: { aggregateId: item.id, messageType: "REIMBURSEMENT_STATE_CORRECTED", personId: { in: [applicant.personId, manager.personId, managerOnly.personId] } } })).toBe(3);
+    expect(await prisma.todo.count({ where: { aggregateId: item.id, todoType: "REIMBURSEMENT_SUBMIT_FINANCE", status: "OPEN", personId: { in: [manager.personId, managerOnly.personId] } } })).toBe(2);
+    expect(await prisma.todo.count({ where: { aggregateId: item.id, todoType: "REIMBURSEMENT_SUBMIT_FINANCE", status: "STALE", personId: { in: [manager.personId, managerOnly.personId] } } })).toBeGreaterThanOrEqual(4);
   });
 
   it("serializes manager/applicant and manager/manager races into one legal transition", async () => {
