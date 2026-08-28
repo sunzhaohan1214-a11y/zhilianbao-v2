@@ -1,0 +1,3 @@
+{"sourceId":"REIMBURSEMENT-001","applicantPersonSourceId":"PERSON-001","type":"TRAVEL","reason":"历史审核中差旅样本","legacyStatus":"审核中","totalAmount":"100.00"}
+{"sourceId":"REIMBURSEMENT-002","applicantPersonSourceId":"PERSON-001","type":"ACTIVITY","reason":"历史已退回活动样本","legacyStatus":"已退回","totalAmount":"200.00"}
+{"sourceId":"REIMBURSEMENT-003","applicantPersonSourceId":"PERSON-002","type":"TRAVEL","reason":"历史已通过差旅样本","legacyStatus":"已通过","totalAmount":"300.00"}

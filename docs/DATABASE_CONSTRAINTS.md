@@ -556,4 +556,12 @@ RESTRICT / NO ACTION
 - 无 Account 人员的手机号不对 `Person.contactPhone` 盲目加 UNIQUE；Apply 先锁定 `person_import_identity_locks(phone_hash)`，再以 locking current read 调用共享 Person Matcher 复核，跨批竞争 loser 整批回滚。
 - 人员 exact phone 必须覆盖 ACTIVE/ARCHIVED；ARCHIVED 以及 DISABLED/MERGED 企业不可通过 Import 创建替代档案、恢复或更新。
 
+## 26. M3-006 Actual Apply 约束
+
+- 每条 source aggregate 使用独立事务；业务 target、领域 Audit/Version/History 与 `LegacyMigrationMap` 同事务提交，不使用一个全量大事务。
+- `(source_system, source_entity, source_id)` 唯一；既有 Map 的 target entity/ID 不得改指，immutable fingerprint 改变必须报 `MIGRATION_SOURCE_HISTORY_CHANGED`。
+- `PersonImportIdentityLock` 在 Person 实际创建前锁定并重新读取当前候选；ARCHIVED Person 与 DISABLED/MERGED Enterprise 不接受通用 resolution 绕过。
+- Attachment 先保留 temporary row/object；正式 Link、Map、`COPIED` result 和 `is_temporary=false` 同事务。数据库提交失败时保留 temporary 供 cleanup，不产生正式 Link。
+- Actual Apply 不写历史业务 Outbox；不得在提交后删除 Outbox 来伪装无通知。
+
 **DATABASE_CONSTRAINTS.md v1.0 END**

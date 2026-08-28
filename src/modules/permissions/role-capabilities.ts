@@ -242,6 +242,8 @@ const SUPER_ADMIN_CAPABILITIES = [
   "system.high_privilege_manage",
   "system.health.view",
   "ai.service.manage",
+  "migration.execute",
+  "migration.view",
 ] as const satisfies readonly Capability[];
 
 export const ROLE_CAPABILITIES: Readonly<Record<RoleCode, readonly Capability[]>> = {

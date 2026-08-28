@@ -155,6 +155,8 @@ export const ACTION_REGISTRY = {
   "report.export": {},
   "import.execute": { defaultScope: "GLOBAL_OPERATIONAL" },
   "export.create": {},
+  "migration.execute": { defaultScope: "SYSTEM", superAdminOnly: true },
+  "migration.view": { defaultScope: "SYSTEM", superAdminOnly: true },
 
   "ai.assistant.use": {},
   "ai.metrics.view": { defaultScope: "GLOBAL_OPERATIONAL" },

@@ -1,0 +1,19 @@
+{
+  "version": "sample-resolution-v1",
+  "resolutions": [
+    {
+      "sourceEntity": "ENTERPRISE",
+      "sourceId": "ENTERPRISE-003",
+      "action": "CREATE",
+      "reason": "脱敏样本已由迁移演练负责人确认是独立企业；联系人仍不确认",
+      "operator": "sample-lineage-operator"
+    },
+    {
+      "sourceEntity": "DEMAND",
+      "sourceId": "DEMAND-003",
+      "action": "CREATE",
+      "reason": "脱敏样本确认需求主体可迁；无法证明的进展作者仍保持 REVIEW",
+      "operator": "sample-lineage-operator"
+    }
+  ]
+}

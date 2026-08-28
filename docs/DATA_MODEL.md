@@ -2826,4 +2826,16 @@ DATA_DICTIONARY.md
 - `PersonImportIdentityLock` 仅以标准化手机号的 SHA-256 作为持久 guard key，在正式 Apply 事务内串行化无 Account 人员的身份复核；它不是 Person 主键，也不替代 EntityMatcher。
 - `candidate_json` 可同时保存 `candidateIds` 与最小脱敏 `candidates` 摘要；人员包含姓名、脱敏手机号和档案/账号状态，企业包含区域、部分信用代码和状态，人才不包含本人电话、邮箱或简历链接。
 
+## M3-006 Migration domain
+
+- `MigrationBatch` stores snapshot/schema/manifest/code/mapping/resolution versions, mode, lifecycle, operator, reconciliation, failure, and later sign-off. Nullable unique `activeKey=sourceSystem` permits only one active migration per source system.
+- `LegacyMigrationMap` is unique by source system/entity/ID and retains first/last batch, target identity, deterministic source fingerprint, and immutable-history policy.
+- `MigrationIssue` is append-only governance evidence with WARNING/REVIEW/BLOCKER, OPEN/RESOLVED/WAIVED, source snapshot, candidates, and actor/time/reason resolution.
+- `MigrationModuleResult` stores one explained reconciliation row per batch/module.
+- `MigrationAttachmentResult` stores source/target hash and size lineage and all copy outcomes.
+- Actual Apply is source-aggregate transactional: the target business row, its domain audit/version/history, and the corresponding Map commit together. DemandProgress and Attachment have independent immutable source maps.
+- Resolution version is stored on `MigrationBatch`; resolution SHA-256 and actual CREATE/LINK/UPDATE/SKIP/REVIEW/FAILED counts are stored in `reconciliationJson`.
+- `MigrationAttachmentResult.status=COPIED` requires a non-temporary PASSED target Attachment, private target object re-read, matching target SHA/size, a formal parent `AttachmentLink`, and an Attachment source map.
+- All migration foreign keys use `ON DELETE RESTRICT`; migration history is never physically deleted by business runtime.
+
 **DATA_MODEL.md v1.2 END**
