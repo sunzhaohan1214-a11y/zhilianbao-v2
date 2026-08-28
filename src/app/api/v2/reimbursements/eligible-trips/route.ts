@@ -1,0 +1,2 @@
+import type { NextRequest } from "next/server"; import { apiError, apiSuccess } from "@/lib/api/response"; import { reimbursementRequestContext } from "@/lib/api/reimbursement-route"; import { buildAuthRequestContext } from "@/lib/auth/request-context";
+export async function GET(request: NextRequest) { const c = buildAuthRequestContext(request); try { const { actor, context, service } = await reimbursementRequestContext(request); return apiSuccess(await service.eligibleTrips({ actor, context }), c.requestId); } catch (e) { return apiError(e, c.requestId); } }

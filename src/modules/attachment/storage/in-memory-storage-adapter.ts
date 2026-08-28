@@ -52,6 +52,10 @@ export class InMemoryStorageAdapter implements StorageAdapter {
     return Buffer.from(body);
   }
 
+  async writeObject(objectKey: string, body: Buffer): Promise<void> {
+    this.objects.set(objectKey, Buffer.from(body));
+  }
+
   async createSignedGetUrl(objectKey: string, expiresInSeconds: number): Promise<string> {
     if (!this.objects.has(objectKey)) throw new Error("OBJECT_NOT_FOUND");
     return `https://memory.invalid/${encodeURIComponent(objectKey)}?expires=${expiresInSeconds}`;

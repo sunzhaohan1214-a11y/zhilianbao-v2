@@ -368,6 +368,61 @@ enum HelpAssignmentType {
   REASSIGN
 }
 
+enum ReimbursementType {
+  TRAVEL
+  ACTIVITY
+}
+
+enum ReimbursementStatus {
+  DRAFT
+  PENDING_ONLINE_REVIEW
+  RETURNED
+  VERIFIED_PENDING_PAPER
+  PAPER_RECEIVED
+  FINANCE_SUBMITTED
+}
+
+enum ReimbursementExpenseType {
+  TRAVEL_TRANSPORT_ACTUAL
+  TRAVEL_TRANSPORT_SUBSIDY
+  TRAVEL_MEAL_SUBSIDY
+  TRAVEL_LODGING
+  DINING
+  VENUE
+  MATERIAL_PRODUCTION
+  SUPPLIES
+  LODGING
+  TRANSPORTATION
+  OTHER
+}
+
+enum ReimbursementExpenseSource {
+  MANUAL
+  OCR
+}
+
+enum ReimbursementOcrStatus {
+  NOT_REQUESTED
+  QUEUED
+  PROCESSING
+  READY
+  DEGRADED
+  FAILED
+  CONFIRMED
+}
+
+enum ReimbursementExportFormat {
+  XLSX
+  PDF
+}
+
+enum ReimbursementExportStatus {
+  WAITING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
 enum AnnouncementStatus {
   DRAFT
   PUBLISHED
@@ -458,6 +513,13 @@ model Person {
   changedHelpAssignments         HelpAssignmentHistory[]       @relation("HelpAssignmentChanger")
   helpProgresses                 HelpProgress[]                @relation("HelpProgressCreator")
   helpCommandIdempotencies       HelpCommandIdempotency[]      @relation("HelpIdempotencyActor")
+  reimbursements                 Reimbursement[]               @relation("ReimbursementApplicant")
+  submittedReimbursementVersions ReimbursementSubmissionVersion[] @relation("ReimbursementVersionSubmitter")
+  confirmedReimbursementInvoices ReimbursementInvoice[]       @relation("ReimbursementInvoiceConfirmer")
+  receivedReimbursements         Reimbursement[]               @relation("ReimbursementPaperReceiver")
+  financeSubmittedReimbursements Reimbursement[]               @relation("ReimbursementFinanceSubmitter")
+  reimbursementIdempotencies     ReimbursementCommandIdempotency[] @relation("ReimbursementIdempotencyActor")
+  reimbursementExports           ReimbursementExportTask[]     @relation("ReimbursementExportCreator")
   reviewedDemands                Demand[]                      @relation("DemandReviewer")
   publishedDemands               Demand[]                      @relation("DemandPublisher")
   demandReviews                  DemandReview[]
@@ -938,6 +1000,7 @@ model Trip {
   visits             EnterpriseVisit[]
   idempotencyRecords TripIdempotency[]
   demandLeads        DemandLead[]
+  reimbursements     Reimbursement[]
 
   @@index([createdByPersonId, createdAt])
   @@index([canceledAt, createdAt])
@@ -1150,6 +1213,8 @@ model Attachment {
   links                 AttachmentLink[]
   accessLogs            AttachmentAccessLog[]
   talentAIExtractions   TalentAIExtraction[]
+  reimbursementInvoice ReimbursementInvoice?
+  reimbursementExports ReimbursementExportTask[] @relation("ReimbursementExportOutput")
 
   @@index([uploadedByPersonId, isTemporary, uploadStatus])
   @@index([uploadStatus, scanStatus])
@@ -2096,6 +2161,156 @@ model HelpCommandIdempotency {
   @@unique([actorPersonId, actionCode, idempotencyKeyHash], map: "help_claim_idempotency_key")
   @@index([helpRequestId, createdAt])
   @@map("help_command_idempotencies")
+}
+
+model Reimbursement {
+  id                         String              @id @default(uuid()) @db.Char(36)
+  businessNo                 String              @unique @map("business_no") @db.VarChar(32)
+  applicantPersonId          String              @map("applicant_person_id") @db.Char(36)
+  type                       ReimbursementType
+  reason                     String              @db.VarChar(2000)
+  linkedTripId               String?             @map("linked_trip_id") @db.Char(36)
+  status                     ReimbursementStatus @default(DRAFT)
+  currentSubmissionVersionId String?             @unique @map("current_submission_version_id") @db.Char(36)
+  totalAmount                Decimal             @default(0) @map("total_amount") @db.Decimal(18, 2)
+  firstSubmittedAt           DateTime?           @map("first_submitted_at") @db.DateTime(3)
+  lastSubmittedAt            DateTime?           @map("last_submitted_at") @db.DateTime(3)
+  paperReceivedAt            DateTime?           @map("paper_received_at") @db.DateTime(3)
+  paperReceivedByPersonId    String?             @map("paper_received_by_person_id") @db.Char(36)
+  financeSubmittedAt         DateTime?           @map("finance_submitted_at") @db.DateTime(3)
+  financeSubmittedByPersonId String?             @map("finance_submitted_by_person_id") @db.Char(36)
+  sourceSystem               String              @default("V2") @map("source_system") @db.VarChar(50)
+  sourceRecordId             String?             @map("source_record_id") @db.VarChar(191)
+  createdAt                  DateTime            @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt                  DateTime            @updatedAt @map("updated_at") @db.DateTime(3)
+  applicant                  Person              @relation("ReimbursementApplicant", fields: [applicantPersonId], references: [id], onDelete: Restrict)
+  linkedTrip                 Trip?               @relation(fields: [linkedTripId], references: [id], onDelete: Restrict)
+  paperReceivedByPerson      Person?             @relation("ReimbursementPaperReceiver", fields: [paperReceivedByPersonId], references: [id], onDelete: Restrict)
+  financeSubmittedByPerson   Person?             @relation("ReimbursementFinanceSubmitter", fields: [financeSubmittedByPersonId], references: [id], onDelete: Restrict)
+  currentSubmissionVersion   ReimbursementSubmissionVersion? @relation("CurrentReimbursementSubmissionVersion", fields: [currentSubmissionVersionId], references: [id], onDelete: Restrict)
+  submissionVersions         ReimbursementSubmissionVersion[] @relation("ReimbursementSubmissionVersions")
+  expenses                   ReimbursementExpense[]
+  invoices                   ReimbursementInvoice[]
+  commandIdempotencies       ReimbursementCommandIdempotency[]
+
+  @@unique([sourceSystem, sourceRecordId])
+  @@index([applicantPersonId, createdAt])
+  @@index([status, updatedAt])
+  @@index([linkedTripId])
+  @@index([paperReceivedByPersonId])
+  @@index([financeSubmittedByPersonId])
+  @@map("reimbursements")
+}
+
+model ReimbursementSubmissionVersion {
+  id                  String        @id @default(uuid()) @db.Char(36)
+  reimbursementId     String        @map("reimbursement_id") @db.Char(36)
+  versionNo           Int           @map("version_no") @db.UnsignedInt
+  reasonSnapshot      String        @map("reason_snapshot") @db.VarChar(2000)
+  tripSnapshotJson    Json?         @map("trip_snapshot_json")
+  expenseSnapshotJson Json          @map("expense_snapshot_json")
+  invoiceSnapshotJson Json          @map("invoice_snapshot_json")
+  totalAmount         Decimal       @map("total_amount") @db.Decimal(18, 2)
+  submittedByPersonId String        @map("submitted_by_person_id") @db.Char(36)
+  submittedAt         DateTime      @map("submitted_at") @db.DateTime(3)
+  reimbursement       Reimbursement @relation("ReimbursementSubmissionVersions", fields: [reimbursementId], references: [id], onDelete: Restrict)
+  currentFor          Reimbursement[] @relation("CurrentReimbursementSubmissionVersion")
+  submittedByPerson   Person        @relation("ReimbursementVersionSubmitter", fields: [submittedByPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([reimbursementId, versionNo], map: "reimbursement_version_no_key")
+  @@index([submittedByPersonId, submittedAt], map: "reimbursement_version_submitter_idx")
+  @@map("reimbursement_submission_versions")
+}
+
+model ReimbursementExpense {
+  id                String                     @id @default(uuid()) @db.Char(36)
+  reimbursementId   String                     @map("reimbursement_id") @db.Char(36)
+  expenseType       ReimbursementExpenseType   @map("expense_type")
+  customExpenseName String?                    @map("custom_expense_name") @db.VarChar(200)
+  description       String?                    @db.VarChar(1000)
+  expenseDate       DateTime?                  @map("expense_date") @db.Date
+  amount            Decimal                    @db.Decimal(18, 2)
+  invoiceId         String?                    @map("invoice_id") @db.Char(36)
+  source            ReimbursementExpenseSource @default(MANUAL)
+  referenceRate     Decimal?                   @map("reference_rate") @db.Decimal(18, 2)
+  claimedDays       Decimal?                   @map("claimed_days") @db.Decimal(8, 2)
+  calculationNote   String?                    @map("calculation_note") @db.VarChar(1000)
+  isActive          Boolean                    @default(true) @map("is_active")
+  createdAt         DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime                   @updatedAt @map("updated_at") @db.DateTime(3)
+  reimbursement     Reimbursement              @relation(fields: [reimbursementId], references: [id], onDelete: Restrict)
+  invoice           ReimbursementInvoice?      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([reimbursementId, isActive, expenseType], map: "reimbursement_expense_active_type_idx")
+  @@index([invoiceId])
+  @@map("reimbursement_expenses")
+}
+
+model ReimbursementInvoice {
+  id                   String                     @id @default(uuid()) @db.Char(36)
+  reimbursementId      String                     @map("reimbursement_id") @db.Char(36)
+  attachmentId         String                     @unique @map("attachment_id") @db.Char(36)
+  ocrStatus            ReimbursementOcrStatus     @default(NOT_REQUESTED) @map("ocr_status")
+  suggestedExpenseType ReimbursementExpenseType? @map("suggested_expense_type")
+  ocrRawJson           Json?                      @map("ocr_raw_json")
+  ocrWarning           String?                    @map("ocr_warning") @db.VarChar(500)
+  confirmedExpenseType ReimbursementExpenseType? @map("confirmed_expense_type")
+  confirmedInvoiceDate DateTime?                  @map("confirmed_invoice_date") @db.Date
+  confirmedAmount      Decimal?                   @map("confirmed_amount") @db.Decimal(18, 2)
+  confirmedSeller      String?                    @map("confirmed_seller") @db.VarChar(300)
+  confirmedInvoiceNo   String?                    @map("confirmed_invoice_no") @db.VarChar(100)
+  invoiceNoNormalized  String?                    @map("invoice_no_normalized") @db.VarChar(100)
+  confirmedAt          DateTime?                  @map("confirmed_at") @db.DateTime(3)
+  confirmedByPersonId  String?                    @map("confirmed_by_person_id") @db.Char(36)
+  createdAt            DateTime                   @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime                   @updatedAt @map("updated_at") @db.DateTime(3)
+  reimbursement        Reimbursement              @relation(fields: [reimbursementId], references: [id], onDelete: Restrict)
+  attachment           Attachment                 @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  confirmedByPerson    Person?                    @relation("ReimbursementInvoiceConfirmer", fields: [confirmedByPersonId], references: [id], onDelete: Restrict)
+  expenses             ReimbursementExpense[]
+
+  @@index([reimbursementId, createdAt])
+  @@index([invoiceNoNormalized])
+  @@index([ocrStatus, updatedAt])
+  @@map("reimbursement_invoices")
+}
+
+model ReimbursementCommandIdempotency {
+  id                 String        @id @default(uuid()) @db.Char(36)
+  reimbursementId    String        @map("reimbursement_id") @db.Char(36)
+  actorPersonId      String        @map("actor_person_id") @db.Char(36)
+  idempotencyKeyHash String        @map("idempotency_key_hash") @db.Char(64)
+  payloadHash        String        @map("payload_hash") @db.Char(64)
+  responseJson       Json          @map("response_json")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.DateTime(3)
+  reimbursement      Reimbursement @relation(fields: [reimbursementId], references: [id], onDelete: Restrict)
+  actorPerson        Person        @relation("ReimbursementIdempotencyActor", fields: [actorPersonId], references: [id], onDelete: Restrict)
+
+  @@unique([actorPersonId, idempotencyKeyHash], map: "reimbursement_submit_idempotency_key")
+  @@index([reimbursementId, createdAt], map: "reimbursement_command_parent_idx")
+  @@map("reimbursement_command_idempotencies")
+}
+
+model ReimbursementExportTask {
+  id                    String                    @id @default(uuid()) @db.Char(36)
+  createdByPersonId     String                    @map("created_by_person_id") @db.Char(36)
+  requiredPermission    String                    @default("reimbursement.manage") @map("required_permission") @db.VarChar(100)
+  reimbursementIdsJson Json                      @map("reimbursement_ids_json")
+  format                ReimbursementExportFormat
+  status                ReimbursementExportStatus @default(WAITING)
+  outputAttachmentId    String?                   @map("output_attachment_id") @db.Char(36)
+  errorCode             String?                   @map("error_code") @db.VarChar(100)
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.DateTime(3)
+  startedAt             DateTime?                 @map("started_at") @db.DateTime(3)
+  finishedAt            DateTime?                 @map("finished_at") @db.DateTime(3)
+  expiresAt             DateTime?                 @map("expires_at") @db.DateTime(3)
+  createdByPerson       Person                    @relation("ReimbursementExportCreator", fields: [createdByPersonId], references: [id], onDelete: Restrict)
+  outputAttachment      Attachment?               @relation("ReimbursementExportOutput", fields: [outputAttachmentId], references: [id], onDelete: Restrict)
+
+  @@index([createdByPersonId, createdAt])
+  @@index([status, createdAt])
+  @@index([outputAttachmentId])
+  @@map("reimbursement_export_tasks")
 }
 
 model Announcement {

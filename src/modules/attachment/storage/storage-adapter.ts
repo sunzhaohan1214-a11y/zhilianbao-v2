@@ -22,5 +22,6 @@ export interface StorageAdapter {
   promoteObject(stagingObjectKey: string, finalObjectKey: string): Promise<StoredObjectHead>;
   deleteObject(objectKey: string): Promise<void>;
   readObject(objectKey: string): Promise<Buffer>;
+  writeObject(objectKey: string, body: Buffer, contentType: string): Promise<void>;
   createSignedGetUrl(objectKey: string, expiresInSeconds: number): Promise<string>;
 }

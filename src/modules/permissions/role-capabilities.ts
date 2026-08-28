@@ -253,7 +253,13 @@ export const ROLE_CAPABILITIES: Readonly<Record<RoleCode, readonly Capability[]>
 };
 
 export const SENSITIVE_PERMISSION_CAPABILITIES: Readonly<Record<string, readonly Capability[]>> = {
-  "reimbursement.apply": ["reimbursement.create"],
+  "reimbursement.apply": [
+    "reimbursement.create",
+    "reimbursement.view.self",
+    "reimbursement.edit.self",
+    "reimbursement.submit",
+    "reimbursement.withdraw",
+  ],
   "reimbursement.manage": [
     "reimbursement.manage.review",
     "reimbursement.manage.return",

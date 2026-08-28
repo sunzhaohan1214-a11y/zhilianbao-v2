@@ -63,6 +63,7 @@ describe("C-M3-003 announcement and notification foundation", () => {
     expect(notificationListSchema.parse({ unread: "true", type: "HELP_REOPENED", module: "HELP" })).toMatchObject({ unread: true, type: "HELP_REOPENED", module: "HELP" });
     expect(notificationListSchema.parse({ unread: "false" }).unread).toBe(false);
     expect(() => notificationListSchema.parse({ unread: "1" })).toThrow();
+    expect(notificationListSchema.parse({ module: "REIMBURSEMENT" }).module).toBe("REIMBURSEMENT");
     expect(() => notificationListSchema.parse({ module: "UNKNOWN" })).toThrow();
   });
 });

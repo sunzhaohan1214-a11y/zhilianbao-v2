@@ -9,11 +9,14 @@ import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-
 import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
 import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
 import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
+import { ReimbursementNotificationHandler, type ReimbursementEventType } from "@/modules/outbox/handlers/reimbursement-notification-handler";
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
 import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
 import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation-handler";
+import { ReimbursementOcrJobHandler } from "./handlers/reimbursement-ocr-handler";
+import { ReimbursementExportJobHandler } from "./handlers/reimbursement-export-handler";
 import { TripResultDueJobHandler } from "./handlers/trip-result-due-handler";
 import { JobHandlerRegistry } from "./handler-registry";
 import { JobRepository } from "./job-repository";
@@ -65,6 +68,8 @@ export class WorkerRuntime {
     jobHandlers.register("ATTACHMENT_SCAN", new AttachmentScanJobHandler(attachment.scanService));
     jobHandlers.register("ATTACHMENT_TEMP_CLEANUP", new AttachmentCleanupJobHandler(attachment.cleanupService));
     jobHandlers.register("DEMAND_RECOMMENDATION_RUN", new DemandRecommendationJobHandler());
+    jobHandlers.register("REIMBURSEMENT_INVOICE_OCR", new ReimbursementOcrJobHandler());
+    jobHandlers.register("REIMBURSEMENT_EXPORT", new ReimbursementExportJobHandler());
     jobHandlers.register("TRIP_RESULT_DUE", new TripResultDueJobHandler());
     this.runner = dependencies?.runner ?? new JobRunner(this.jobs, jobHandlers, config.heartbeatMs, logger);
 
@@ -89,6 +94,9 @@ export class WorkerRuntime {
     outboxHandlers.register("TRIP_RESULT_DUE_SCHEDULED", new TripResultDueScheduledHandler(this.jobs));
     outboxHandlers.register("TRIP_CANCELED", new TripLifecycleHandler("TRIP_CANCELED"));
     outboxHandlers.register("TRIP_RESULT_SUBMITTED", new TripLifecycleHandler("TRIP_RESULT_SUBMITTED"));
+    for (const eventType of ["REIMBURSEMENT_SUBMITTED", "REIMBURSEMENT_RETURNED", "REIMBURSEMENT_VERIFIED", "REIMBURSEMENT_PAPER_RECEIVED", "REIMBURSEMENT_PAPER_INCOMPLETE", "REIMBURSEMENT_FINANCE_SUBMITTED", "REIMBURSEMENT_WITHDRAWN", "REIMBURSEMENT_STATE_CORRECTED"] as const satisfies readonly ReimbursementEventType[]) {
+      outboxHandlers.register(eventType, new ReimbursementNotificationHandler(eventType));
+    }
     this.outbox = dependencies?.outbox ?? new OutboxConsumer(outboxHandlers, config.outboxMaxAttempts, logger);
   }
 
