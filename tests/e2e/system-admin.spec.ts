@@ -7,7 +7,7 @@ import { e2eUsers } from "./auth-fixtures";
 
 const origin = "http://127.0.0.1:3000";
 async function login(page: Page, user: { phone: string; password: string }) {
-  const response = await page.request.post("/api/v2/auth/login", { headers: { origin }, data: user });
+  const response = await page.request.post("/api/v2/auth/login", { headers: { origin }, data: { phone: user.phone, password: user.password } });
   expect(response.ok()).toBe(true);
 }
 async function post(page: Page, path: string, data: unknown, idempotent = false) {
