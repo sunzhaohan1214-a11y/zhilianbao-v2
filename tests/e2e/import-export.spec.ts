@@ -47,7 +47,9 @@ async function uploadResolveAndConfirm(page: Page, buffer: Buffer) {
   await page.getByRole("button", { name: "上传并创建预览" }).click();
   await page.waitForURL(/\/admin\/imports\/[0-9a-f-]+$/);
   await expect(page.getByText("PREVIEW_READY", { exact: true })).toBeVisible();
-  await expect(page.getByText("安宜镇 · 信用代码：9132…T001 · 状态：正常")).toBeVisible();
+  const candidateSummaries = page.getByText("安宜镇 · 信用代码：9132…T001 · 状态：正常");
+  await expect(candidateSummaries).toHaveCount(2);
+  await expect(candidateSummaries.first()).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(enterpriseE2e.enterpriseId.slice(0, 8)) })).toHaveCount(0);
   const resolution = page.waitForResponse((response) => response.url().includes("/resolve") && response.request().method() === "POST");
   await page.getByRole("button", { name: "选择 宝应智造示范企业" }).click();
