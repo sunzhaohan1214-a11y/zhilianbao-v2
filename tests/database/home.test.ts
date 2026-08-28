@@ -126,7 +126,7 @@ describe("A-M1-008 real MySQL home aggregation", () => {
     const completedHelp = await prisma.helpRequest.create({ data: {
       businessNo: `BZ2099${randomUUID().replaceAll("-", "").slice(0, 10)}`, submitterPersonId: creatorId,
       category: "OTHER", title: "A-M1-008 已完成求助", description: "过期待办必须隐藏", urgency: "NORMAL", status: "COMPLETED",
-      currentOwnerPersonId: personId, completedAt: now, completionSummary: "已完成",
+      currentOwnerPersonId: personId, expectedCompleteAt: new Date("2099-08-27T00:00:00.000Z"), completedAt: now, completionSummary: "已完成",
     } });
     await prisma.todo.createMany({ data: [
       { personId, todoType: "HELP_PROCESS", module: "help", aggregateType: "HELP_REQUEST", aggregateId: help.id, actionUrl: `/help/${help.id}`, dedupeKey: `home-todo-${randomUUID()}` },
