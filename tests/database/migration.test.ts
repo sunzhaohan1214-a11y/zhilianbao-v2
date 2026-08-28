@@ -25,10 +25,10 @@ let seedBatchId: string;
 let areaId: string;
 let firstResult: Awaited<ReturnType<MigrationService["applySnapshot"]>>;
 
-function actorFor(personId: string, role: "SUPER_ADMIN" | "ADMIN" | "MEMBER_ALUMNI_PLATFORM", accountId = operatorAccountId): PermissionActor {
+function actorFor(personId: string, role: "SUPER_ADMIN" | "ADMIN" | "MEMBER_CURRENT", accountId = operatorAccountId): PermissionActor {
   const roles = [role];
   const specialPermissions = new Set(role === "SUPER_ADMIN" ? ["reimbursement.manage"] : []);
-  return { personId, accountId, accountStatus: "NORMAL", permissionVersion: BigInt(1), effectiveRoles: roles, capabilities: resolveCapabilities(roles, specialPermissions), specialPermissions, selfPersonId: personId, townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true, hasGlobalOperational: role === "SUPER_ADMIN" || role === "ADMIN", hasSystem: role === "SUPER_ADMIN", currentBatchMember: role === "SUPER_ADMIN", configurationIssues: [] };
+  return { personId, accountId, accountStatus: "NORMAL", permissionVersion: BigInt(1), effectiveRoles: roles, capabilities: resolveCapabilities(roles, specialPermissions), specialPermissions, selfPersonId: personId, townshipAreaIds: [], departmentAreaIds: [], hasGlobalPublished: true, hasGlobalOperational: role === "SUPER_ADMIN" || role === "ADMIN", hasSystem: role === "SUPER_ADMIN", currentBatchMember: role === "SUPER_ADMIN" || role === "MEMBER_CURRENT", configurationIssues: [] };
 }
 
 async function apply(root = fixture) {
@@ -168,7 +168,7 @@ describe("M3-006 Actual Apply on real MySQL", () => {
     const reimbursementService = new ReimbursementService();
     await expect(reimbursementService.paperReceived({ actor, reimbursementId })).rejects.toMatchObject({ code: "REIMBURSEMENT_STATE_CONFLICT" });
     await expect(reimbursementService.financeSubmitted({ actor, reimbursementId })).rejects.toMatchObject({ code: "REIMBURSEMENT_STATE_CONFLICT" });
-    const applicant = actorFor(reimbursement.applicantPersonId, "MEMBER_ALUMNI_PLATFORM");
+    const applicant = actorFor(reimbursement.applicantPersonId, "MEMBER_CURRENT");
     await expect(reimbursementService.withdraw({ actor: applicant, reimbursementId })).rejects.toMatchObject({ code: "REIMBURSEMENT_STATE_CONFLICT" });
     await expect(reimbursementService.detail({ actor: actorFor(operatorPersonId, "ADMIN"), reimbursementId })).rejects.toMatchObject({ code: "REIMBURSEMENT_NOT_FOUND" });
     expect((await reimbursementService.detail({ actor: applicant, reimbursementId })).id).toBe(reimbursementId);
