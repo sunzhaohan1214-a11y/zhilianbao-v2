@@ -392,12 +392,13 @@ export class AnnouncementService {
   }
 
   async getTopVisibleAnnouncement(actor: PermissionActor) {
+    await authorizeActor({ actor, action: "announcement.view" });
     const base = { status: "PUBLISHED" as const, currentVersion: { is: { recipientStates: { some: { personId: actor.personId, revokedAt: null } } } } };
     const include = { currentVersion: { include: { recipientStates: { where: { personId: actor.personId } } } } };
-    const important = await this.prisma.announcement.findFirst({ where: { ...base, currentVersion: { is: { needConfirm: true, isImportant: true, recipientStates: { some: { personId: actor.personId, revokedAt: null, confirmedAt: null } } } } }, include, orderBy: { publishedAt: "desc" } });
+    const important = await this.prisma.announcement.findFirst({ where: { ...base, currentVersion: { is: { needConfirm: true, isImportant: true, recipientStates: { some: { personId: actor.personId, revokedAt: null, confirmedAt: null } } } } }, include, orderBy: [{ publishedAt: "desc" }, { id: "asc" }] });
     if (important) return important;
-    const pinned = await this.prisma.announcement.findFirst({ where: { ...base, isPinned: true }, include, orderBy: { publishedAt: "desc" } });
+    const pinned = await this.prisma.announcement.findFirst({ where: { ...base, isPinned: true }, include, orderBy: [{ publishedAt: "desc" }, { id: "asc" }] });
     if (pinned) return pinned;
-    return this.prisma.announcement.findFirst({ where: base, include, orderBy: { publishedAt: "desc" } });
+    return this.prisma.announcement.findFirst({ where: base, include, orderBy: [{ publishedAt: "desc" }, { id: "asc" }] });
   }
 }

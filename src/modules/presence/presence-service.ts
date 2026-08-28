@@ -238,8 +238,10 @@ export class PresenceService {
     };
   }
 
-  currentSummary(input: ServiceInput & { now?: Date }) {
-    return this.current(input);
+  async currentSummary(input: ServiceInput & { now?: Date; limit?: number }) {
+    const summary = await this.current(input);
+    const limit = Math.max(0, input.limit ?? summary.items.length);
+    return { ...summary, items: summary.items.slice(0, limit) };
   }
 
   async adminHistory(input: ServiceInput & { query: unknown; now?: Date }) {

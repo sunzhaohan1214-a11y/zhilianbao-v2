@@ -100,6 +100,14 @@ function shanghaiDayBounds(at: Date): { start: Date; end: Date } {
   };
 }
 
+export function summarizeHomeTripPlaces(nodes: readonly { locationName: string; enterprise: { name: string } | null }[]): string {
+  const places = nodes.map((node) => node.enterprise?.name ?? node.locationName);
+  const allEnterprises = nodes.every((node) => node.enterprise !== null);
+  return places.length <= 1 ? (places[0] ?? "行程待完善")
+    : places.length === 2 ? `走访 ${places[0]}、${places[1]}`
+    : `走访 ${places[0]}、${places[1]} 等 ${places.length} ${allEnterprises ? "家企业" : "个地点"}`;
+}
+
 export function isEligibleTripParticipant(person: { personStatus: string; account?: { status: string } | null }): boolean {
   return person.personStatus === "ACTIVE" && Boolean(person.account) && person.account?.status !== "DISABLED";
 }
@@ -916,6 +924,51 @@ export class TripService {
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
     return trips.map((trip) => this.present(trip, now));
+  }
+
+  async listTodaySummary(input: ServiceInput & { now?: Date; limit?: number }) {
+    await authorizeActor({ actor: input.actor, action: "trip.view" });
+    const now = input.now ?? new Date();
+    const { start, end } = shanghaiDayBounds(now);
+    const teamView = input.actor.capabilities.has("trip.create.team") || adminActor(input.actor);
+    const limit = Math.min(3, Math.max(0, input.limit ?? 3));
+    const trips = await this.repository.prisma.trip.findMany({
+      where: {
+        canceledAt: null,
+        nodes: { some: { plannedStartAt: { gte: start, lte: end } } },
+        ...(teamView ? {} : { participants: { some: { personId: input.actor.personId, leftAt: null } } }),
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: limit,
+      select: {
+        id: true,
+        canceledAt: true,
+        overallEndAt: true,
+        result: { select: { id: true } },
+        participants: {
+          where: { leftAt: null },
+          orderBy: [{ isCreator: "desc" }, { joinedAt: "asc" }],
+          select: { person: { select: { name: true } } },
+          take: 5,
+        },
+        nodes: {
+          orderBy: [{ sequenceNo: "asc" }],
+          select: { plannedStartAt: true, plannedEndAt: true, locationName: true, enterprise: { select: { name: true } } },
+        },
+      },
+    });
+    return trips.map((trip) => {
+      const summary = summarizeHomeTripPlaces(trip.nodes);
+      const startAt = trip.nodes[0]?.plannedStartAt;
+      if (!startAt) throw new TripError("TRIP_NOT_FOUND", "行程节点不完整");
+      return {
+        id: trip.id,
+        startAt,
+        summary,
+        participantNames: trip.participants.map(({ person }) => person.name),
+        status: deriveTripStatus(trip, now),
+      };
+    });
   }
 
   async listVisits(input: ServiceInput & { page?: number; pageSize?: number }) {

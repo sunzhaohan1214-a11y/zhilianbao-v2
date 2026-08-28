@@ -111,6 +111,13 @@ Close APPROVE + TRACKING + first date
 → Plan ENDED / no OPEN Outcome Todo / no WAITING future Job
 ```
 
+### Home（A-M1-008 critical）
+
+- Unit：团长/部长身份映射、上海自然日 stale 边界、待办紧急/截止排序、行程地点摘要；
+- Real MySQL：公告优先、未读数、四项全团统计、stale 单条/批量等价、当前在宝去重分类、共享行程单条、过期待办隐藏、本人推荐优先；
+- Critical E2E：普通团员、往届人才、团长、部长、镇区、管理员六角色首页可达；只有团长/部长显示全团概览；固定区块顺序、四 Tab、荷宝降级入口以及首页无认领按钮；
+- 门禁：schema/migration 零变化；`lint`、`typecheck`、全量 unit/integration、build、本地可用时 database/e2e，最终以精确 head 的 CI `quality`、`database`、`critical-e2e`、`docker-build` 为真实服务证明。
+
 另测 NONE → NOT_TRACKED 且无填报按钮；普通内部只见 APPROVED；往届协助不获得填报入口。
 
 ### Visit Lead
