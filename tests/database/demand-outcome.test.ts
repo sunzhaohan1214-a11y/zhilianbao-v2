@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { RoleCode } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentParentAuthorizerRegistry } from "@/modules/attachment/parent-authorization";
@@ -126,14 +126,19 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+afterEach(async () => {
+  await prisma.jobTask.deleteMany({ where: { jobType: "DEMAND_OUTCOME_DUE", idempotencyKey: { startsWith: "demand-outcome-due:" } } });
+});
+
 describe("A-M1-007 real MySQL outcome lifecycle", () => {
   it("creates the tracking plan atomically with close approval and rolls the close back when the plan is invalid", async () => {
     const [owner, admin] = await Promise.all([actorFixture(["MEMBER_CURRENT"]), actorFixture(["ADMIN"])]);
     const tracked = await demand("IN_PROGRESS", owner.person.id);
     await lifecycle.submitClose({ actor: owner.actor, demandId: tracked.id, idempotencyKey: randomUUID(), body: { solution: "已解决", connectedResources: "高校实验室" } });
     await lifecycle.reviewClose({ actor: admin.actor, demandId: tracked.id, body: { decision: "APPROVE", townshipVerificationResult: "属地已核实", outcomePlan: { trackingMode: "TRACKING", firstTrackingDate: day(0) } } });
-    expect(await prisma.demandOutcomePlan.findUniqueOrThrow({ where: { demandId: tracked.id } })).toMatchObject({ trackingMode: "TRACKING", status: "PENDING", dueVersion: 1 });
-    expect(await prisma.jobTask.count({ where: { jobType: "DEMAND_OUTCOME_DUE", payloadJson: { path: ["planId"], equals: (await prisma.demandOutcomePlan.findUniqueOrThrow({ where: { demandId: tracked.id } })).id } } })).toBe(1);
+    const trackedPlan = await prisma.demandOutcomePlan.findUniqueOrThrow({ where: { demandId: tracked.id } });
+    expect(trackedPlan).toMatchObject({ trackingMode: "TRACKING", status: "PENDING", dueVersion: 1 });
+    expect(await prisma.jobTask.count({ where: { jobType: "DEMAND_OUTCOME_DUE", idempotencyKey: `demand-outcome-due:${trackedPlan.id}:1` } })).toBe(1);
 
     const rollback = await demand("IN_PROGRESS", owner.person.id);
     await lifecycle.submitClose({ actor: owner.actor, demandId: rollback.id, idempotencyKey: randomUUID(), body: { solution: "拟办结", connectedResources: "技术资源" } });
