@@ -140,7 +140,7 @@ describe("C-M3-004 real MySQL historical reporting", () => {
     expect(county.overview.talent).toEqual({ added: 1, completedRounds: 1, inProgressRounds: 1, domestic: 1, overseas: 0 });
     const area = await service.previewMonthlyReport({ actor, query: { month: "2026-06", areaId, batchId: batchB }, now: new Date("2026-08-28T12:00:00+08:00") });
     expect(area.overview.trips.distinctEnterprises).toBe(1); expect(area.overview.trips.leadCount).toBe(1);
-    expect(area.rows.trips[0]?.enterprises).toBe("企业甲"); expect(area.rows.trips[0]?.result).toBe("甲镇区结果");
+    expect(area.rows.trips[0]?.enterprises).toMatch(/^M3-004企业-/); expect(area.rows.trips[0]?.enterprises).not.toContain("、"); expect(area.rows.trips[0]?.result).toBe("甲镇区结果");
   });
 
   it("creates one private idempotent output with exactly five safe sheets", async () => {
