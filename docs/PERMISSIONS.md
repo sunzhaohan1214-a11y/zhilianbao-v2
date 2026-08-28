@@ -594,6 +594,60 @@ demand.team_coordinator.remind
 
 团队协调角色提醒不改变需求状态和负责人。事件与审计必须记录实际操作人的角色来源，不得把部长记为团长。
 
+## 7.7 Progress / Close / Responsibility lifecycle capability
+
+正式 capability：
+
+```text
+demand.progress.add
+demand.close.submit
+demand.close.review
+demand.owner.exit_request
+demand.owner.exit_review
+demand.owner.transfer
+demand.team_coordinator.remind
+demand.cancel
+```
+
+角色映射与对象级边界：
+
+| 角色 | capability 基线 | 对象级执行条件 |
+|---|---|---|
+| `GROUP_LEADER` / `MINISTER` | `demand.team_coordinator.remind` | 只能提醒真正 stale 的 `IN_PROGRESS` Demand；纯协调角色不能新增进展、提交/审核办结、退出或转交 |
+| `MEMBER_CURRENT` | progress、close submit、owner exit request | 进展还需是 current owner、active collaborator 或负责镇区 staff；close 仅 current owner；exit 仅 current owner 本人 |
+| `MEMBER_ALUMNI_PLATFORM` | progress | 仅具体 ALUMNI_TOWNSHIP Demand 的 active PLATFORM helper 本人 |
+| `TOWNSHIP_STAFF` | progress、close submit、cancel | 仅负责区域；普通 staff 可补进展，但 ALUMNI_TOWNSHIP close 只有 current handler；取消还需状态合法 |
+| `ADMIN` | progress、close review、owner exit review、cancel | Progress 仍要求正式已发布 Demand；close/exit 审核要求当前状态和唯一 current request |
+| `SUPER_ADMIN` | 叠加 ADMIN，并独占 owner transfer | 仅 `IN_PROGRESS + CURRENT_OWNER`，必须 preview、二次确认并重新校验目标资格 |
+
+有 capability 只表示进入动作校验的资格，不表示可对任意 Demand 执行。所有关键命令在事务中使用中央责任 resolver：
+
+```text
+CURRENT_OWNER:
+  currentOwnerPersonId 与唯一 active DemandOwnerHistory.personId 一致
+
+ALUMNI_TOWNSHIP:
+  currentOwnerPersonId = null
+  唯一 active TownshipHandler
+  至少一个 active AlumniHelper
+```
+
+责任结构冲突时 fail-safe 拒绝关键 mutation。
+
+### Progress 对象级规则
+
+- CURRENT_OWNER：current owner、active collaborator、负责镇区有效 staff、ADMIN/SUPER 可写；
+- ALUMNI_TOWNSHIP：current handler、负责镇区 staff、active PLATFORM alumni helper、ADMIN/SUPER 可写；
+- HISTORICAL alumni 无 Account，不能在线提交；仅 current handler 或 ADMIN/SUPER 可代理录入并保存 actor、represented person 与 source type。
+
+### Close / Exit / Transfer 对象级规则
+
+- Close submit：CURRENT_OWNER 仅 current owner；ALUMNI_TOWNSHIP 仅 current handler；
+- Close review、Owner exit review：仅 ADMIN/SUPER；
+- Owner exit request：仅 `IN_PROGRESS + CURRENT_OWNER + actor=current owner`；
+- Owner transfer：普通 ADMIN 明确禁止，仅 SUPER；目标必须是实时合法 current member；
+- Cancel：负责镇区 staff 或 ADMIN/SUPER，reason 必填，企业账号不能执行。
+
 ---
 
 # 8. 企业模块权限

@@ -7,6 +7,7 @@ import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attac
 import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/announcement-notification-handler";
 import { BusinessNotificationHandler } from "@/modules/outbox/handlers/business-notification-handler";
 import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
+import { DEMAND_LIFECYCLE_NOTIFICATION_EVENTS, DemandProgressCloseNotificationHandler } from "@/modules/outbox/handlers/demand-progress-close-notification-handler";
 import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
 import { TripLifecycleHandler, TripParticipantAddedHandler, TripResultDueScheduledHandler } from "@/modules/outbox/handlers/trip-notification-handler";
 import { ReimbursementNotificationHandler, type ReimbursementEventType } from "@/modules/outbox/handlers/reimbursement-notification-handler";
@@ -89,6 +90,9 @@ export class WorkerRuntime {
     }
     outboxHandlers.register("DEMAND_ALUMNI_RESPONSE_RECORDED", new DemandAlumniResponseNotificationHandler());
     outboxHandlers.register("DEMAND_ALUMNI_HELP_ACTIVATED", new DemandAlumniHelpActivatedNotificationHandler());
+    for (const eventType of DEMAND_LIFECYCLE_NOTIFICATION_EVENTS) {
+      outboxHandlers.register(eventType, new DemandProgressCloseNotificationHandler(eventType));
+    }
     outboxHandlers.register("TRIP_PARTICIPANT_ADDED", new TripParticipantAddedHandler());
     outboxHandlers.register("TRIP_UPDATED", new TripLifecycleHandler("TRIP_UPDATED"));
     outboxHandlers.register("TRIP_RESULT_DUE_SCHEDULED", new TripResultDueScheduledHandler(this.jobs));

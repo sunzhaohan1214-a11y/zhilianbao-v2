@@ -403,8 +403,11 @@ XQ-YYYY-######
 | `is_cross_batch` | BOOL | 是 | 默认false，派生/受控 |
 | `first_published_at` | DATETIME | 否 | 首次发布后永久不改 |
 | `current_owner_person_id` | UUID | 否 | 查询冗余，历史真源另表 |
+| `completed_at` | DATETIME(3) | 否 | 办结审核 APPROVE 时间；仅 COMPLETED |
+| `completion_batch_id` | UUID | 否 | APPROVE 时已验证为 ACTIVE 的 `current_follow_batch_id` |
+| `canceled_at` | DATETIME(3) | 否 | 进入 CANCELED 的时间 |
 | `merged_into_id` | UUID | 否 | 已合并 |
-| `canceled_reason` | TEXT | 条件 | 已取消 |
+| `canceled_reason` | VARCHAR(500) | 否 | CANCELED 时保存必填取消原因 |
 
 ## 7.2 DemandProvenance
 
@@ -469,17 +472,77 @@ ended_at
 
 ## 7.7 DemandProgress
 
-| 字段 | 说明 |
-|---|---|
-| `current_progress` | 本次进展描述 |
-| `next_step` | 下一步 |
-| `submitter_person_id` |  |
-| `submitter_role_context` | 主责/协同/往届/镇区代录 |
-| `created_at` |  |
+| 字段 | 类型/可空 | 说明 |
+|---|---|---|
+| `id` | UUID，非空 | 主键 |
+| `demand_id` | UUID，非空 | 父 Demand |
+| `current_progress` | TEXT，非空 | 本次当前进展 |
+| `next_step` | TEXT，非空 | 下一步动作 |
+| `created_by_person_id` | UUID，非空 | 真实在线 actor |
+| `source_type` | ENUM，非空 | `CURRENT_OWNER/COLLABORATOR/ALUMNI_PLATFORM/TOWNSHIP_STAFF/TOWNSHIP_PROXY/ADMIN` |
+| `represented_person_id` | UUID，可空 | 仅受控历史往届代理录入 |
+| `created_at` | DATETIME(3)，非空 | 创建时间 |
 
-追加式，不覆盖历史。
+追加式，不编辑、覆盖或删除历史。
 
-## 7.8 DemandReview
+## 7.8 DemandProgressReminder
+
+| 字段 | 类型/可空 | 说明 |
+|---|---|---|
+| `demand_id` | UUID，非空 | 父 Demand |
+| `reminder_type` | ENUM，非空 | 当前为 `PROGRESS_STALE` |
+| `sent_by_person_id` | UUID，非空 | 实际 GROUP_LEADER / MINISTER actor |
+| `recipient_person_id` | UUID，非空 | current owner 或 current township handler |
+| `responsibility_mode` | ENUM，非空 | `CURRENT_OWNER/ALUMNI_TOWNSHIP` |
+| `sent_at` | DATETIME(3)，非空 | 限频真源；记录 append-only |
+
+## 7.9 DemandCloseRequest / DemandCloseReview
+
+CloseRequest：
+
+| 字段 | 类型/可空 | 说明 |
+|---|---|---|
+| `demand_id` | UUID，非空 | 父 Demand |
+| `submission_no` | UINT，非空 | 同 Demand 递增且唯一 |
+| `solution` | TEXT，非空 | 解决情况 |
+| `connected_resources` | TEXT，非空 | 已对接资源 |
+| `submitted_by_person_id` | UUID，非空 | current owner 或 current handler |
+| `responsibility_mode` | ENUM，非空 | 提交时责任模式快照 |
+| `township_handler_person_id` | UUID，可空 | ALUMNI_TOWNSHIP 提交时 handler 快照 |
+| `submitted_at` | DATETIME(3)，非空 | 提交时间 |
+| `ended_at` | DATETIME(3)，可空 | 审核/取消结束当前申请时写入 |
+| `active_key` | TINYINT，可空 | 当前申请为 `1`，历史为 `NULL` |
+
+CloseRequest 为 immutable history；办结证据附件使用 `DEMAND_CLOSE_REQUEST`。
+
+CloseReview：
+
+| 字段 | 类型/可空 | 说明 |
+|---|---|---|
+| `close_request_id` | UUID，非空且唯一 | 每次 CloseRequest 至多一条审核 |
+| `demand_id` | UUID，非空 | 父 Demand |
+| `decision` | ENUM，非空 | `APPROVE/RETURN` |
+| `township_verification_result` | TEXT，非空 | 两种 decision 均必须记录 |
+| `reason` | VARCHAR(500)，可空 | RETURN 时非空 |
+| `reviewed_by_person_id` | UUID，非空 | ADMIN / SUPER |
+| `reviewed_at` | DATETIME(3)，非空 | 审核时间；Review immutable |
+
+## 7.10 DemandOwnerExitRequest
+
+| 字段 | 类型/可空 | 说明 |
+|---|---|---|
+| `demand_id` | UUID，非空 | 父 Demand |
+| `owner_person_id` | UUID，非空 | 申请时 current owner 快照 |
+| `owner_history_id` | UUID，非空 | 申请时 active OwnerHistory |
+| `reason` | VARCHAR(500)，非空 | 退出原因 |
+| `status` | ENUM，非空 | `PENDING/APPROVED/REJECTED` |
+| `requested_at` | DATETIME(3)，非空 | 申请时间 |
+| `reviewed_at` | DATETIME(3)，可空 | 已审核时非空 |
+| `reviewed_by_person_id` | UUID，可空 | 审核 ADMIN / SUPER |
+| `review_reason` | VARCHAR(500)，可空 | REJECT 时必填；APPROVE 可填 |
+| `active_key` | TINYINT，可空 | PENDING 为 `1`，历史为 `NULL` |
+
+## 7.11 DemandReview
 
 ```text
 decision: APPROVE/RETURN
@@ -491,7 +554,7 @@ reviewed_at
 
 普通：3个工作日；紧急：1个工作日。时限由 WorkCalendar + 配置计算。
 
-## 7.9 DemandRecommendationRun / Item
+## 7.12 DemandRecommendationRun / Item
 
 Run：
 

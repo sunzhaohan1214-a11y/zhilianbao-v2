@@ -428,6 +428,22 @@ alumni_helper = 往届协助人
 
 往届不得被写成正式主责。
 
+### 4.7.1 当前责任结构
+
+所有 Progress / Close / Owner Exit / SUPER Transfer 关键命令统一解析：
+
+```text
+CURRENT_OWNER
+  currentOwnerPersonId = 唯一 active DemandOwnerHistory.personId
+
+ALUMNI_TOWNSHIP
+  currentOwnerPersonId = null
+  唯一 active DemandTownshipHandler
+  至少一个 active DemandAlumniHelper
+```
+
+两种结构同时存在、Owner 指针与 active history 不一致、缺少 handler/helper 或存在多个 active handler 时，拒绝关键 mutation；系统不得静默猜责任人。
+
 ## 4.8 暂停
 
 **不存在“暂停”主状态。**
@@ -457,7 +473,78 @@ IN_PROGRESS
 
 需求上。
 
-团长或部长通过团队协调能力发出的提醒不会改变主状态；提醒审计保留实际角色身份。
+按上海自然日计算，只有距离最新有效 DemandProgress 超过 30 个自然日才 stale；无 Progress 时：
+
+```text
+CURRENT_OWNER → active OwnerHistory.effectiveAt
+ALUMNI_TOWNSHIP → active TownshipHandler.effectiveAt
+```
+
+团长或部长通过团队协调能力发出的提醒不会改变主状态；同 Demand 7 个上海自然日内最多一次，接收人仅为 current owner 或 current handler，提醒审计保留实际角色身份。第一阶段不做 daily cron。
+
+### 4.9.1 Progress / Close
+
+Progress 仅在 `IN_PROGRESS` append-only 新增，不允许编辑、覆盖或删除。`PENDING_CLOSE_REVIEW` 默认不再接受普通 Progress。
+
+办结提交：
+
+```text
+IN_PROGRESS
+→ immutable DemandCloseRequest
+→ PENDING_CLOSE_REVIEW
+```
+
+CURRENT_OWNER 只有 current owner 可提交；ALUMNI_TOWNSHIP 只有 current handler 可提交。协作者、其他镇区 staff 与 alumni helper 不能改变主状态。
+
+Close Review 必须由 ADMIN / SUPER 记录 `townshipVerificationResult`：
+
+```text
+RETURN  → reason required → IN_PROGRESS
+APPROVE → COMPLETED
+```
+
+RETURN 结束当前 CloseRequest，后续重提创建新的 immutable request；旧 Request/Review/附件全部保留。APPROVE 设置：
+
+```text
+completedAt = approval time
+completionBatchId = 已验证仍 ACTIVE 的 currentFollowBatchId
+```
+
+M1-006 不创建 Outcome；M1-007 尚未开始。
+
+### 4.9.2 Owner exit
+
+仅 `IN_PROGRESS + CURRENT_OWNER + actor=current owner` 可申请。审核期间 Demand 仍为 `IN_PROGRESS`，owner 与 active OwnerHistory 继续有效。
+
+```text
+REJECT  → owner/history 不变
+APPROVE → expire active OwnerHistory
+        → currentOwnerPersonId = null
+        → IN_PROGRESS → PENDING_CLAIM
+```
+
+APPROVE 同时结束 active collaborators、撤回 pending collaboration requests，历史永久保留；不自动重跑 AI，也不自动分配新 owner。
+
+### 4.9.3 SUPER owner transfer
+
+仅 SUPER_ADMIN 可对 `IN_PROGRESS + CURRENT_OWNER` 执行：
+
+```text
+preview
+→ 10 分钟 HMAC impactToken
+→ confirmation=CONFIRM
+→ execute
+```
+
+token 绑定 actor、Demand、target、reason hash、current owner/history、currentFollowBatch 与 Demand.updatedAt。执行时再次验证 token、锁 Demand/OwnerHistory，并重新验证目标仍是当前合法 MEMBER_CURRENT。
+
+Transfer 结束旧 OwnerHistory、创建唯一 active 新 history，Demand 保持 `IN_PROGRESS`，active collaborators 保留，新 owner 无接受步骤。同批次记 `TRANSFER`；跨批次记 `CROSS_BATCH_TRANSFER` 并更新 `currentFollowBatchId`、`isCrossBatch=true`。
+
+### 4.9.4 Cancel lifecycle cleanup
+
+允许从 `PENDING_REVIEW/RETURNED/PENDING_CLAIM/IN_PROGRESS/PENDING_CLOSE_REVIEW` 取消。负责镇区 staff 或 ADMIN/SUPER 必须填写 reason；进入 `CANCELED` 后保存 `canceledAt/canceledReason`，不设置 completion facts、不计 COMPLETED。
+
+取消会结束当前 owner/handler/alumni/collaborator 责任关系，撤回 pending collaboration，结束 active CloseRequest 与 pending OwnerExitRequest，并 stale 所有生命周期 Todo；历史记录不删除。
 
 ## 4.10 正式发布后纠错
 

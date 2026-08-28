@@ -213,15 +213,22 @@ AI失败不阻止业务。
 
 ## M1.6 Progress / Close
 
+状态：已在 PR #22 实现，等待合并。
+
 - 进展；
 - stale派生；
 - 团长与部长共享的团队协调提醒（7天限频）；
 - 提交办结；
 - 管理员核实；
 - 退回；
-- 办结。
+- 办结；
+- 主责退出申请及 ADMIN/SUPER 审核；
+- SUPER owner transfer preview/confirm；
+- 生命周期 Message/Todo/Outbox、Attachment 与 cancel cleanup。
 
 ## M1.7 Outcome
+
+状态：未开始；不得由 M1.6 办结逻辑提前实现。
 
 - 跟踪计划；
 - 多轮；

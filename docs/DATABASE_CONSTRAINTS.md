@@ -218,6 +218,62 @@ MySQL unique允许多个NULL，从而保留多次历史。
 
 > 用事务锁 Demand + 当前活动关系查询 + 插入；必须并发测试。
 
+## 10.1 M1-006 Progress / Close / Owner lifecycle
+
+迁移 `20260831120000_m1_demand_progress_close` 是 expand-only：只新增 Demand 办结/取消事实字段、五个生命周期表、索引、CHECK 和 FK，未修改任何历史 migration。
+
+### DemandProgress / DemandProgressReminder
+
+```text
+DemandProgress INDEX(demand_id, created_at)
+DemandProgress INDEX(created_by_person_id, created_at)
+DemandProgressReminder INDEX(demand_id, reminder_type, sent_at)
+```
+
+两表均为 append-only 事实。七个上海自然日的 reminder 限频由事务锁 Demand 后查询持久化 Reminder 记录保证，不以 Message/Todo 作为限频真源。
+
+### DemandCloseRequest
+
+```text
+UNIQUE(demand_id, submission_no)
+UNIQUE(demand_id, active_key)
+```
+
+MySQL `active_key=1/NULL` 表达同 Demand 最多一个当前申请并保留多轮历史。CHECK：
+
+```text
+active_key = 1  <=> ended_at IS NULL
+active_key IS NULL <=> ended_at IS NOT NULL
+```
+
+### DemandCloseReview
+
+```text
+UNIQUE(close_request_id)
+CHECK(decision <> RETURN OR reason IS NOT NULL)
+```
+
+因此每个 immutable CloseRequest 至多一个 immutable Review，且退回必须有原因。
+
+### DemandOwnerExitRequest
+
+```text
+UNIQUE(demand_id, active_key)
+```
+
+CHECK 保证：
+
+```text
+PENDING  => active_key=1 AND reviewed_at IS NULL
+APPROVED/REJECTED => active_key IS NULL AND reviewed_at IS NOT NULL
+```
+
+### Demand completion facts / foreign keys
+
+`completion_batch_id` 外键指向 `batches(id)`；所有本任务新增正式关系均 `ON DELETE RESTRICT`，防止删除父实体破坏历史（数据库按项目惯例允许 `ON UPDATE CASCADE`）。
+
+进展、Reminder、CloseRequest/Review、OwnerExitRequest 的 Demand/Person/OwnerHistory FK 全部采用同一删除限制策略。关键写事务统一先锁 Demand，再处理 OwnerHistory、CloseRequest、ExitRequest 与 Collaboration，避免只靠页面或先查后写。
+
 # 11. TalentTownshipRound
 
 同人才+区域最多一个IN_PROGRESS。

@@ -29,4 +29,26 @@ export function registerDemandAttachmentAuthorizers(registry: AttachmentParentAu
       return actor.capabilities.has("demand.view") && actor.hasGlobalPublished;
     },
   });
+
+  registry.register("DEMAND_PROGRESS", {
+    async authorize({ actor, link }) {
+      if (!actor.capabilities.has("demand.view") || !actor.hasGlobalPublished) return false;
+      const progress = await getPrismaClient().demandProgress.findUnique({
+        where: { id: link.entityId },
+        select: { demand: { select: { status: true } } },
+      });
+      return Boolean(progress && !["DRAFT", "RETURNED", "PENDING_REVIEW"].includes(progress.demand.status));
+    },
+  });
+
+  registry.register("DEMAND_CLOSE_REQUEST", {
+    async authorize({ actor, link }) {
+      if (!actor.capabilities.has("demand.view") || !actor.hasGlobalPublished) return false;
+      const request = await getPrismaClient().demandCloseRequest.findUnique({
+        where: { id: link.entityId },
+        select: { demand: { select: { status: true } } },
+      });
+      return Boolean(request && !["DRAFT", "RETURNED", "PENDING_REVIEW"].includes(request.demand.status));
+    },
+  });
 }

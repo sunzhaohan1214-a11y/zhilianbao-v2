@@ -1005,6 +1005,68 @@ Demand 1 — N DemandProgress
 
 “最新进展”通过查询产生，不覆盖历史。
 
+`DemandProgress` 是 append-only 正式事实：不提供编辑、覆盖或删除旧进展的业务动作。历史往届线下代录同时保存真实 `createdByPersonId`、`representedPersonId` 与 `sourceType`，不得冒充往届本人在线提交。
+
+进展附件通过 `AttachmentLink(entityType=DEMAND_PROGRESS)` 关联私有附件；正式关联前要求 `UPLOADED + PASSED + objectKey`，每次下载重新按父 Demand 可见性鉴权。
+
+### 7.9.1 当前责任模式
+
+进展、办结、退出和转交统一通过 transaction-aware responsibility resolver 识别：
+
+```text
+CURRENT_OWNER
+  currentOwnerPersonId = 唯一 active DemandOwnerHistory.personId
+
+ALUMNI_TOWNSHIP
+  currentOwnerPersonId = null
+  唯一 active DemandTownshipHandler
+  至少一个 active DemandAlumniHelper
+```
+
+两种结构同时存在、Owner 指针与历史不一致、缺少 handler/helper 或出现多个 active handler 时，关键 mutation fail-safe 拒绝，不静默猜测责任人。
+
+### 7.9.2 DemandProgressReminder
+
+```text
+Demand 1 — N DemandProgressReminder
+```
+
+`DemandProgressReminder` 是团队协调提醒的持久化限频证据，保存 reminder type、发送人、唯一责任接收人、责任模式与发送时间，记录 append-only。它不是从 Message/Todo 反推的临时状态。
+
+### 7.9.3 DemandCloseRequest / DemandCloseReview
+
+```text
+Demand 1 — N DemandCloseRequest
+DemandCloseRequest 1 — 0..1 DemandCloseReview
+```
+
+每次办结提交创建新的 immutable `DemandCloseRequest`；退回后的重新提交使用递增 `submissionNo`，旧正文、责任快照与附件永久保留。`activeKey` 只标识当前待审核申请。
+
+每个 CloseRequest 至多一个 immutable `DemandCloseReview`，保存 ADMIN / SUPER 的 decision、镇区核验结果、退回原因和审核时间。审核不会覆盖 CloseRequest 正文。
+
+CloseRequest 附件使用 `AttachmentLink(entityType=DEMAND_CLOSE_REQUEST)`，历史申请的证据仍按父 Demand 可见性访问。
+
+### 7.9.4 DemandOwnerExitRequest
+
+```text
+Demand 1 — N DemandOwnerExitRequest
+```
+
+退出申请保存 owner 与 OwnerHistory 快照、申请原因、审核状态/人员/意见和时间；同 Demand 最多一个 active PENDING，APPROVED/REJECTED 历史永久保留。审核期间正式 owner 与 active OwnerHistory 不变。
+
+### 7.9.5 Demand completion / cancellation facts
+
+Demand 保存受控当前事实：
+
+```text
+completedAt
+completionBatchId
+canceledAt
+canceledReason
+```
+
+`completedAt` 是办结审核批准时间；`completionBatchId` 是批准时校验仍为 ACTIVE 的 `currentFollowBatchId`。M1-006 不创建 Outcome，M1-007 只从 COMPLETED Demand 与最终批准的 CloseRequest/Review 接续。
+
 ---
 
 ## 7.10 DemandRecommendationRun

@@ -51,6 +51,7 @@ const MEMBER_CURRENT_CAPABILITIES = [
   "demand.collaboration.manage",
   "demand.progress.add",
   "demand.close.submit",
+  "demand.owner.exit_request",
   "enterprise.correct_request",
   "member.profile.self_edit",
   "talent.submit",
@@ -79,6 +80,7 @@ const MEMBER_CURRENT_CAPABILITIES = [
 ] as const satisfies readonly Capability[];
 
 const MEMBER_ALUMNI_CAPABILITIES = [
+  "demand.progress.add",
   "enterprise.correct_request",
   "member.profile.self_edit",
   "talent.submit",
@@ -167,6 +169,8 @@ export const ADMIN_CAPABILITIES = [
   "demand.review",
   "demand.publish_direct",
   "demand.close.review",
+  "demand.progress.add",
+  "demand.owner.exit_review",
   "demand.cancel",
   "demand.correct_formal",
   "demand.recommendation.manage",

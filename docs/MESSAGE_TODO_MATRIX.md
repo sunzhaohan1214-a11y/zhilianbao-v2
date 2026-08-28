@@ -115,11 +115,10 @@ ALUMNI 新 current run 会将被替换人员尚未处理的 `DEMAND_ALUMNI_RESPO
 
 | Event | 消息 | Todo |
 |---|---|---|
-| `DEMAND_PROGRESS_ADDED` | 主责/协同/镇区相关人按需 | 无 |
-| `DEMAND_BECAME_STALE` | 主责、管理员、负责镇区 | 主责/责任方 `DEMAND_UPDATE_STALE` |
-| `TEAM_COORDINATOR_STALE_REMINDER` | 主责 | 主责现有 `DEMAND_UPDATE_STALE` 更新提示，不重复建多个；团长或部长均适用，7天限频，消息与审计记录实际角色 |
+| `DEMAND_PROGRESS_ADDED` | 无 generic Message，避免通知噪声 | stale 当前 Demand 的 `DEMAND_UPDATE_STALE`、`DEMAND_CONTINUE` |
+| `TEAM_COORDINATOR_STALE_REMINDER` | current owner 或 current township handler | 同一责任接收人 `DEMAND_UPDATE_STALE`；同 Demand 7 个上海自然日限频且最多一个 OPEN |
 
-久未更新是派生条件，不改状态。
+久未更新是 `IN_PROGRESS` 的上海自然日派生条件，不改 DemandStatus，也不使用每日 cron 自动催促。无 Progress 时基线分别为 active OwnerHistory.effectiveAt 或 active TownshipHandler.effectiveAt。
 
 ---
 
@@ -127,12 +126,30 @@ ALUMNI 新 current run 会将被替换人员尚未处理的 `DEMAND_ALUMNI_RESPO
 
 | Event | 消息 | Todo |
 |---|---|---|
-| `DEMAND_CLOSE_SUBMITTED` | 主责/镇区收到已提交提示可选 | 管理员 `DEMAND_CLOSE_REVIEW` |
-| `DEMAND_CLOSE_RETURNED` | 主责、协同、负责镇区 | 主责/镇区 `DEMAND_CONTINUE` |
-| `DEMAND_COMPLETED` | 主责、协同、负责镇区 | 若需成效：按计划日期生成后续 Todo |
-| `DEMAND_CANCELED` | 主责、协同 | 关闭需求相关全部 OPEN Todo |
+| `DEMAND_CLOSE_SUBMITTED` | active ADMIN / SUPER | active ADMIN / SUPER `DEMAND_CLOSE_REVIEW`；同时 stale `DEMAND_UPDATE_STALE`、`DEMAND_CONTINUE` |
+| `DEMAND_CLOSE_RETURNED` | current responsibility、active collaborators/PLATFORM helpers、负责镇区相关人 | current owner 或 current handler `DEMAND_CONTINUE` |
+| `DEMAND_COMPLETED` | current responsibility、active collaborators/PLATFORM helpers、负责镇区相关人，去重 | 无；stale `DEMAND_UPDATE_STALE`、`DEMAND_CONTINUE`、`DEMAND_CLOSE_REVIEW`、`DEMAND_OWNER_EXIT_REVIEW` |
+| `DEMAND_CANCELED` | 当前责任相关人、负责镇区相关人 | 无；stale 全部上述生命周期 Todo |
 | `DEMAND_MERGED` | 主责、协同、负责镇区 | 关闭非主记录Todo |
-| `DEMAND_OWNER_TRANSFERRED` | 原主责、新主责、协同、负责镇区 | 新主责适用进展Todo | 高风险操作 |
+| `DEMAND_OWNER_EXIT_REQUESTED` | active ADMIN / SUPER | active ADMIN / SUPER `DEMAND_OWNER_EXIT_REVIEW` |
+| `DEMAND_OWNER_EXIT_REJECTED` | 原 owner | 无；stale `DEMAND_OWNER_EXIT_REVIEW` |
+| `DEMAND_OWNER_EXIT_APPROVED` | former owner、former collaborators、负责镇区相关人，去重 | 无；stale 全部生命周期 Todo |
+| `DEMAND_OWNER_TRANSFERRED` | old owner、new owner、active collaborators、负责镇区相关人，去重 | 新 owner 无接受 Todo；只 stale old owner 的 `DEMAND_UPDATE_STALE`、`DEMAND_CONTINUE` |
+
+M1-006 Message 使用：
+
+```text
+dedupeKey = eventType + Demand + person
+```
+
+同 business、event type、person 聚合；随机 `eventKey` 不进入 Message dedupeKey。Todo 使用：
+
+```text
+dedupeKey = Demand + todoType + person
+eventKey = 当前业务轮次
+```
+
+因此同 Demand、Person、TodoType 最多一个 OPEN，新的业务轮次可 reopen 已 stale 的 Todo，但 Worker 重放不会重复创建 Message/Todo。
 
 ---
 

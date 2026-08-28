@@ -91,6 +91,10 @@ Idempotency-Key
 - 公开填报；
 - 正式提交；
 - 认领；
+- 需求进展新增；
+- 需求办结提交；
+- 主责退出申请；
+- SUPER 主责转交执行；
 - 行程结果；
 - 人才发起；
 - 报销提交；
@@ -213,9 +217,12 @@ POST /demands/:id/progress
 POST /demands/:id/submit-close
 POST /demands/:id/review-close
 POST /demands/:id/cancel
+POST /demands/:id/owner-exit
+POST /demands/:id/owner-exit/review
+POST /demands/:id/transfer-owner/preview
+POST /demands/:id/transfer-owner
 POST /demands/:id/formal-correction
 POST /demands/:id/merge
-POST /demands/:id/transfer-owner
 POST /demands/:id/group-leader-remind
 ```
 
@@ -248,6 +255,34 @@ AI运行可返回：
 `run` 必须提供 `Idempotency-Key`，且只允许 ADMIN / SUPER_ADMIN。`GET`
 按对象级权限过滤：管理员以及同时具备有效 `TOWNSHIP_STAFF` 角色和负责区域范围的镇区人员可见完整名单，有账号的被推荐人只可见本人项。只有 Appointment/area mapping 而无有效角色的账号不得获得完整可见或历史往届代录能力。
 往届正式协助激活不写入 `currentOwnerPersonId`，必须同时建立有效的镇区经办关系。
+
+## 7.5 Progress / Close / Responsibility lifecycle
+
+当前正式路由与命令约束：
+
+| Route | 身份与对象级规则 | `Idempotency-Key` | 关键请求约束 |
+|---|---|---:|---|
+| `GET /demands/:id/progress` | 有效内部账号且通过 `demand.view` | 否 | 返回进展、办结、退出、责任与 stale 派生概览 |
+| `POST /demands/:id/progress` | `demand.progress.add`，并通过当前责任关系校验 | 必须 | `currentProgress`、`nextStep` 必填；可带 `attachmentIds`、受控 `representedPersonId` |
+| `POST /demands/:id/group-leader-remind` | 有效 `GROUP_LEADER` / `MINISTER` 且 `demand.team_coordinator.remind` | 否 | body 为 `{}`；仅真正 stale 的 `IN_PROGRESS` Demand |
+| `POST /demands/:id/submit-close` | `demand.close.submit`；仅 current owner 或 current township handler | 必须 | `solution`、`connectedResources` 必填，可带 `attachmentIds` |
+| `POST /demands/:id/review-close` | ADMIN / SUPER 且 `demand.close.review` | 否 | `townshipVerificationResult` 必填；RETURN 时 `reason` 必填 |
+| `POST /demands/:id/owner-exit` | `demand.owner.exit_request`；仅 CURRENT_OWNER 本人 | 必须 | `reason` 必填 |
+| `POST /demands/:id/owner-exit/review` | ADMIN / SUPER 且 `demand.owner.exit_review` | 否 | `decision=APPROVE/REJECT`；REJECT 时 `reviewReason` 必填 |
+| `POST /demands/:id/transfer-owner/preview` | 仅 SUPER 且 `demand.owner.transfer` | 否 | `newOwnerPersonId`、`reason`；返回 10 分钟 HMAC `impactToken` |
+| `POST /demands/:id/transfer-owner` | 仅 SUPER 且 `demand.owner.transfer` | 必须 | 同一目标/原因、`impactToken`、`confirmation="CONFIRM"` |
+| `POST /demands/:id/cancel` | 负责镇区 staff 或 ADMIN / SUPER 且 `demand.cancel` | 否 | `reason` 必填；只允许规定的非终态 |
+
+`progress`、`submit-close`、`owner-exit` 和正式 `transfer-owner` 复用 `DemandCommandIdempotency`。同 actor、action、key、Demand 与 payload 可重放；同 key 跨 Demand 或 payload 不同返回稳定冲突。Preview、审核、提醒和取消依靠事务锁与当前状态校验，不声明幂等 key。
+
+责任模式只允许：
+
+```text
+CURRENT_OWNER
+ALUMNI_TOWNSHIP
+```
+
+关键 mutation 会在事务中重新解析责任结构；主责指针、唯一 active OwnerHistory、唯一 active TownshipHandler 或 active AlumniHelper 互相矛盾时 fail-safe，不猜责任人。
 
 ---
 
