@@ -8,6 +8,8 @@ import { DataExportService } from "@/modules/import-export/export-service";
 import { ImportService } from "@/modules/import-export/import-service";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
 
+process.env.APP_ENV = "test";
+
 const prisma = getPrismaClient();
 const importService = new ImportService();
 const exportService = new DataExportService();
