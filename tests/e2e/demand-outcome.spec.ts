@@ -162,7 +162,8 @@ test("completed demand follows the tracked outcome lifecycle and exposes only ap
   await page.goto(`/admin/demands/${demand.id}`);
   await page.locator('textarea[name="verifiedNote"]').fill("管理员已电话核实合同金额");
   await page.getByRole("button", { name: "审核通过" }).click();
-  await expect(page.getByText("跟踪中", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("操作已完成。");
+  await expect(page.getByText("已通过", { exact: true })).toBeVisible();
   expect((await prisma.demandOutcomePlan.findUniqueOrThrow({ where: { id: plan.id } })).status).toBe("IN_PROGRESS");
   await authenticated.context.close();
 
