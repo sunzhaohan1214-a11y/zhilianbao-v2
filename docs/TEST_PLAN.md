@@ -512,4 +512,8 @@ P3 UI/文案/低频问题
 - The sanitized fixture contains 26 business records plus three attachment rows and intentionally ends `REVIEW_REQUIRED`; it is not a false all-success sample.
 - Full rehearsal is not automated or claimed until a controlled real V1 full snapshot/schema is supplied.
 
-**TEST_PLAN.md v1.1 END**
+## M3-007 coverage
+
+Unit coverage verifies typed setting defaults, fixed timezone workday rules, canonical preview hashes, audit redaction, AI capability/secret-ref validation, provider fail-closed behavior and TEST fakes. Real-MySQL coverage verifies concurrent setting version control, calendar override/version/audit, backup idempotency/provider-once, map stale preview, batch pre-backup concurrency and import pre-backup. Critical E2E must distinguish SUPER and ADMIN menus/denials and must never run a destructive real restore.
+
+**TEST_PLAN.md v1.2 END**

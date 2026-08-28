@@ -1,0 +1,40 @@
+import type { BackupType, Prisma } from "@/generated/prisma/client";
+import { getPrismaClient } from "@/lib/db/prisma";
+import { authorizeActor } from "@/modules/permissions/authorization";
+import type { PermissionActor } from "@/modules/permissions/types";
+import type { BackupProvider } from "./backup-provider";
+import { getBackupProvider } from "./backup-provider";
+import { findSystemCommand, requireIdempotencyKey, saveSystemCommand, stableHash } from "./command";
+import { SystemError } from "./errors";
+import { manualBackupSchema } from "./schemas";
+import type { SystemMutationContext } from "./types";
+
+type Input = { actor: PermissionActor; context?: SystemMutationContext };
+function env() { return process.env.APP_ENV ?? process.env.NODE_ENV ?? "unknown"; }
+function appVersion() { return process.env.APP_VERSION ?? process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 40) ?? "unknown"; }
+function isUnique(error: unknown) { return typeof error === "object" && error !== null && "code" in error && error.code === "P2002"; }
+export function backupPolicyCompliance(providerReady: boolean, completedAt: Date | null, now = new Date()) { const ageHours = completedAt ? Math.round((now.getTime() - completedAt.getTime()) / 3_600_000) : null; return { ageHours, compliance: !providerReady ? "UNKNOWN" as const : ageHours !== null && ageHours <= 24 ? "COMPLIANT" as const : "DEGRADED" as const }; }
+
+export class BackupService {
+  constructor(private readonly prisma = getPrismaClient(), private readonly provider: BackupProvider = getBackupProvider()) {}
+  async health() { const provider = await this.provider.health(); const latest = await this.prisma.backupRecord.findFirst({ where: { status: "SUCCEEDED" }, orderBy: { completedAt: "desc" } }); const policy = backupPolicyCompliance(provider.ready, latest?.completedAt ?? null); return { provider, expectedPolicy: { incrementalRetentionDays: 30, fullRetentionWeeks: 12, criticalRetentionDays: 180, rpoHours: 24, rtoHours: 8 }, compliance: policy.compliance, lastSuccessfulBackupAt: latest?.completedAt ?? null, lastSuccessfulBackupAgeHours: policy.ageHours, lastRestoreDrillAt: null }; }
+  async list(input: Input) { await authorizeActor({ actor: input.actor, action: "backup.manage", resource: { resourceType: "backup", requiredScope: "SYSTEM" } }); return { health: await this.health(), items: await this.prisma.backupRecord.findMany({ orderBy: { requestedAt: "desc" }, take: 100 }) }; }
+  async requestManual(input: Input & { body: unknown; idempotencyKey: string | null }) {
+    await authorizeActor({ actor: input.actor, action: "backup.manage", resource: { resourceType: "backup", requiredScope: "SYSTEM" } }); const body = manualBackupSchema.parse(input.body); const health = await this.provider.health(); if (!health.ready) throw new SystemError("BACKUP_PROVIDER_UNAVAILABLE", "备份 Provider 未配置或不可用", { providerStatus: health.status });
+    return this.request({ actor: input.actor, context: input.context, type: "MANUAL", reason: body.reason, idempotencyKey: input.idempotencyKey ?? "" });
+  }
+  async requestPreOperation(input: Input & { type: "PRE_IMPORT" | "PRE_BATCH_SWITCH" | "PRE_MIGRATION" | "PRE_RELEASE"; reason: string; idempotencyKey: string }) {
+    const health = await this.provider.health(); if (!health.ready) throw new SystemError("BACKUP_PROVIDER_UNAVAILABLE", "高风险操作需要成功预备份，但 Provider 不可用", { providerStatus: health.status });
+    const backup = await this.request({ actor: input.actor, context: input.context, type: input.type, reason: input.reason, idempotencyKey: input.idempotencyKey }); if (backup.status !== "SUCCEEDED") throw new SystemError("BACKUP_NOT_READY", "预备份未成功，禁止继续高风险操作"); return backup;
+  }
+  private async request(input: Input & { type: BackupType; reason: string; idempotencyKey: string }) {
+    const keyHash = requireIdempotencyKey(input.idempotencyKey); const action = `BACKUP_CREATE_${input.type}`; const payloadHash = stableHash({ type: input.type, reason: input.reason }); const providerHealth = await this.provider.health(); if (!providerHealth.ready) throw new SystemError("BACKUP_PROVIDER_UNAVAILABLE", "备份 Provider 未配置或不可用");
+    let reserved: { id: string; invoke: boolean };
+    try { reserved = await this.prisma.$transaction(async (tx) => { const replay = await findSystemCommand(tx, { actorPersonId: input.actor.personId, action, keyHash, payloadHash }); if (replay) return { id: (replay.responseJson as { backupRecordId: string }).backupRecordId, invoke: false };
+      const row = await tx.backupRecord.create({ data: { provider: providerHealth.provider, backupType: input.type, sourceEnvironment: env(), status: "REQUESTED", reason: input.reason, appVersion: appVersion(), createdByPersonId: input.actor.personId } }); const response = { backupRecordId: row.id } as Prisma.InputJsonValue; await saveSystemCommand(tx, { actorPersonId: input.actor.personId, action, keyHash, payloadHash, aggregateType: "BACKUP_RECORD", aggregateId: row.id, response }); await tx.auditLog.create({ data: { actorPersonId: input.actor.personId, actorAccountId: input.actor.accountId, actionCode: "BACKUP_REQUESTED", entityType: "BACKUP_RECORD", entityId: row.id, afterJson: { backupType: input.type, sourceEnvironment: env(), status: "REQUESTED" }, reason: input.reason, requestId: input.context?.requestId, ip: input.context?.ip, device: input.context?.deviceName } }); return { id: row.id, invoke: true }; }); }
+    catch (error) { if (!isUnique(error)) throw error; const replay = await this.prisma.systemCommandIdempotency.findUnique({ where: { actorPersonId_action_keyHash: { actorPersonId: input.actor.personId, action, keyHash } } }); if (!replay || replay.payloadHash !== payloadHash) throw new SystemError("SYSTEM_IDEMPOTENCY_CONFLICT", "Idempotency-Key 已用于不同备份命令"); reserved = { id: (replay.responseJson as { backupRecordId: string }).backupRecordId, invoke: false }; }
+    if (reserved.invoke) { try { await this.prisma.backupRecord.update({ where: { id: reserved.id }, data: { status: "RUNNING" } }); const result = await this.provider.createSnapshot({ backupType: input.type, reason: input.reason, idempotencyKey: reserved.id }); await this.prisma.backupRecord.update({ where: { id: reserved.id }, data: { providerBackupId: result.providerBackupId, status: result.status, snapshotAt: result.snapshotAt, schemaVersion: result.schemaVersion, completedAt: result.status === "SUCCEEDED" ? new Date() : undefined, verifiedAt: result.verifiedAt, errorCode: result.errorCode } }); } catch { await this.prisma.backupRecord.update({ where: { id: reserved.id }, data: { status: "FAILED", completedAt: new Date(), errorCode: "BACKUP_PROVIDER_FAILED" } }); throw new SystemError("BACKUP_PROVIDER_UNAVAILABLE", "云快照创建失败"); } }
+    return this.prisma.backupRecord.findUniqueOrThrow({ where: { id: reserved.id } });
+  }
+  async sync(input: Input) { await authorizeActor({ actor: input.actor, action: "backup.manage", resource: { resourceType: "backup", requiredScope: "SYSTEM" } }); const health = await this.provider.health(); if (!health.ready) throw new SystemError("BACKUP_PROVIDER_UNAVAILABLE", "备份 Provider 不可用"); const providerItems = await this.provider.listBackups(); let updated = 0; for (const item of providerItems) { const result = await this.prisma.backupRecord.updateMany({ where: { provider: health.provider, providerBackupId: item.providerBackupId }, data: { status: item.status, snapshotAt: item.snapshotAt, schemaVersion: item.schemaVersion, verifiedAt: item.verifiedAt, errorCode: item.errorCode, completedAt: item.status !== "RUNNING" ? new Date() : undefined } }); updated += result.count; } await this.prisma.auditLog.create({ data: { actorPersonId: input.actor.personId, actorAccountId: input.actor.accountId, actionCode: "BACKUP_SYNCED", entityType: "BACKUP_CATALOG", afterJson: { provider: health.provider, providerCount: providerItems.length, updated }, reason: "Provider catalog synchronization", requestId: input.context?.requestId, ip: input.context?.ip, device: input.context?.deviceName } }); return { providerCount: providerItems.length, updated }; }
+}

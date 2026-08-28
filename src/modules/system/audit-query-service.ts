@@ -1,0 +1,10 @@
+import { getPrismaClient } from "@/lib/db/prisma";
+import { authorizeActor } from "@/modules/permissions/authorization";
+import type { PermissionActor } from "@/modules/permissions/types";
+
+const REDACT = /(phone|secret|token|password|private|prompt|response|invoice|content|body|database_url|authorization|credential|api.?key)/i;
+export function redactAuditValue(value: unknown, key = ""): unknown { if (REDACT.test(key)) return "[REDACTED]"; if (Array.isArray(value)) return value.map((item) => redactAuditValue(item)); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redactAuditValue(child, childKey)])); return value; }
+export class AuditQueryService {
+  constructor(private readonly prisma = getPrismaClient()) {}
+  async list(input: { actor: PermissionActor; query: { actionCode?: string; entityType?: string; entityId?: string; actorPersonId?: string; requestId?: string; from?: Date; to?: Date; page?: number; pageSize?: number } }) { await authorizeActor({ actor: input.actor, action: "audit.full_view", resource: { resourceType: "audit", requiredScope: "SYSTEM" } }); const page = Math.max(1, input.query.page ?? 1); const pageSize = Math.min(100, Math.max(1, input.query.pageSize ?? 50)); const where = { actionCode: input.query.actionCode, entityType: input.query.entityType, entityId: input.query.entityId, actorPersonId: input.query.actorPersonId, requestId: input.query.requestId, createdAt: input.query.from || input.query.to ? { gte: input.query.from, lte: input.query.to } : undefined }; const [total, rows] = await Promise.all([this.prisma.auditLog.count({ where }), this.prisma.auditLog.findMany({ where, include: { actorPerson: { select: { id: true, name: true } } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (page - 1) * pageSize, take: pageSize })]); return { total, page, pageSize, items: rows.map((row) => ({ ...row, beforeJson: redactAuditValue(row.beforeJson), afterJson: redactAuditValue(row.afterJson), ip: row.ip ? row.ip.replace(/\.\d+$/, ".***") : null })) }; }
+}

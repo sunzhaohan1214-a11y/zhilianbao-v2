@@ -564,4 +564,8 @@ RESTRICT / NO ACTION
 - Attachment 先保留 temporary row/object；正式 Link、Map、`COPIED` result 和 `is_temporary=false` 同事务。数据库提交失败时保留 temporary 供 cleanup，不产生正式 Link。
 - Actual Apply 不写历史业务 Outbox；不得在提交后删除 Outbox 来伪装无通知。
 
-**DATABASE_CONSTRAINTS.md v1.0 END**
+## M3-007 constraints
+
+Setting versions and AI config versions are unique by parent/version. Calendar dates are unique. System commands are unique by actor/action/key hash. AI capability and Backup provider identifiers are unique in their scopes. `RestoreRequest.active_key` is nullable unique so at most one active restore orchestration exists. All governance history/provider metadata foreign keys use `ON DELETE RESTRICT`. High-risk services re-read current rows under `FOR UPDATE`; cloud snapshot/restore calls are never awaited inside the mutation transaction.
+
+**DATABASE_CONSTRAINTS.md v1.1 END**

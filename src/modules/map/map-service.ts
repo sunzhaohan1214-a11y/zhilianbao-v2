@@ -11,6 +11,7 @@ import { matchesMemberMapFilters, selectMemberMapMembership } from "./member-map
 import { boundaryActivateSchema, boundaryCreateSchema, coordinateSchema, memberMapQuerySchema } from "./schemas";
 import { getMapRuntimeConfig } from "./runtime-config";
 import { isEnterpriseResponsibleAreaType, validateCoordinatePair } from "./validators";
+import { findSystemCommand, requireIdempotencyKey, saveSystemCommand, stableHash } from "@/modules/system/command";
 
 type Input = { actor: PermissionActor; context?: MutationContext };
 const boundarySelect = { id: true, areaId: true, versionNo: true, geoJson: true, checksum: true, sourceFilename: true, isCurrent: true, changeReason: true, createdByPersonId: true, createdAt: true } as const;
@@ -48,20 +49,35 @@ export class MapService {
     });
   }
 
-  async activateBoundary(input: Input & { boundaryId: string; command: unknown }) {
+  async activationPreview(input: Input & { boundaryId: string }) {
+    await authorizeActor({ actor: input.actor, action: "enterprise.map.manage", resource: { resourceType: "map-boundary", requiredScope: "GLOBAL_OPERATIONAL" } });
+    const target = await this.prisma.mapBoundaryVersion.findUnique({ where: { id: input.boundaryId }, select: boundarySelect });
+    if (!target) throw new MapError("MAP_BOUNDARY_NOT_FOUND", "边界版本不存在", 404);
+    const current = await this.prisma.mapBoundaryVersion.findFirst({ where: { areaId: target.areaId, isCurrent: true }, select: boundarySelect });
+    const payload = { target: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, checksum: target.checksum }, current: current ? { id: current.id, versionNo: current.versionNo, checksum: current.checksum } : null, impact: { currentBoundaryWillChange: current?.id !== target.id, oldVersionRetained: true, coordinateAuthorityUnchanged: true } };
+    return { ...payload, expectedCurrentBoundaryId: current?.id ?? null, expectedTargetVersion: target.versionNo, previewToken: stableHash(payload) };
+  }
+
+  async activateBoundary(input: Input & { boundaryId: string; command: unknown; idempotencyKey: string | null }) {
     await authorizeActor({ actor: input.actor, action: "enterprise.map.manage", resource: { resourceType: "map-boundary", requiredScope: "GLOBAL_OPERATIONAL" } });
     const command = boundaryActivateSchema.parse(input.command);
+    const keyHash = requireIdempotencyKey(input.idempotencyKey); const payloadHash = stableHash({ boundaryId: input.boundaryId, command });
     return this.prisma.$transaction(async (tx) => {
+      const replay = await findSystemCommand(tx, { actorPersonId: input.actor.personId, action: "MAP_BOUNDARY_ACTIVATE", keyHash, payloadHash }); if (replay) return replay.responseJson;
       const target = await tx.mapBoundaryVersion.findUnique({ where: { id: input.boundaryId }, select: boundarySelect });
       if (!target) throw new MapError("MAP_BOUNDARY_NOT_FOUND", "边界版本不存在", 404);
       const locked = await tx.$queryRaw<Array<{ id: string; status: string }>>`SELECT id, status FROM administrative_areas WHERE id = ${target.areaId} FOR UPDATE`;
       assertActiveAreaForBoundaryActivation(locked[0]);
       const current = await tx.mapBoundaryVersion.findMany({ where: { areaId: target.areaId, isCurrent: true }, select: { id: true, versionNo: true } });
+      if (current.length > 1 || (current[0]?.id ?? null) !== command.expectedCurrentBoundaryId || target.versionNo !== command.expectedTargetVersion) throw new MapError("MAP_BOUNDARY_PREVIEW_STALE", "边界版本状态已变化，请重新预览", 409);
+      const previewPayload = { target: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, checksum: target.checksum }, current: current[0] ? { id: current[0].id, versionNo: current[0].versionNo, checksum: (await tx.mapBoundaryVersion.findUniqueOrThrow({ where: { id: current[0].id }, select: { checksum: true } })).checksum } : null, impact: { currentBoundaryWillChange: current[0]?.id !== target.id, oldVersionRetained: true, coordinateAuthorityUnchanged: true } };
+      if (stableHash(previewPayload) !== command.previewToken) throw new MapError("MAP_BOUNDARY_PREVIEW_STALE", "边界影响预览已失效", 409);
       await tx.mapBoundaryVersion.updateMany({ where: { areaId: target.areaId, isCurrent: true }, data: { isCurrent: false } });
       await tx.mapBoundaryVersion.update({ where: { id: target.id }, data: { isCurrent: true } });
       const count = await tx.mapBoundaryVersion.count({ where: { areaId: target.areaId, isCurrent: true } });
       if (count !== 1) throw new MapError("MAP_BOUNDARY_STATE_CONFLICT", "边界激活后 current 状态不唯一", 409);
       await writeFoundationAudit(tx, { ...input, actionCode: "MAP_BOUNDARY_VERSION_ACTIVATED", entityType: "MAP_BOUNDARY_VERSION", entityId: target.id, reason: command.reason, before: { current: current.map((item) => ({ id: item.id, versionNo: item.versionNo })) }, after: { areaId: target.areaId, versionNo: target.versionNo, isCurrent: true } });
+      await saveSystemCommand(tx, { actorPersonId: input.actor.personId, action: "MAP_BOUNDARY_ACTIVATE", keyHash, payloadHash, aggregateType: "MAP_BOUNDARY_VERSION", aggregateId: target.id, response: { id: target.id, areaId: target.areaId, versionNo: target.versionNo, isCurrent: true } });
       return { ...target, isCurrent: true };
     });
   }

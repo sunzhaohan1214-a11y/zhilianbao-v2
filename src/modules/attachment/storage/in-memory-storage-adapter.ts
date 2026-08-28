@@ -10,6 +10,8 @@ export class InMemoryStorageAdapter implements StorageAdapter {
     this.region = input.region ?? "ap-test";
   }
 
+  async healthProbe() { return { configured: true, reachable: true }; }
+
   async createUploadAuthorization(input: { objectKey: string; expiresInSeconds: number }): Promise<UploadAuthorization> {
     const startTime = Math.floor(Date.now() / 1000);
     return {

@@ -16,6 +16,7 @@ import { ImportRepository, type ImportTransaction } from "./repository";
 import { confirmImportSchema, createImportBatchSchema, importMappingSchema, resolveImportRowSchema, selectImportSheetSchema } from "./schemas";
 import type { ImportMapping, ParsedImportRow } from "./types";
 import { buildImportResultWorkbook, buildImportTemplate, inspectWorkbook, parseMappedSheet, readHeaders, MAX_IMPORT_FILE_BYTES } from "./workbook";
+import { BackupService } from "@/modules/system/backup-service";
 
 type ServiceInput = { actor: PermissionActor; context?: AuthRequestContext };
 type JsonRecord = Record<string, string>;
@@ -40,8 +41,8 @@ function safeErrorCode(error: unknown): string {
   if (typeof error === "object" && error && "code" in error && typeof error.code === "string") return error.code.slice(0, 100);
   return "IMPORT_APPLY_FAILED";
 }
-function payloadHash(batchId: string, previewVersion: number): string {
-  return createHash("sha256").update(JSON.stringify({ batchId, previewVersion, confirm: true })).digest("hex");
+function payloadHash(batchId: string, previewVersion: number, reason: string): string {
+  return createHash("sha256").update(JSON.stringify({ batchId, previewVersion, reason, confirm: true })).digest("hex");
 }
 function keyHash(key: string): string { return createHash("sha256").update(key).digest("hex"); }
 function phoneIdentityHash(phone: string): string { return createHash("sha256").update(`PHONE:${normalizeImportPhone(phone)}`).digest("hex"); }
@@ -72,6 +73,7 @@ export class ImportService {
   private readonly enterprise = new EnterpriseService();
   private readonly member = new MemberService();
   private readonly talent = new TalentService();
+  private readonly backups = new BackupService();
 
   constructor(private readonly repository = new ImportRepository()) {}
 
@@ -417,8 +419,16 @@ export class ImportService {
     const body = confirmImportSchema.parse(input.body);
     const idempotencyKey = input.idempotencyKey?.trim();
     if (!idempotencyKey || idempotencyKey.length > 200) throw new ImportExportError("IMPORT_IDEMPOTENCY_CONFLICT", "必须提供有效 Idempotency-Key");
+    const hashedKey = keyHash(idempotencyKey);
+    const hashedPayload = payloadHash(input.batchId, body.expectedPreviewVersion, body.reason);
+    const replay = await this.repository.prisma.importCommandIdempotency.findUnique({ where: { actorPersonId_action_keyHash: { actorPersonId: input.actor.personId, action: "CONFIRM", keyHash: hashedKey } } });
+    if (replay) { if (replay.batchId !== input.batchId || replay.previewVersion !== body.expectedPreviewVersion || replay.payloadHash !== hashedPayload) throw new ImportExportError("IMPORT_IDEMPOTENCY_CONFLICT", "Idempotency-Key 已用于不同导入命令"); return replay.responseJson; }
     const preview = await this.repository.prisma.importBatch.findUnique({ where: { id: input.batchId }, include: { rows: { orderBy: { rowNumber: "asc" } } } });
     if (!preview) throw new ImportExportError("IMPORT_NOT_FOUND", "导入批次不存在");
+    if (preview.previewVersion !== body.expectedPreviewVersion) throw new ImportExportError("IMPORT_PREVIEW_STALE", "预览版本已变化，请重新确认");
+    if (preview.status !== "PREVIEW_READY") throw new ImportExportError("IMPORT_STATE_CONFLICT", "当前批次不能执行正式导入");
+    if (preview.blockingRowCount !== 0 || preview.rows.some(({ resolutionStatus }) => ["BLOCKED", "NEEDS_REVIEW"].includes(resolutionStatus))) throw new ImportExportError("IMPORT_BLOCKING_ROWS", "仍有未解决的阻断行");
+    const preBackup = await this.backups.requestPreOperation({ actor: input.actor, context: input.context, type: "PRE_IMPORT", reason: body.reason, idempotencyKey: `import:${input.idempotencyKey}` });
     const prepared = new Map<string, string>();
     if (preview.importType === "MEMBER") {
       for (const row of preview.rows) {
@@ -426,8 +436,6 @@ export class ImportService {
         if (row.action !== "SKIP" && yes(value.createAccount) && !prepared.has(value.phone)) prepared.set(value.phone, (await prepareInitialAccountCredential(value.phone)).passwordHash);
       }
     }
-    const hashedKey = keyHash(idempotencyKey);
-    const hashedPayload = payloadHash(input.batchId, body.expectedPreviewVersion);
     try {
       const result = await this.repository.transaction(async (tx) => {
         await this.repository.lockBatch(tx, input.batchId).catch(() => { throw new ImportExportError("IMPORT_NOT_FOUND", "导入批次不存在"); });
@@ -456,7 +464,7 @@ export class ImportService {
         const response = { batchId: batch.id, status: "SUCCEEDED", sourceRows: batch.rowCount, ...counts, previewVersion: batch.previewVersion };
         await tx.importBatch.update({ where: { id: batch.id }, data: { status: "SUCCEEDED", appliedAt: new Date(), resultJson: response, errorCode: null, failedAt: null } });
         await tx.auditLog.create({ data: { actorPersonId: input.actor.personId, actorAccountId: input.actor.accountId, actionCode: "IMPORT_BATCH_APPLIED", entityType: "IMPORT_BATCH", entityId: batch.id,
-          afterJson: { importType: batch.importType, rowCount: batch.rowCount, created: counts.created, updated: counts.updated, linked: counts.linked, skipped: counts.skipped },
+          afterJson: { importType: batch.importType, rowCount: batch.rowCount, created: counts.created, updated: counts.updated, linked: counts.linked, skipped: counts.skipped, preBackupRecordId: preBackup.id }, reason: body.reason,
           requestId: input.context?.requestId, ip: input.context?.ip, device: input.context?.deviceName } });
         await tx.importCommandIdempotency.create({ data: { actorPersonId: input.actor.personId, action: "CONFIRM", keyHash: hashedKey, payloadHash: hashedPayload,
           batchId: batch.id, previewVersion: batch.previewVersion, responseJson: response } });

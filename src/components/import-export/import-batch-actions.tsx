@@ -100,9 +100,11 @@ export function ImportBatchActions({ batch }: { batch: Batch }) {
     setConfirmOpen(true);
   }
   async function executeImport() {
+    const reason = window.prompt("请输入正式导入原因（执行前必须完成云快照）");
+    if (!reason) return;
     setBusy(true); setMessage("");
     try {
-      await api(`/api/v2/admin/imports/${batch.id}/confirm`, { confirm: true, expectedPreviewVersion: batch.previewVersion }, { "Idempotency-Key": confirmKey });
+      await api(`/api/v2/admin/imports/${batch.id}/confirm`, { confirm: true, expectedPreviewVersion: batch.previewVersion, reason }, { "Idempotency-Key": confirmKey });
       setConfirmOpen(false); router.refresh();
     } catch (error) {
       if (error instanceof ApiError && error.code === "IMPORT_PREVIEW_STALE") {

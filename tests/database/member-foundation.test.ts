@@ -25,6 +25,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.systemCommandIdempotency.deleteMany({ where: { actorPersonId: { in: personIds } } });
+  await prisma.backupRecord.deleteMany({ where: { createdByPersonId: { in: personIds } } });
   await prisma.auditLog.deleteMany({ where: { actorPersonId: { in: personIds } } });
   await prisma.stateTransitionHistory.deleteMany({ where: { actorPersonId: { in: personIds } } });
   await prisma.memberCapabilityIndustry.deleteMany({ where: { personId: { in: personIds } } });
@@ -46,9 +48,10 @@ describe("B-M2-001 real MySQL invariants", () => {
   it("serializes competing activations and leaves exactly one current ACTIVE batch", async () => {
     await prisma.batch.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
     const old = await batch("old", true); const first = await batch("first"); const second = await batch("second"); const service = new BatchService(prisma);
+    const previews = await Promise.all([service.activationPreview({ actor, batchId: first.id }), service.activationPreview({ actor, batchId: second.id })]);
     const outcomes = await Promise.allSettled([
-      service.activate({ actor, batchId: first.id, command: { confirmation: "ACTIVATE", expectedCurrentBatchId: old.id } }),
-      service.activate({ actor, batchId: second.id, command: { confirmation: "ACTIVATE", expectedCurrentBatchId: old.id } }),
+      service.activate({ actor, batchId: first.id, command: { confirmation: "ACTIVATE", confirm: true, reason: "TEST competing activation", expectedCurrentBatchId: old.id, previewToken: previews[0].previewToken }, idempotencyKey: randomUUID() }),
+      service.activate({ actor, batchId: second.id, command: { confirmation: "ACTIVATE", confirm: true, reason: "TEST competing activation", expectedCurrentBatchId: old.id, previewToken: previews[1].previewToken }, idempotencyKey: randomUUID() }),
     ]);
     expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(await prisma.batch.count({ where: { isCurrent: true, status: "ACTIVE" } })).toBe(1);

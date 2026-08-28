@@ -63,6 +63,11 @@ export class CosStorageAdapter implements StorageAdapter {
     this.cos = input.cos ?? new COS({ SecretId: input.secretId, SecretKey: input.secretKey });
   }
 
+  async healthProbe() {
+    await this.headObject("system-health/nonexistent-probe");
+    return { configured: true, reachable: true };
+  }
+
   async createUploadAuthorization(input: { objectKey: string; expiresInSeconds: number }): Promise<UploadAuthorization> {
     try {
       const data = await getCredential({

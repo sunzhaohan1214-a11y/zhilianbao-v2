@@ -5,8 +5,10 @@ import { isPermissionError } from "@/modules/permissions/permission-errors";
 
 export default async function AdminLayout({ children }: Readonly<{ children: ReactNode }>) {
   const session = await requireBusinessPageSession();
+  let capabilities: string[] = [];
   try {
-    await requireAdminShellPermission(session);
+    const authorization = await requireAdminShellPermission(session);
+    capabilities = [...authorization.actor.capabilities];
   } catch (error) {
     if (!isPermissionError(error)) throw error;
     return (
@@ -19,5 +21,5 @@ export default async function AdminLayout({ children }: Readonly<{ children: Rea
       </main>
     );
   }
-  return <AdminShell>{children}</AdminShell>;
+  return <AdminShell capabilities={capabilities}>{children}</AdminShell>;
 }

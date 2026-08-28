@@ -1,0 +1,2 @@
+import type { NextRequest } from "next/server"; import { apiError, apiSuccess } from "@/lib/api/response"; import { systemRequestContext } from "@/lib/api/system-route"; import { buildAuthRequestContext } from "@/lib/auth/request-context";
+export async function GET(request: NextRequest) { const context = buildAuthRequestContext(request); try { const system = await systemRequestContext(request); return apiSuccess(await system.health.overview({ actor: system.actor }), context.requestId); } catch (error) { return apiError(error, context.requestId); } }

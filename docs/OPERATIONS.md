@@ -457,4 +457,8 @@ WORKER_RUN_ONCE=true npm run start:worker
 
 单轮模式执行 stale recovery、有限批次 Outbox consume 和当前可领取 Job 后退出。Outbox handler 只允许短事务内 DB side effect 或幂等转 Job，外部网络调用必须交给 Job handler。监控至少区分 WAITING backlog、stale RUNNING、FAILED Job、未发布 Outbox 和 `failed_at` 毒消息。
 
-**OPERATIONS.md v1.0 END**
+## M3-007 backup and restore operations
+
+Expected policy remains nightly incremental/30 days, weekly full/12 weeks, critical pre-operation snapshots/180 days, RPO <=24h and RTO <=8h. The web process never runs `mysqldump` or exposes snapshot bytes. Without a real cloud `BackupProvider`, backup health is NOT_CONFIGURED/UNKNOWN and manual/pre-operation backup returns 503. Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. Provider success advances only to validation required. Automated validation plus SUPER manual check are required before sessions are invalidated and maintenance exits. Any failure keeps maintenance active. Real provider integration and controlled restore drill remain M3-008.
+
+**OPERATIONS.md v1.1 END**

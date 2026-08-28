@@ -37,6 +37,7 @@ export const resolveImportRowSchema = z.object({
 export const confirmImportSchema = z.object({
   confirm: z.literal(true),
   expectedPreviewVersion: z.number().int().positive(),
+  reason: z.string().trim().min(1).max(500),
 }).strict();
 
 export const importListQuerySchema = z.object({

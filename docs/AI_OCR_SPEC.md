@@ -504,4 +504,8 @@ feedback
 9. 模型不浏览他人私人对话；
 10. 不用通用LLM替代专业票据OCR。
 
-**AI_OCR_SPEC.md v1.0 END**
+## M3-007 configuration governance
+
+The database can configure only this specification's fixed capability allowlist. It stores `secretRef` names, never secret values. A sanitized fixed minimal test payload contains no real user content. DRAFT may become TESTED after an actual configured/test adapter succeeds; ACTIVE additionally requires `evaluationVersion` and `evaluationPassedAt`. M3-007 exposes no ordinary-admin or SUPER button that fabricates evaluation success, and existing env-driven Demand Match fallback remains authoritative unless a fully gated ACTIVE config exists.
+
+**AI_OCR_SPEC.md v1.1 END**
