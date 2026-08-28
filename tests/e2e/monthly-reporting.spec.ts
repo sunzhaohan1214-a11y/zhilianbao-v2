@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { e2eUsers, enterpriseE2e } from "./auth-fixtures";
+import { e2eUsers, enterpriseE2e, seedAuthFixtures } from "./auth-fixtures";
+
+test.beforeEach(async () => {
+  await seedAuthFixtures();
+});
 
 async function login(page: Page, user: { phone: string; password: string }) {
   await page.goto("/login"); await page.getByLabel("手机号").fill(user.phone); await page.getByLabel("密码", { exact: true }).fill(user.password);
