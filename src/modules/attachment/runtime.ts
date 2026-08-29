@@ -5,7 +5,7 @@ import { AttachmentScanService } from "./attachment-scan-service";
 import { AttachmentService } from "./attachment-service";
 import { AttachmentParentAuthorizerRegistry } from "./parent-authorization";
 import { AttachmentRepository } from "./repository/attachment-repository";
-import { FakeCleanScanner, UnavailableFileScanAdapter, type FileScanAdapter } from "./scan/file-scan-adapter";
+import { ClamAvFileScanAdapter, FakeCleanScanner, UnavailableFileScanAdapter, type FileScanAdapter } from "./scan/file-scan-adapter";
 import { CosStorageAdapter } from "./storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "./storage/in-memory-storage-adapter";
 import type { StorageAdapter } from "./storage/storage-adapter";
@@ -61,7 +61,7 @@ function createRuntime(): AttachmentRuntime {
   registerAnnouncementAttachmentAuthorizer(parentAuthorizers);
   registerImportAttachmentAuthorizer(parentAuthorizers);
   registerMonthlyReportAttachmentAuthorizer(parentAuthorizers);
-  const scanner = isTest ? new FakeCleanScanner() : new UnavailableFileScanAdapter();
+  const scanner = createScanner(isTest);
   return {
     storage,
     scanner,
@@ -72,6 +72,16 @@ function createRuntime(): AttachmentRuntime {
     linkService: new AttachmentLinkService(repository),
     cleanupService: new AttachmentCleanupService(repository, storage),
   };
+}
+
+function createScanner(isTest: boolean): FileScanAdapter {
+  if (isTest) return new FakeCleanScanner();
+  if (process.env.FILE_SCAN_PROVIDER?.toLowerCase() !== "clamav") return new UnavailableFileScanAdapter();
+  const host = process.env.CLAMAV_HOST?.trim() ?? "";
+  const port = Number(process.env.CLAMAV_PORT ?? "3310");
+  const timeoutMs = Number(process.env.CLAMAV_TIMEOUT_MS ?? "10000");
+  try { return new ClamAvFileScanAdapter({ host, port, timeoutMs }); }
+  catch { return new UnavailableFileScanAdapter(); }
 }
 
 export function getAttachmentRuntime(): AttachmentRuntime {

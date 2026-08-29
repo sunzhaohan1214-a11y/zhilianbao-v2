@@ -778,3 +778,10 @@ Secret 通过 TEST / PROD 环境变量或腾讯云安全配置注入。
 15. 禁止用坐标推断并覆盖企业正式所属区域。
 
 **ARCHITECTURE.md TECH v1.0 END**
+# M3-008 release-gate architecture
+
+Release evidence is layered rather than collapsed into one health flag: code/static checks, CI service proof, production configuration, real cloud operations, source-data rehearsal, UAT and cutover each retain their own status. The readiness aggregator is read-only and cannot deploy, change repository policy, create backups or execute restores.
+
+Security, performance and browser automation run as independent required jobs. MySQL-backed correctness/performance jobs use real 8.4 service instances; scanner integration uses a real ClamAV daemon. The official CynosDB backup adapter reconciles a deterministic backup name before creating, fails on ambiguous matches, and leaves retention unknown when the provider does not return evidence. Restore is deliberately separated into a TEST-only new-cluster drill with manual validation and cleanup.
+
+Phase 1 adds no Redis and no long-lived permission cache. Home correctness uses bounded aggregate queries without a 50-row prefilter that could hide urgent older Todos. AI Chat calls authorized domain services rather than accessing the database as a privilege bypass.

@@ -72,6 +72,32 @@ afterAll(async () => {
 });
 
 describe("A-M1-008 real MySQL home aggregation", () => {
+  it("considers an older urgent Todo beyond the newest 50 OPEN records", async () => {
+    const urgent = await prisma.helpRequest.create({ data: {
+      businessNo: `BZ2099${randomUUID().replaceAll("-", "").slice(0, 10)}`,
+      submitterPersonId: creatorId, category: "OTHER", title: "M3-008 第 51 条紧急待办",
+      description: "旧但紧急的待办不能被任意 top 50 截断。", urgency: "URGENT", status: "IN_PROGRESS",
+      currentOwnerPersonId: personId, expectedCompleteAt: new Date("2099-08-28T05:00:00.000Z"),
+    } });
+    const urgentTodo = await prisma.todo.create({ data: {
+      personId, todoType: "HELP_PROCESS", module: "help", aggregateType: "HELP_REQUEST", aggregateId: urgent.id,
+      actionUrl: `/help/${urgent.id}`, dedupeKey: `m3-008-urgent-${randomUUID()}`, createdAt: new Date("2090-01-01T00:00:00.000Z"),
+    } });
+    for (let index = 0; index < 55; index += 1) {
+      const item = await prisma.helpRequest.create({ data: {
+        businessNo: `BZ2099${randomUUID().replaceAll("-", "").slice(0, 10)}`,
+        submitterPersonId: creatorId, category: "OTHER", title: `M3-008 普通待办 ${index}`,
+        description: "规模正确性测试。", urgency: "NORMAL", status: "IN_PROGRESS",
+        currentOwnerPersonId: personId, expectedCompleteAt: new Date("2099-09-30T00:00:00.000Z"),
+      } });
+      await prisma.todo.create({ data: {
+        personId, todoType: "HELP_PROCESS", module: "help", aggregateType: "HELP_REQUEST", aggregateId: item.id,
+        actionUrl: `/help/${item.id}`, dedupeKey: `m3-008-normal-${randomUUID()}`, createdAt: new Date(`2099-08-28T03:${String(index).padStart(2, "0")}:00.000Z`),
+      } });
+    }
+    expect((await home.overview({ actor, now })).todos[0]).toMatchObject({ id: urgentTodo.id, priority: "HIGH" });
+  });
+
   it("aggregates each home source with role, visibility, limit, ranking, and stale-rule parity", async () => {
     const baseline = await home.teamOverview({ actor, now });
     const pending = await demand("PENDING_CLAIM");

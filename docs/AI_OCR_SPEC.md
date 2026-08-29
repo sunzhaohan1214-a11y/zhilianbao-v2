@@ -509,3 +509,10 @@ feedback
 The database can configure only this specification's fixed capability allowlist. It stores `secretRef` names, never secret values. A sanitized fixed minimal test payload contains no real user content. DRAFT may become TESTED after an actual configured/test adapter succeeds; ACTIVE additionally requires `evaluationVersion` and `evaluationPassedAt`. M3-007 exposes no ordinary-admin or SUPER button that fabricates evaluation success, and existing env-driven Demand Match fallback remains authoritative unless a fully gated ACTIVE config exists.
 
 **AI_OCR_SPEC.md v1.1 END**
+# M3-008 AI evaluation and Chat binding
+
+The fixed, de-identified contract dataset has an immutable version and SHA-256 hash. Evaluation binds dataset hash, prompt/rules version, provider/model/capability and retention/training configuration into the activation version; editing a draft clears prior evaluation evidence.
+
+Hard contract gates require 100% private/unauthorized refusal and zero fabricated formal facts. Contract evaluation proves deterministic routing/sanitization only and explicitly does not claim real provider quality. Real provider evaluation is a separate bounded command with sample/call estimates and remains `BLOCKED_BY_EXTERNAL_ENV` until an approved adapter and credentials are present.
+
+The first-phase Chat endpoint supports structured demand, enterprise, member, policy and talent queries through official domain services. It always reuses the current actor's permission boundary and emits evidence type/ID/label. Private prompts are refused; unsupported semantic requests use a safe degraded response. Chat history is not persisted. OCR remains optional and manual reimbursement remains available; attachment malware scanning is a separate mandatory security gate.

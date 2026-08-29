@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 import type { BackupType } from "@/generated/prisma/client";
+import { TencentCynosDbBackupProvider } from "./tencent-cynosdb-backup-provider";
 import { CURRENT_SCHEMA_VERSION, currentAppVersion, currentRuntimeEnvironment, fakeSystemProvidersEnabled } from "./runtime";
 
-export type ProviderHealth = { ready: boolean; status: "READY" | "NOT_CONFIGURED" | "DEGRADED"; provider: string; detail?: string };
+export type ProviderHealth = {
+  ready: boolean; backupReady?: boolean; restoreReady?: boolean;
+  status: "READY" | "NOT_CONFIGURED" | "DEGRADED"; provider: string; detail?: string;
+};
 export type ProviderBackup = {
   providerBackupId: string; backupType: BackupType; sourceEnvironment: string;
   status: "RUNNING" | "SUCCEEDED" | "FAILED"; snapshotAt: Date;
@@ -53,4 +57,10 @@ export class FakeBackupProvider implements BackupProvider {
   async getRestoreStatus(id: string) { return this.operations.get(id) ?? { status: "FAILED" as const, errorCode: "RESTORE_OPERATION_NOT_FOUND" }; }
 }
 const runtime = globalThis as typeof globalThis & { __zlbBackupProvider?: BackupProvider };
-export function getBackupProvider(): BackupProvider { runtime.__zlbBackupProvider ??= fakeSystemProvidersEnabled() ? new FakeBackupProvider() : new UnavailableBackupProvider(); return runtime.__zlbBackupProvider; }
+export function getBackupProvider(): BackupProvider {
+  if (runtime.__zlbBackupProvider) return runtime.__zlbBackupProvider;
+  if (fakeSystemProvidersEnabled()) runtime.__zlbBackupProvider = new FakeBackupProvider();
+  else if (process.env.BACKUP_PROVIDER === "tencent-cynosdb") runtime.__zlbBackupProvider = TencentCynosDbBackupProvider.fromEnvironment();
+  else runtime.__zlbBackupProvider = new UnavailableBackupProvider();
+  return runtime.__zlbBackupProvider;
+}

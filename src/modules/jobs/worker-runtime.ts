@@ -26,13 +26,18 @@ import { JobRepository } from "./job-repository";
 import { JobRunner, type WorkerLogger } from "./job-runner";
 import { jobPayloadSchemas } from "./job-types";
 import type { WorkerConfig } from "./worker-config";
+import { writeLog } from "@/lib/logging/logger";
 
 export function createWorkerId(): string {
   return `${hostname().slice(0, 40)}:${process.pid}:${randomBytes(4).toString("hex")}`.slice(0, 100);
 }
 
 export const jsonWorkerLogger: WorkerLogger = (entry) => {
-  console.log(JSON.stringify({ timestamp: new Date().toISOString(), module: "worker", ...entry }));
+  writeLog(entry.result === "failed" || entry.result === "shutdown_timeout" ? "error" : "info", {
+    ...entry,
+    module: "worker",
+    result: String(entry.result ?? "unknown"),
+  });
 };
 
 function wait(ms: number): Promise<void> {

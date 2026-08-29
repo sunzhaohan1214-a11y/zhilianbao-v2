@@ -301,3 +301,12 @@ CI建议检查：
 ADMIN retains only its existing operational capabilities and cannot see or directly enter System Admin. System overview, full audit, sensitive health/storage details, system mutation, backup and restore require SUPER capabilities. AI config mutation additionally requires `ai.service_manage`. System settings never store database, COS, session, LLM/OCR or private-key values. Audit rendering recursively redacts phones, credentials, tokens, prompts/responses, invoice/body/content fields and masks IP detail. Production and deployment TEST/UAT default to unavailable Backup/Maintenance providers and fail closed. Fakes require the server-only double gate `ENABLE_FAKE_SYSTEM_PROVIDERS=true` and (`NODE_ENV=test` or `APP_ENV=test`); this flag is confined to the Playwright server and is not a deployment default. No SQL console, environment editor, role editor, migration execution UI, backup download/delete, or mobile restore entry exists.
 
 **SECURITY_SPEC.md v1.1 END**
+# M3-008 security hardening
+
+- Minimum CSP allowlist permits only self and the required Tencent map/cloud origins; framing and objects are denied. Production HSTS is emitted only when HTTPS is explicitly confirmed.
+- `nosniff`, strict-origin referrer policy, restrictive permissions policy, frame denial, and removal of the framework signature are mandatory.
+- Structured logs recursively redact credentials, sessions, authorization/cookies, phone/ID values, AI prompt/response and invoice bodies. Unknown exceptions expose only stable error codes.
+- Attachment scanning fails closed outside explicit TEST fakes. Production selection requires ClamAV; CI proves both clean acceptance and malware rejection against a real daemon.
+- High/critical dependency advisories, secret patterns, unsafe Prisma/raw SQL, dangerous HTML/eval, production `db push`, and runtime schema creation fail the security job.
+- The route matrix rechecks authentication, capability, object visibility and state; ordinary ADMIN never inherits SUPER-only system/AI/reimbursement authority.
+- Runtime containers use the `nextjs` non-root user and contain no `.env` or committed test evidence.

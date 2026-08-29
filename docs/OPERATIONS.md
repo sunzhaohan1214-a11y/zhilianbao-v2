@@ -466,3 +466,10 @@ Restore is same-environment, same-provider, exact-schema only. Preview captures 
 Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. After Provider success, automatic validation performs `SELECT 1`, checks the required Prisma migration is finished/not rolled back/without failure logs, enforces exactly one current ACTIVE batch and at least one NORMAL account, probes up to three formal PASSED attachment objects through the configured storage adapter, and proves Job/Outbox queries execute. Any required failure keeps the restore active and maintenance enabled. Manual completion is reentrant, requires successful validation and explicit inspection, releases only the matching maintenance operation, and invalidates all sessions. Real provider integration and controlled restore drill remain M3-008.
 
 **OPERATIONS.md v1.1 END**
+# M3-008 release operations addendum
+
+The operational source of truth is `docs/RELEASE_READINESS.md`, with detailed checklists in `UAT_CHECKLIST.md`, `PROD_RELEASE_CHECKLIST.md`, `RESTORE_DRILL_RUNBOOK.md`, `MONITORING_RUNBOOK.md`, `GITHUB_RELEASE_GATES.md`, and `DB_PRIVILEGE_RUNBOOK.md`.
+
+The official CynosDB adapter may create/list/reconcile snapshots. It does not expose credentials/private endpoints and does not enable web-triggered restore. Restore drills use `RollbackToNewCluster` only, require TEST identity, fixed confirmation, cost acknowledgment, target prefix and manual cleanup. In-place source restoration remains an approved production runbook action outside application code.
+
+Production release requires `backupReady`, a successful backup no older than 24 hours, production scanner readiness, protected main, exact-head checks, UAT, V1 full rehearsal/reconciliation and restore evidence. Missing external evidence remains BLOCKED and must not be converted into a code pass.

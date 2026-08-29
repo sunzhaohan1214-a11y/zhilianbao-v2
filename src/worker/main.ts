@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { WorkerRuntime } from "@/modules/jobs/worker-runtime";
 import { loadWorkerConfig } from "@/modules/jobs/worker-config";
+import { writeLog } from "@/lib/logging/logger";
 
 async function main(): Promise<void> {
   if (process.argv.includes("--help")) {
@@ -25,11 +26,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  console.error(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    module: "worker",
-    result: "fatal",
-    error_code: error instanceof Error ? error.name : "UNKNOWN_FATAL_ERROR",
-  }));
+  writeLog("error", { module: "worker", result: "fatal", errorCode: error instanceof Error ? error.name : "UNKNOWN_FATAL_ERROR" });
   process.exitCode = 1;
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Prisma, PrismaClient, ReimbursementStatus, ReimbursementType } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient, type ReimbursementStatus, type ReimbursementType } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
 import type { PermissionActor } from "@/modules/permissions/types";
 
@@ -49,10 +49,11 @@ export class ReimbursementRepository {
       where: { invoiceNoNormalized: { in: [...normalizedNumbers] } },
       orderBy: { id: "asc" }, select: { id: true },
     });
-    await tx.$queryRawUnsafe(
-      `SELECT id FROM reimbursement_invoices WHERE invoice_no_normalized IN (${normalizedNumbers.map(() => "?").join(",")}) ORDER BY id FOR UPDATE`,
-      ...normalizedNumbers,
-    );
+    await tx.$queryRaw`
+      SELECT id FROM reimbursement_invoices
+      WHERE invoice_no_normalized IN (${Prisma.join([...normalizedNumbers])})
+      ORDER BY id FOR UPDATE
+    `;
   }
 
   async nextBusinessNo(tx: ReimbursementTransaction, at = new Date()) {

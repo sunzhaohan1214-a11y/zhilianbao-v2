@@ -530,3 +530,15 @@ P3 UI/文案/低频问题
 Unit coverage verifies typed setting defaults, fixed timezone workday rules, canonical preview hashes, audit redaction, AI capability/secret-ref validation, explicit fake-provider double gating, provider fail-closed behavior, reentrant maintenance and compliance UNKNOWN semantics. Real-MySQL coverage verifies concurrent setting/calendar controls; backup and restore crash-resume with fixed Provider keys; cross-environment/schema/readiness rejection; actual migration, Job, Outbox and attachment-object validation; Provider-only catalog ingest; non-green compliance without evidence; and zero-mutation batch/import behavior when pre-backup fails. Critical E2E distinguishes SUPER and ADMIN navigation/routes/APIs and exercises only the explicitly enabled fake restore lifecycle; it never executes a real restore.
 
 **TEST_PLAN.md v1.2 END**
+# M3-008 release gates
+
+In addition to the existing unit/integration/database/critical E2E suites, the release candidate must pass:
+
+- Security: high/critical dependency audit, tracked/untracked secret scan, dangerous-code scan, route/IDOR matrix, headers/log redaction, real ClamAV clean and malware probes, AI contract evaluation.
+- Correctness: Home urgent Todo remains visible beyond 50 newer rows on real MySQL; read-only consistency checks cover current batch, ownership/history, contacts, talent rounds, Todo dedupe, attachment metadata, exports and restore exclusivity.
+- Performance: 1,000 enterprises, 1,000 demands, 100 presence records and 20 trips; 90 read samples and 20 real transaction/audit writes; read P95 <= 800 ms, write P95 <= 1,500 ms, error count 0.
+- Browser: Chrome/Chromium desktop, Firefox desktop and Safari-compatible WebKit mobile across login, home, demand detail, attachment access, reports and system basics.
+- Weak network: visible loading, duplicate-submit prevention, safe error, explicit retry and success recovery.
+- Timezone UAT: business dates remain Asia/Shanghai when browser timezone is UTC and America/Los_Angeles.
+
+CI service proof and local proof must be reported separately. An unavailable local MySQL, browser, ClamAV or cloud account is not a pass.
