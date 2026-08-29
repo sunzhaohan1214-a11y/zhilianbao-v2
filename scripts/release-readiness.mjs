@@ -2,11 +2,16 @@ import { mkdir, writeFile } from "node:fs/promises";
 import {
   buildReleaseReadiness,
   readinessExitCode,
+  validateAiEvidence,
   validateBackupEvidence,
   validateExactHeadCi,
-  validateGenericEvidence,
   validateGithubProtection,
+  validateMaintenanceEvidence,
+  validateMigrationEvidence,
+  validatePreflightEvidence,
+  validateRestoreEvidence,
   validateScannerEvidence,
+  validateUatEvidence,
 } from "../src/modules/hardening/release-readiness.ts";
 
 const rawMode = process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1] ?? "local";
@@ -45,9 +50,25 @@ async function exactHeadCiEvidence() {
   } catch { return { status: "BLOCKED_BY_EXTERNAL_ENV", errorCode: "GITHUB_CI_API_UNAVAILABLE" }; }
 }
 
-const [githubProtection, exactHeadCi] = await Promise.all([githubProtectionEvidence(), exactHeadCiEvidence()]);
+const [githubProtection, exactHeadCi, scannerEvidence, backupEvidence, maintenanceEvidence, restoreEvidence, migrationEvidence, uatEvidence, preflightEvidence, realAiEvidence] = await Promise.all([
+  githubProtectionEvidence(),
+  exactHeadCiEvidence(),
+  validateScannerEvidence(process.env.FILE_SCANNER_EVIDENCE_JSON, appVersion),
+  validateBackupEvidence(process.env.CLOUD_BACKUP_EVIDENCE_JSON, appVersion, { region: process.env.CYNOSDB_APPROVED_REGION, clusterId: process.env.CYNOSDB_APPROVED_CLUSTER_ID, vpcId: process.env.CYNOSDB_APPROVED_VPC_ID, subnetId: process.env.CYNOSDB_APPROVED_SUBNET_ID }),
+  validateMaintenanceEvidence(process.env.MAINTENANCE_EVIDENCE_JSON, appVersion),
+  validateRestoreEvidence(process.env.RESTORE_DRILL_EVIDENCE_JSON, appVersion),
+  validateMigrationEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion),
+  validateUatEvidence(process.env.UAT_EVIDENCE_JSON, appVersion),
+  validatePreflightEvidence(process.env.PROD_PREFLIGHT_EVIDENCE_JSON, appVersion),
+  validateAiEvidence(process.env.REAL_AI_EVIDENCE_JSON, appVersion),
+]);
 const scannerConfigured = process.env.FILE_SCAN_PROVIDER?.toLowerCase() === "clamav" && configured("CLAMAV_HOST", "CLAMAV_PORT");
-const backupConfigured = process.env.BACKUP_PROVIDER?.toLowerCase() === "tencent-cynosdb" && configured("TENCENT_CLOUD_SECRET_ID", "TENCENT_CLOUD_SECRET_KEY", "CYNOSDB_REGION", "CYNOSDB_CLUSTER_ID");
+const backupConfigured = process.env.BACKUP_PROVIDER?.toLowerCase() === "tencent-cynosdb" && configured(
+  "TENCENT_CLOUD_SECRET_ID", "TENCENT_CLOUD_SECRET_KEY", "CYNOSDB_REGION", "CYNOSDB_CLUSTER_ID",
+  "CYNOSDB_APPROVED_ENVIRONMENT", "CYNOSDB_APPROVED_CLUSTER_ID", "CYNOSDB_APPROVED_REGION", "CYNOSDB_APPROVED_VPC_ID", "CYNOSDB_APPROVED_SUBNET_ID",
+) && process.env.CYNOSDB_APPROVED_ENVIRONMENT?.toUpperCase() === appEnvironment
+  && process.env.CYNOSDB_CLUSTER_ID === process.env.CYNOSDB_APPROVED_CLUSTER_ID
+  && process.env.CYNOSDB_REGION === process.env.CYNOSDB_APPROVED_REGION;
 
 const report = buildReleaseReadiness({
   mode,
@@ -56,16 +77,16 @@ const report = buildReleaseReadiness({
   fakeProvidersEnabled: process.env.ENABLE_FAKE_SYSTEM_PROVIDERS === "true",
   scannerConfigured,
   backupConfigured,
-  scannerEvidence: validateScannerEvidence(process.env.FILE_SCANNER_EVIDENCE_JSON, appVersion),
-  backupEvidence: validateBackupEvidence(process.env.CLOUD_BACKUP_EVIDENCE_JSON, appVersion, { region: process.env.CYNOSDB_REGION, clusterId: process.env.CYNOSDB_CLUSTER_ID }),
-  maintenanceEvidence: validateGenericEvidence(process.env.MAINTENANCE_EVIDENCE_JSON, appVersion),
-  restoreEvidence: validateGenericEvidence(process.env.RESTORE_DRILL_EVIDENCE_JSON, appVersion),
-  migrationEvidence: validateGenericEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion, "BLOCKED_BY_SOURCE_DATA"),
+  scannerEvidence,
+  backupEvidence,
+  maintenanceEvidence,
+  restoreEvidence,
+  migrationEvidence,
   githubProtection,
   exactHeadCi,
-  uatEvidence: validateGenericEvidence(process.env.UAT_EVIDENCE_JSON, appVersion, "BLOCKED_BY_UAT"),
-  preflightEvidence: validateGenericEvidence(process.env.PROD_PREFLIGHT_EVIDENCE_JSON, appVersion),
-  realAiEvidence: validateGenericEvidence(process.env.REAL_AI_EVIDENCE_JSON, appVersion),
+  uatEvidence,
+  preflightEvidence,
+  realAiEvidence,
 });
 
 await mkdir("artifacts", { recursive: true });

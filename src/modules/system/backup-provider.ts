@@ -10,7 +10,7 @@ export type ProviderHealth = {
 export type ProviderBackup = {
   providerBackupId: string; backupType: BackupType; sourceEnvironment: string;
   status: "RUNNING" | "SUCCEEDED" | "FAILED"; snapshotAt: Date;
-  schemaVersion?: string; appVersion?: string; retentionUntil?: Date; verifiedAt?: Date; errorCode?: string;
+  correlationId?: string; schemaVersion?: string; appVersion?: string; retentionUntil?: Date; verifiedAt?: Date; errorCode?: string;
 };
 export type RestoreProviderStatus = { status: "RUNNING" | "SUCCEEDED" | "FAILED"; errorCode?: string };
 export interface BackupProvider {
@@ -40,7 +40,8 @@ export class FakeBackupProvider implements BackupProvider {
   async createSnapshot(input: { backupType: BackupType; reason: string; idempotencyKey: string }): Promise<ProviderBackup> {
     this.createCalls.push(input.idempotencyKey); const existing = this.snapshotsByKey.get(input.idempotencyKey); if (existing) return existing;
     if (this.options.failCreate) throw new Error("FAKE_BACKUP_FAILED"); const now = new Date();
-    const item: ProviderBackup = { providerBackupId: `fake-${createHash("sha256").update(input.idempotencyKey).digest("hex")}`, backupType: input.backupType, sourceEnvironment: this.options.sourceEnvironment ?? currentRuntimeEnvironment(), status: "SUCCEEDED", snapshotAt: now, schemaVersion: this.options.schemaVersion ?? CURRENT_SCHEMA_VERSION, appVersion: this.options.appVersion ?? currentAppVersion() };
+    const correlationId = `fake-${createHash("sha256").update(input.idempotencyKey).digest("hex")}`;
+    const item: ProviderBackup = { providerBackupId: correlationId, correlationId, backupType: input.backupType, sourceEnvironment: this.options.sourceEnvironment ?? currentRuntimeEnvironment(), status: "SUCCEEDED", snapshotAt: now, schemaVersion: this.options.schemaVersion ?? CURRENT_SCHEMA_VERSION, appVersion: this.options.appVersion ?? currentAppVersion() };
     this.snapshotsByKey.set(input.idempotencyKey, item); this.snapshots.push(item); if (this.options.throwAfterCreateSideEffectOnce && !this.threwAfterCreateSideEffect) { this.threwAfterCreateSideEffect = true; throw new Error("FAKE_NETWORK_UNKNOWN_AFTER_BACKUP_SIDE_EFFECT"); } return item;
   }
   addProviderBackup(item: ProviderBackup) { if (!this.snapshots.some((entry) => entry.providerBackupId === item.providerBackupId)) this.snapshots.push(item); }

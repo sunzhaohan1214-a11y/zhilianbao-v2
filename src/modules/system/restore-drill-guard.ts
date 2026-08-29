@@ -6,6 +6,14 @@ export type RestoreDrillGuardInput = {
   costAcknowledged?: string;
   confirmation?: string;
   sourceClusterId?: string;
+  region?: string;
+  vpcId?: string;
+  subnetId?: string;
+  approvedEnvironment?: string;
+  approvedClusterId?: string;
+  approvedRegion?: string;
+  approvedVpcId?: string;
+  approvedSubnetId?: string;
   backupId?: string;
   targetName?: string;
   targetPrefix?: string;
@@ -15,6 +23,11 @@ export function assertRestoreDrillAllowed(input: RestoreDrillGuardInput): void {
   const environment = input.appEnvironment?.trim().toLowerCase();
   if (environment === "prod" || environment === "production") throw new Error("RESTORE_DRILL_PROD_FORBIDDEN");
   if (environment !== "test") throw new Error("RESTORE_DRILL_TEST_ENV_REQUIRED");
+  if (input.approvedEnvironment?.trim().toLowerCase() !== "test") throw new Error("RESTORE_DRILL_APPROVED_TEST_IDENTITY_REQUIRED");
+  if (!input.approvedClusterId || input.sourceClusterId !== input.approvedClusterId
+    || !input.approvedRegion || input.region !== input.approvedRegion
+    || !input.approvedVpcId || input.vpcId !== input.approvedVpcId
+    || !input.approvedSubnetId || input.subnetId !== input.approvedSubnetId) throw new Error("RESTORE_DRILL_APPROVED_IDENTITY_MISMATCH");
   if (input.enabled !== "true") throw new Error("RESTORE_DRILL_EXPLICIT_ENABLE_REQUIRED");
   if (input.costAcknowledged !== "true") throw new Error("RESTORE_DRILL_COST_ACK_REQUIRED");
   if (input.confirmation !== RESTORE_DRILL_CONFIRMATION) throw new Error("RESTORE_DRILL_CONFIRMATION_INVALID");

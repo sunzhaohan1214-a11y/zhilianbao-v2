@@ -15,7 +15,7 @@ type BackupFile = {
 };
 
 export type CynosDbClient = {
-  DescribeClusterDetail(input: { ClusterId: string }): Promise<{ Detail?: { ClusterId?: string; Region?: string; Status?: string } }>;
+  DescribeClusterDetail(input: { ClusterId: string }): Promise<{ Detail?: { ClusterId?: string; Region?: string; Status?: string; VpcId?: string; SubnetId?: string } }>;
   DescribeBackupList(input: {
     ClusterId: string; Limit?: number; Offset?: number; BackupIds?: Array<number | bigint>; BackupNames?: string[];
   }): Promise<{ TotalCount?: number; BackupList?: BackupFile[] }>;
@@ -24,6 +24,7 @@ export type CynosDbClient = {
 
 export type TencentCynosDbConfig = {
   secretId: string; secretKey: string; region: string; clusterId: string; environment: string; timeoutMs: number;
+  approvedEnvironment: string; approvedClusterId: string; approvedRegion: string; approvedVpcId: string; approvedSubnetId: string;
 };
 
 function required(environment: NodeJS.ProcessEnv, name: string): string {
@@ -65,6 +66,11 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
       clusterId: required(environment, "CYNOSDB_CLUSTER_ID"),
       environment: safeEnvironment(environment.APP_ENV ?? environment.NODE_ENV ?? "unknown"),
       timeoutMs: Math.max(1_000, Number(environment.CYNOSDB_TIMEOUT_MS ?? 15_000)),
+      approvedEnvironment: required(environment, "CYNOSDB_APPROVED_ENVIRONMENT").toLowerCase(),
+      approvedClusterId: required(environment, "CYNOSDB_APPROVED_CLUSTER_ID"),
+      approvedRegion: required(environment, "CYNOSDB_APPROVED_REGION"),
+      approvedVpcId: required(environment, "CYNOSDB_APPROVED_VPC_ID"),
+      approvedSubnetId: required(environment, "CYNOSDB_APPROVED_SUBNET_ID"),
     };
     const client = new cynosdb.v20190107.Client({
       credential: { secretId: config.secretId, secretKey: config.secretKey },
@@ -76,6 +82,19 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
 
   constructor(private readonly config: TencentCynosDbConfig, private readonly client: CynosDbClient) {}
 
+  private async assertApprovedClusterIdentity(): Promise<void> {
+    if (!["test", "prod"].includes(this.config.approvedEnvironment)
+      || this.config.environment !== this.config.approvedEnvironment
+      || this.config.clusterId !== this.config.approvedClusterId
+      || this.config.region !== this.config.approvedRegion) throw new Error("CYNOSDB_APPROVED_IDENTITY_CONFIG_MISMATCH");
+    const detail = (await this.client.DescribeClusterDetail({ ClusterId: this.config.clusterId })).Detail;
+    if (detail?.ClusterId !== this.config.approvedClusterId
+      || detail.Region !== this.config.approvedRegion
+      || detail.VpcId !== this.config.approvedVpcId
+      || detail.SubnetId !== this.config.approvedSubnetId
+      || detail.Status !== "running") throw new Error("CYNOSDB_APPROVED_IDENTITY_NOT_VERIFIED");
+  }
+
   private deterministicName(idempotencyKey: string): string {
     const safeKey = idempotencyKey.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 36);
     return `zlb-${safeEnvironment(this.config.environment)}-${safeKey}`.slice(0, 60);
@@ -86,6 +105,7 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
     const when = snapshotAt(file);
     return {
       providerBackupId: String(file.BackupId),
+      correlationId: file.BackupName,
       backupType: mappedBackupType(file),
       sourceEnvironment: this.config.environment.toUpperCase(),
       status: providerStatus(file.BackupStatus),
@@ -96,12 +116,10 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
 
   async health(): Promise<ProviderHealth> {
     try {
-      const response = await this.client.DescribeClusterDetail({ ClusterId: this.config.clusterId });
-      const detail = response.Detail;
-      const ready = detail?.ClusterId === this.config.clusterId && detail.Region === this.config.region && detail.Status === "running";
+      await this.assertApprovedClusterIdentity();
       return {
-        ready, backupReady: ready, restoreReady: false, status: ready ? "READY" : "DEGRADED", provider: "tencent-cynosdb",
-        detail: ready ? "CynosDB cluster is running; web restore remains disabled" : "CynosDB cluster identity, region, or status check failed",
+        ready: true, backupReady: true, restoreReady: false, status: "READY", provider: "tencent-cynosdb",
+        detail: "Approved CynosDB identity is running; web restore remains disabled",
       };
     } catch {
       return { ready: false, backupReady: false, restoreReady: false, status: "DEGRADED", provider: "tencent-cynosdb", detail: "CynosDB health request failed" };
@@ -109,13 +127,21 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
   }
 
   async listBackups(): Promise<ProviderBackup[]> {
-    const result: ProviderBackup[] = [];
+    await this.assertApprovedClusterIdentity();
+    const byId = new Map<string, ProviderBackup>();
+    const idByCorrelation = new Map<string, string>();
     for (let offset = 0; ; offset += 100) {
       const response = await this.client.DescribeBackupList({ ClusterId: this.config.clusterId, Limit: 100, Offset: offset });
-      for (const item of response.BackupList ?? []) result.push(this.map(item));
+      for (const item of response.BackupList ?? []) {
+        const mapped = this.map(item);
+        const correlatedId = mapped.correlationId ? idByCorrelation.get(mapped.correlationId) : undefined;
+        if (correlatedId && correlatedId !== mapped.providerBackupId) throw new Error("BACKUP_PROVIDER_AMBIGUOUS");
+        byId.set(mapped.providerBackupId, mapped);
+        if (mapped.correlationId) idByCorrelation.set(mapped.correlationId, mapped.providerBackupId);
+      }
       if (offset + 100 >= (response.TotalCount ?? 0) || !(response.BackupList?.length)) break;
     }
-    return result;
+    return [...byId.values()];
   }
 
   private async findByName(name: string): Promise<ProviderBackup | null> {
@@ -126,6 +152,7 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
   }
 
   async createSnapshot(input: { backupType: BackupType; reason: string; idempotencyKey: string }): Promise<ProviderBackup> {
+    await this.assertApprovedClusterIdentity();
     const name = this.deterministicName(input.idempotencyKey);
     const existing = await this.findByName(name);
     if (existing) return existing;
@@ -135,11 +162,12 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
     if (created.FlowId === undefined) throw new Error("BACKUP_PROVIDER_MISSING_FLOW_ID");
     return {
       providerBackupId: `pending-${name}`, backupType: input.backupType,
-      sourceEnvironment: this.config.environment.toUpperCase(), status: "RUNNING", snapshotAt: new Date(),
+      correlationId: name, sourceEnvironment: this.config.approvedEnvironment.toUpperCase(), status: "RUNNING", snapshotAt: new Date(),
     };
   }
 
   async getBackup(providerBackupId: string): Promise<ProviderBackup | null> {
+    await this.assertApprovedClusterIdentity();
     if (providerBackupId.startsWith("pending-")) return this.findByName(providerBackupId.slice("pending-".length));
     if (!/^\d+$/.test(providerBackupId)) return null;
     const response = await this.client.DescribeBackupList({ ClusterId: this.config.clusterId, Limit: 100, Offset: 0, BackupIds: [BigInt(providerBackupId)] });

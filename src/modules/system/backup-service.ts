@@ -52,9 +52,27 @@ export class BackupService {
   }
   async sync(input: Input) {
     await authorizeActor({ actor: input.actor, action: "backup.manage", resource: { resourceType: "backup", requiredScope: "SYSTEM" } }); const health = await this.provider.health(); if (!health.ready) throw new SystemError("BACKUP_PROVIDER_UNAVAILABLE", "备份 Provider 不可用");
-    const providerItems = await this.provider.listBackups(); let updated = 0; let created = 0;
-    for (const item of providerItems) { const existing = await this.prisma.backupRecord.findUnique({ where: { provider_providerBackupId: { provider: health.provider, providerBackupId: item.providerBackupId } } });
-      if (existing) { await this.prisma.backupRecord.update({ where: { id: existing.id }, data: this.providerStatusMetadata(item) }); updated += 1; } else { await this.prisma.backupRecord.create({ data: { provider: health.provider, reason: "PROVIDER_CATALOG_SYNC", createdByPersonId: null, ...this.providerCatalogMetadata(item) } }); created += 1; } }
+    const rawProviderItems = await this.provider.listBackups(); const providerItemsById = new Map<string, ProviderBackup>(); const idByCorrelation = new Map<string, string>();
+    for (const item of rawProviderItems) {
+      const sameId = providerItemsById.get(item.providerBackupId);
+      if (sameId && sameId.correlationId !== item.correlationId) throw new SystemError("BACKUP_CATALOG_CORRELATION_AMBIGUOUS", "Provider 备份关联信息不唯一，已拒绝同步");
+      const sameCorrelation = item.correlationId ? idByCorrelation.get(item.correlationId) : undefined;
+      if (sameCorrelation && sameCorrelation !== item.providerBackupId) throw new SystemError("BACKUP_CATALOG_CORRELATION_AMBIGUOUS", "Provider 备份关联信息不唯一，已拒绝同步");
+      providerItemsById.set(item.providerBackupId, item); if (item.correlationId) idByCorrelation.set(item.correlationId, item.providerBackupId);
+    }
+    const providerItems = [...providerItemsById.values()]; let updated = 0; let created = 0;
+    for (const item of providerItems) {
+      const action = await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.backupRecord.findUnique({ where: { provider_providerBackupId: { provider: health.provider, providerBackupId: item.providerBackupId } } });
+        const pendingId = item.correlationId ? `pending-${item.correlationId}` : null;
+        const pending = pendingId ? await tx.backupRecord.findUnique({ where: { provider_providerBackupId: { provider: health.provider, providerBackupId: pendingId } } }) : null;
+        if (existing && pending && existing.id !== pending.id) throw new SystemError("BACKUP_CATALOG_CORRELATION_AMBIGUOUS", "真实备份与 pending 记录同时存在，已拒绝同步");
+        if (pending) { await tx.backupRecord.update({ where: { id: pending.id }, data: { providerBackupId: item.providerBackupId, ...this.providerStatusMetadata(item) } }); return "updated" as const; }
+        if (existing) { await tx.backupRecord.update({ where: { id: existing.id }, data: this.providerStatusMetadata(item) }); return "updated" as const; }
+        await tx.backupRecord.create({ data: { provider: health.provider, reason: "PROVIDER_CATALOG_SYNC", createdByPersonId: null, ...this.providerCatalogMetadata(item) } }); return "created" as const;
+      });
+      if (action === "created") created += 1; else updated += 1;
+    }
     await this.prisma.auditLog.create({ data: { actorPersonId: input.actor.personId, actorAccountId: input.actor.accountId, actionCode: "BACKUP_SYNCED", entityType: "BACKUP_CATALOG", afterJson: { provider: health.provider, providerCount: providerItems.length, updated, created }, reason: "Provider catalog synchronization", requestId: input.context?.requestId, ip: input.context?.ip, device: input.context?.deviceName } }); return { providerCount: providerItems.length, updated, created };
   }
   private providerStatusMetadata(item: ProviderBackup) { return { status: item.status, snapshotAt: item.snapshotAt, retentionUntil: item.retentionUntil, errorCode: item.errorCode, completedAt: item.status === "RUNNING" ? null : item.snapshotAt }; }

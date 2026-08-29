@@ -17,19 +17,33 @@ No blocked state may be translated into PASS. `RELEASE_READY=YES` requires produ
 
 `APP_VERSION` must be the exact 40-hex candidate commit. `GITHUB_CANDIDATE_RUN_ID` identifies the immutable Actions run; the gate fetches it and requires the run `head_sha` plus all seven named jobs to match and succeed.
 
-External evidence variables contain JSON rather than booleans: `FILE_SCANNER_EVIDENCE_JSON`, `CLOUD_BACKUP_EVIDENCE_JSON`, `MAINTENANCE_EVIDENCE_JSON`, `RESTORE_DRILL_EVIDENCE_JSON`, `V1_REHEARSAL_EVIDENCE_JSON`, `UAT_EVIDENCE_JSON`, and `PROD_PREFLIGHT_EVIDENCE_JSON`. Each object must contain:
+External evidence variables contain a JSON pointer rather than a self-reported result or boolean: `FILE_SCANNER_EVIDENCE_JSON`, `CLOUD_BACKUP_EVIDENCE_JSON`, `MAINTENANCE_EVIDENCE_JSON`, `RESTORE_DRILL_EVIDENCE_JSON`, `V1_REHEARSAL_EVIDENCE_JSON`, `UAT_EVIDENCE_JSON`, and `PROD_PREFLIGHT_EVIDENCE_JSON`. A local pointer contains an immutable digest and a readable evidence file path:
 
 ```json
 {
   "reference": "urn:sha256:<64-hex-content-digest>",
+  "sourcePath": "<path-to-evidence-json>"
+}
+```
+
+An HTTPS reference may be used without `sourcePath` only when the URL contains a `sha256=<64-hex-content-digest>` query parameter. The readiness gate reads the referenced bytes, limits evidence to 1 MiB, recomputes SHA-256, and rejects missing sources or digest mismatches before parsing the evidence document. The referenced document must contain:
+
+```json
+{
+  "category": "<scanner|backup|maintenance|restore|migration|uat|preflight|ai>",
   "candidateSha": "<40-hex-candidate-commit>",
+  "environment": "<TEST|PROD>",
   "status": "PASS",
   "verifiedAt": "<ISO-8601 timestamp>",
   "details": {}
 }
 ```
 
-Scanner details must prove ClamAV health, clean acceptance and EICAR rejection. Backup details must identify the configured CynosDB region/cluster, provider health, a successful backup and a real snapshot time no older than 24 hours. Legacy naked booleans are ignored.
+Each variable is bound to one category and environment; category or environment substitution fails closed. Scanner details must prove ClamAV health, clean acceptance and EICAR rejection. Backup details must prove a PROD source, the approved CynosDB region/cluster, provider health, a successful backup and a real snapshot time no older than 24 hours. Maintenance must prove provider health plus enter/exit checks. Restore must identify the exact TEST source backup and cluster, the TEST target cluster, validation, RTO/RPO and completed cleanup. Migration must identify the source snapshot and target migration database and prove dry-run/apply/rerun/reconciliation. UAT must prove zero P0/P1 issues plus business and operations sign-off. Production preflight must prove checks, rollback readiness and an approved change window. Missing category fields fail closed. Legacy naked booleans and inline self-reported PASS objects are ignored.
+
+## Approved CynosDB identity
+
+Real CynosDB operations require deployment-injected approved identity values: `CYNOSDB_APPROVED_ENVIRONMENT`, `CYNOSDB_APPROVED_CLUSTER_ID`, `CYNOSDB_APPROVED_REGION`, `CYNOSDB_APPROVED_VPC_ID`, and `CYNOSDB_APPROVED_SUBNET_ID`. They must match the requested configuration and the identity returned by Tencent Cloud. `APP_ENV` is not accepted as cloud-resource identity by itself. Restore drills additionally require the approved environment to be `TEST`; production backup readiness requires evidence for the approved `PROD` cluster. Keep real IDs in Secret/deployment configuration, not Git.
 
 ## Current M3-008 truth
 

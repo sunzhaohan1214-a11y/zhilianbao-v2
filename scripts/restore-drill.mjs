@@ -29,20 +29,33 @@ async function persist(payload) {
 }
 
 try {
+  const region = required("CYNOSDB_REGION");
+  const zone = required("CYNOSDB_ZONE");
+  const vpcId = required("CYNOSDB_VPC_ID");
+  const subnetId = required("CYNOSDB_SUBNET_ID");
+  const approvedEnvironment = required("CYNOSDB_APPROVED_ENVIRONMENT");
+  const approvedClusterId = required("CYNOSDB_APPROVED_CLUSTER_ID");
+  const approvedRegion = required("CYNOSDB_APPROVED_REGION");
+  const approvedVpcId = required("CYNOSDB_APPROVED_VPC_ID");
+  const approvedSubnetId = required("CYNOSDB_APPROVED_SUBNET_ID");
   assertRestoreDrillAllowed({
     appEnvironment: process.env.APP_ENV,
     enabled: process.env.CYNOSDB_ALLOW_RESTORE_DRILL,
     costAcknowledged: process.env.CYNOSDB_RESTORE_DRILL_COST_ACK,
     confirmation: args.confirm,
     sourceClusterId,
+    region,
+    vpcId,
+    subnetId,
+    approvedEnvironment,
+    approvedClusterId,
+    approvedRegion,
+    approvedVpcId,
+    approvedSubnetId,
     backupId,
     targetName,
     targetPrefix,
   });
-  const region = required("CYNOSDB_REGION");
-  const zone = required("CYNOSDB_ZONE");
-  const vpcId = required("CYNOSDB_VPC_ID");
-  const subnetId = required("CYNOSDB_SUBNET_ID");
   required("TENCENT_CLOUD_SECRET_ID");
   required("TENCENT_CLOUD_SECRET_KEY");
 
@@ -71,8 +84,8 @@ try {
     profile: { httpProfile: { reqTimeout: Math.ceil(Number(process.env.CYNOSDB_TIMEOUT_MS ?? 15_000) / 1_000) } },
   });
   const cluster = (await client.DescribeClusterDetail({ ClusterId: sourceClusterId })).Detail;
-  if (cluster?.ClusterId !== sourceClusterId || cluster.Region !== region || cluster.Status !== "running") throw new Error("RESTORE_DRILL_SOURCE_CLUSTER_NOT_READY");
-  if (cluster.Zone !== zone || cluster.VpcId !== vpcId || cluster.SubnetId !== subnetId) throw new Error("RESTORE_DRILL_NETWORK_IDENTITY_MISMATCH");
+  if (cluster?.ClusterId !== approvedClusterId || cluster.Region !== approvedRegion || cluster.Status !== "running") throw new Error("RESTORE_DRILL_SOURCE_CLUSTER_NOT_READY");
+  if (cluster.Zone !== zone || cluster.VpcId !== approvedVpcId || cluster.SubnetId !== approvedSubnetId) throw new Error("RESTORE_DRILL_NETWORK_IDENTITY_MISMATCH");
   const backups = await client.DescribeBackupList({ ClusterId: sourceClusterId, BackupIds: [BigInt(backupId)], Limit: 100, Offset: 0 });
   const exact = (backups.BackupList ?? []).filter((item) => String(item.BackupId) === backupId && item.BackupStatus === "success");
   if (exact.length !== 1) throw new Error("RESTORE_DRILL_BACKUP_NOT_UNIQUE_SUCCEEDED");

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+
 export const READINESS_STATUSES = [
   "PASS", "FAIL", "BLOCKED_BY_EXTERNAL_ENV", "BLOCKED_BY_SOURCE_DATA", "BLOCKED_BY_UAT", "NOT_APPLICABLE",
 ] as const;
@@ -28,34 +31,69 @@ export type ReleaseReadinessReport = {
 
 export const REQUIRED_CI_JOBS = ["quality", "database", "critical-e2e", "docker-build", "security", "performance", "browser-compat"] as const;
 export type EvidenceValidation = { status: ReadinessStatus; errorCode?: string; evidenceRef?: string };
-type BoundEvidence = { reference?: unknown; candidateSha?: unknown; status?: unknown; verifiedAt?: unknown; details?: unknown };
+export type ExternalEvidenceCategory = "scanner" | "backup" | "maintenance" | "restore" | "migration" | "uat" | "preflight" | "ai";
+type EvidencePointer = { reference?: unknown; sourcePath?: unknown };
+type BoundEvidence = { category?: unknown; candidateSha?: unknown; environment?: unknown; status?: unknown; verifiedAt?: unknown; details?: unknown };
 
 export function isCommitSha(value: string | undefined): value is string {
   return Boolean(value && /^[a-f0-9]{40}$/i.test(value));
 }
 
-function isImmutableReference(value: unknown): value is string {
-  return typeof value === "string" && (/^urn:sha256:[a-f0-9]{64}$/i.test(value) || /^https:\/\/\S+[?#&]sha256=[a-f0-9]{64}(?:&\S*)?$/i.test(value));
+function immutableDigest(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const urn = /^urn:sha256:([a-f0-9]{64})$/i.exec(value);
+  if (urn) return urn[1].toLowerCase();
+  try {
+    const url = new URL(value);
+    const digest = url.protocol === "https:" ? url.searchParams.get("sha256") : null;
+    return digest && /^[a-f0-9]{64}$/i.test(digest) ? digest.toLowerCase() : null;
+  } catch { return null; }
 }
 
-function parseBoundEvidence(raw: string | undefined, candidateSha: string, missingStatus: ReadinessStatus): { validation: EvidenceValidation; details?: Record<string, unknown> } {
+async function readEvidenceBytes(pointer: EvidencePointer): Promise<Uint8Array> {
+  if (typeof pointer.sourcePath === "string" && pointer.sourcePath.trim()) {
+    const info = await stat(pointer.sourcePath);
+    if (!info.isFile() || info.size > 1_048_576) throw new Error("EVIDENCE_SOURCE_INVALID");
+    return readFile(pointer.sourcePath);
+  }
+  if (typeof pointer.reference !== "string" || !pointer.reference.startsWith("https://")) throw new Error("EVIDENCE_SOURCE_MISSING");
+  const response = await fetch(pointer.reference, { signal: AbortSignal.timeout(8_000), redirect: "error" });
+  if (!response.ok) throw new Error("EVIDENCE_SOURCE_UNAVAILABLE");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > 1_048_576) throw new Error("EVIDENCE_SOURCE_INVALID");
+  return bytes;
+}
+
+async function parseBoundEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus): Promise<{ validation: EvidenceValidation; details?: Record<string, unknown> }> {
   if (!raw?.trim()) return { validation: { status: missingStatus, errorCode: "IMMUTABLE_EVIDENCE_MISSING" } };
+  let pointer: EvidencePointer;
+  try { pointer = JSON.parse(raw) as EvidencePointer; } catch { return { validation: { status: "FAIL", errorCode: "IMMUTABLE_EVIDENCE_INVALID" } }; }
+  const digest = immutableDigest(pointer.reference);
+  if (!digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_NOT_IMMUTABLE" } };
+  let bytes: Uint8Array;
+  try { bytes = await readEvidenceBytes(pointer); } catch { return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_UNREADABLE", evidenceRef: pointer.reference as string } }; }
+  const actualDigest = createHash("sha256").update(bytes).digest("hex");
+  if (actualDigest !== digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_DIGEST_MISMATCH", evidenceRef: pointer.reference as string } };
   let evidence: BoundEvidence;
-  try { evidence = JSON.parse(raw) as BoundEvidence; } catch { return { validation: { status: "FAIL", errorCode: "IMMUTABLE_EVIDENCE_INVALID" } }; }
-  if (!isImmutableReference(evidence.reference)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_NOT_IMMUTABLE" } };
-  if (evidence.candidateSha !== candidateSha) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CANDIDATE_SHA_MISMATCH", evidenceRef: evidence.reference } };
-  if (evidence.status !== "PASS") return { validation: { status: "FAIL", errorCode: "EVIDENCE_STATUS_NOT_PASS", evidenceRef: evidence.reference } };
-  if (typeof evidence.verifiedAt !== "string" || Number.isNaN(new Date(evidence.verifiedAt).getTime())) return { validation: { status: "FAIL", errorCode: "EVIDENCE_VERIFIED_AT_INVALID", evidenceRef: evidence.reference } };
-  if (!evidence.details || typeof evidence.details !== "object" || Array.isArray(evidence.details)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_DETAILS_MISSING", evidenceRef: evidence.reference } };
-  return { validation: { status: "PASS", evidenceRef: evidence.reference }, details: evidence.details as Record<string, unknown> };
+  try { evidence = JSON.parse(new TextDecoder().decode(bytes)) as BoundEvidence; } catch { return { validation: { status: "FAIL", errorCode: "EVIDENCE_CONTENT_INVALID", evidenceRef: pointer.reference as string } }; }
+  if (evidence.category !== category) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CATEGORY_MISMATCH", evidenceRef: pointer.reference as string } };
+  if (evidence.candidateSha !== candidateSha) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CANDIDATE_SHA_MISMATCH", evidenceRef: pointer.reference as string } };
+  if (evidence.environment !== environment) return { validation: { status: "FAIL", errorCode: "EVIDENCE_ENVIRONMENT_MISMATCH", evidenceRef: pointer.reference as string } };
+  if (evidence.status !== "PASS") return { validation: { status: "FAIL", errorCode: "EVIDENCE_STATUS_NOT_PASS", evidenceRef: pointer.reference as string } };
+  if (typeof evidence.verifiedAt !== "string" || Number.isNaN(new Date(evidence.verifiedAt).getTime())) return { validation: { status: "FAIL", errorCode: "EVIDENCE_VERIFIED_AT_INVALID", evidenceRef: pointer.reference as string } };
+  if (!evidence.details || typeof evidence.details !== "object" || Array.isArray(evidence.details)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_DETAILS_MISSING", evidenceRef: pointer.reference as string } };
+  return { validation: { status: "PASS", evidenceRef: pointer.reference as string }, details: evidence.details as Record<string, unknown> };
 }
 
-export function validateGenericEvidence(raw: string | undefined, candidateSha: string, missingStatus: ReadinessStatus = "BLOCKED_BY_EXTERNAL_ENV"): EvidenceValidation {
-  return parseBoundEvidence(raw, candidateSha, missingStatus).validation;
+function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
+function finiteAtMost(value: unknown, maximum: number): boolean { return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum; }
+
+export async function validateGenericEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus = "BLOCKED_BY_EXTERNAL_ENV"): Promise<EvidenceValidation> {
+  return (await parseBoundEvidence(raw, candidateSha, category, environment, missingStatus)).validation;
 }
 
-export function validateScannerEvidence(raw: string | undefined, candidateSha: string): EvidenceValidation {
-  const parsed = parseBoundEvidence(raw, candidateSha, "BLOCKED_BY_EXTERNAL_ENV");
+export async function validateScannerEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "scanner", "PROD", "BLOCKED_BY_EXTERNAL_ENV");
   if (parsed.validation.status !== "PASS") return parsed.validation;
   const details = parsed.details!;
   return details.provider === "clamav" && details.health === "READY" && details.cleanAccepted === true && details.eicarRejected === true
@@ -63,16 +101,54 @@ export function validateScannerEvidence(raw: string | undefined, candidateSha: s
     : { status: "FAIL", errorCode: "SCANNER_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
 }
 
-export function validateBackupEvidence(raw: string | undefined, candidateSha: string, expected: { region?: string; clusterId?: string }, now = new Date()): EvidenceValidation {
-  const parsed = parseBoundEvidence(raw, candidateSha, "BLOCKED_BY_EXTERNAL_ENV");
+export async function validateBackupEvidence(raw: string | undefined, candidateSha: string, expected: { region?: string; clusterId?: string; vpcId?: string; subnetId?: string }, now = new Date()): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "backup", "PROD", "BLOCKED_BY_EXTERNAL_ENV");
   if (parsed.validation.status !== "PASS") return parsed.validation;
   const details = parsed.details!;
   const snapshotAt = typeof details.snapshotAt === "string" ? new Date(details.snapshotAt) : null;
   const fresh = snapshotAt && !Number.isNaN(snapshotAt.getTime()) && snapshotAt.getTime() <= now.getTime() && now.getTime() - snapshotAt.getTime() <= 86_400_000;
-  return details.provider === "tencent-cynosdb" && details.health === "READY" && details.backupStatus === "SUCCEEDED"
-    && details.region === expected.region && details.clusterId === expected.clusterId && fresh
+  return details.provider === "tencent-cynosdb" && details.health === "READY" && details.backupStatus === "SUCCEEDED" && details.sourceEnvironment === "PROD"
+    && details.region === expected.region && details.clusterId === expected.clusterId && details.vpcId === expected.vpcId && details.subnetId === expected.subnetId && fresh
     ? parsed.validation
     : { status: "FAIL", errorCode: "BACKUP_EVIDENCE_IDENTITY_HEALTH_OR_FRESHNESS_INVALID", evidenceRef: parsed.validation.evidenceRef };
+}
+
+export async function validateMaintenanceEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "maintenance", "PROD", "BLOCKED_BY_EXTERNAL_ENV"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
+  return nonEmpty(details.provider) && details.health === "READY" && details.enterPassed === true && details.exitPassed === true ? parsed.validation : { status: "FAIL", errorCode: "MAINTENANCE_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+}
+
+export async function validateRestoreEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "restore", "TEST", "BLOCKED_BY_EXTERNAL_ENV"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
+  const complete = nonEmpty(details.sourceBackupId) && nonEmpty(details.sourceClusterId) && details.sourceEnvironment === "TEST"
+    && nonEmpty(details.targetClusterId) && details.targetEnvironment === "TEST" && details.validationPassed === true
+    && finiteAtMost(details.rtoHours, 8) && finiteAtMost(details.rpoHours, 24) && details.cleanupCompleted === true;
+  return complete ? parsed.validation : { status: "FAIL", errorCode: "RESTORE_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+}
+
+export async function validateMigrationEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "migration", "TEST", "BLOCKED_BY_SOURCE_DATA"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
+  const complete = nonEmpty(details.sourceSnapshotIdentity) && nonEmpty(details.targetMigrationDatabase) && details.dryRunPassed === true
+    && details.applyPassed === true && details.rerunPassed === true && details.reconciliationPassed === true;
+  return complete ? parsed.validation : { status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+}
+
+export async function validateUatEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "uat", "TEST", "BLOCKED_BY_UAT"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
+  return details.p0Open === 0 && details.p1Open === 0 && details.businessSignoff === true && details.operationsSignoff === true
+    ? parsed.validation : { status: "FAIL", errorCode: "UAT_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+}
+
+export async function validatePreflightEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "preflight", "PROD", "BLOCKED_BY_EXTERNAL_ENV"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
+  return details.checksPassed === true && details.rollbackReady === true && details.changeWindowApproved === true
+    ? parsed.validation : { status: "FAIL", errorCode: "PREFLIGHT_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+}
+
+export async function validateAiEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
+  const parsed = await parseBoundEvidence(raw, candidateSha, "ai", "PROD", "BLOCKED_BY_EXTERNAL_ENV"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
+  return nonEmpty(details.provider) && nonEmpty(details.model) && details.evaluationPassed === true
+    ? parsed.validation : { status: "FAIL", errorCode: "AI_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
 }
 
 export function validateGithubProtection(policy: Record<string, unknown> | null): EvidenceValidation {
