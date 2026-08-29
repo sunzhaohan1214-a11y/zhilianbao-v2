@@ -61,6 +61,15 @@ export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: str
       });
       const completePayload = await completeResponse.json();
       if (!completeResponse.ok) throw new Error(completePayload.error?.message ?? "附件确认失败");
+      if (intent.upload.type === "TEST_MEMORY") {
+        const scanResponse = await fetch(`/api/v2/test/public-attachments/${intent.attachmentId}/scan`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadToken: intent.uploadToken }),
+        });
+        const scanPayload = await scanResponse.json();
+        if (!scanResponse.ok) throw new Error(scanPayload.error?.message ?? "测试附件安全扫描失败");
+      }
       await waitForAttachmentScan(async () => {
         const response = await fetch(`/api/v2/public/demand-leads/attachments/${intent.attachmentId}/complete`, {
           method: "POST",
