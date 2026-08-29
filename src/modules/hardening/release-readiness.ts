@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { readFile, stat } from "node:fs/promises";
+import { isIP } from "node:net";
 
 export const READINESS_STATUSES = [
   "PASS", "FAIL", "BLOCKED_BY_EXTERNAL_ENV", "BLOCKED_BY_SOURCE_DATA", "BLOCKED_BY_UAT", "NOT_APPLICABLE",
@@ -34,6 +36,8 @@ export type EvidenceValidation = { status: ReadinessStatus; errorCode?: string; 
 export type ExternalEvidenceCategory = "scanner" | "backup" | "maintenance" | "restore" | "migration" | "uat" | "preflight" | "ai";
 type EvidencePointer = { reference?: unknown; sourcePath?: unknown };
 type BoundEvidence = { category?: unknown; candidateSha?: unknown; environment?: unknown; status?: unknown; verifiedAt?: unknown; details?: unknown };
+const MAX_EVIDENCE_BYTES = 1_048_576;
+const EVIDENCE_TIMEOUT_MS = 8_000;
 
 export function isCommitSha(value: string | undefined): value is string {
   return Boolean(value && /^[a-f0-9]{40}$/i.test(value));
@@ -50,39 +54,151 @@ function immutableDigest(value: unknown): string | null {
   } catch { return null; }
 }
 
-async function readEvidenceBytes(pointer: EvidencePointer): Promise<Uint8Array> {
-  if (typeof pointer.sourcePath === "string" && pointer.sourcePath.trim()) {
-    const info = await stat(pointer.sourcePath);
-    if (!info.isFile() || info.size > 1_048_576) throw new Error("EVIDENCE_SOURCE_INVALID");
-    return readFile(pointer.sourcePath);
+function sanitizedEvidenceRef(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  if (/^urn:sha256:[a-f0-9]{64}$/i.test(value)) return value;
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch { return undefined; }
+}
+
+function isUnsafeIpv4(value: string): boolean {
+  const parts = value.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127)
+    || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+    || (a === 192 && b === 0) || (a === 192 && b === 2) || (a === 198 && (b === 18 || b === 19 || b === 51))
+    || (a === 203 && b === 0) || a >= 224;
+}
+
+function isUnsafeIpAddress(value: string): boolean {
+  const normalized = value.replace(/^\[|\]$/g, "").toLowerCase();
+  if (isIP(normalized) === 4) return isUnsafeIpv4(normalized);
+  if (isIP(normalized) !== 6) return true;
+  const mappedIpv4 = /(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized)?.[1];
+  if (mappedIpv4) return isUnsafeIpv4(mappedIpv4);
+  const first = Number.parseInt(normalized.split(":")[0] || "0", 16);
+  return normalized === "::" || normalized === "::1" || (first & 0xfe00) === 0xfc00
+    || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00 || normalized.startsWith("2001:db8:");
+}
+
+async function assertSafeHttpsReference(reference: string): Promise<URL> {
+  let url: URL;
+  try { url = new URL(reference); } catch { throw new Error("EVIDENCE_REFERENCE_UNSAFE"); }
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
+  const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
+  if (isIP(hostname)) {
+    if (isUnsafeIpAddress(hostname)) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
+    return url;
   }
-  if (typeof pointer.reference !== "string" || !pointer.reference.startsWith("https://")) throw new Error("EVIDENCE_SOURCE_MISSING");
-  const response = await fetch(pointer.reference, { signal: AbortSignal.timeout(8_000), redirect: "error" });
-  if (!response.ok) throw new Error("EVIDENCE_SOURCE_UNAVAILABLE");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > 1_048_576) throw new Error("EVIDENCE_SOURCE_INVALID");
+  let addresses: Array<{ address: string; family: number }>;
+  try { addresses = await lookup(hostname, { all: true, verbatim: true }); } catch { throw new Error("EVIDENCE_REFERENCE_UNREACHABLE"); }
+  if (!addresses.length || addresses.some(({ address }) => isUnsafeIpAddress(address))) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
+  return url;
+}
+
+async function readLimitedResponse(response: Response): Promise<Uint8Array> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_EVIDENCE_BYTES) throw new Error("EVIDENCE_REFERENCE_TOO_LARGE");
+  if (!response.body) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_EVIDENCE_BYTES) {
+      await reader.cancel();
+      throw new Error("EVIDENCE_REFERENCE_TOO_LARGE");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes;
+}
+
+async function readSourceBytes(sourcePath: string): Promise<Uint8Array> {
+  let info;
+  try { info = await stat(sourcePath); } catch { throw new Error("EVIDENCE_SOURCE_UNREADABLE"); }
+  if (!info.isFile()) throw new Error("EVIDENCE_SOURCE_INVALID");
+  if (info.size > MAX_EVIDENCE_BYTES) throw new Error("EVIDENCE_SOURCE_TOO_LARGE");
+  try { return await readFile(sourcePath); } catch { throw new Error("EVIDENCE_SOURCE_UNREADABLE"); }
+}
+
+async function readReferenceBytes(reference: string): Promise<Uint8Array> {
+  const url = await assertSafeHttpsReference(reference);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(EVIDENCE_TIMEOUT_MS), redirect: "error" });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    throw new Error(name === "TimeoutError" || name === "AbortError" ? "EVIDENCE_REFERENCE_TIMEOUT" : "EVIDENCE_REFERENCE_UNREACHABLE");
+  }
+  if (!response.ok) throw new Error("EVIDENCE_REFERENCE_HTTP_ERROR");
+  return readLimitedResponse(response);
+}
+
+function stableEvidenceError(error: unknown, fallback: string): string {
+  return error instanceof Error && /^EVIDENCE_[A-Z0-9_]+$/.test(error.message) ? error.message : fallback;
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
 }
 
 async function parseBoundEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus): Promise<{ validation: EvidenceValidation; details?: Record<string, unknown> }> {
   if (!raw?.trim()) return { validation: { status: missingStatus, errorCode: "IMMUTABLE_EVIDENCE_MISSING" } };
   let pointer: EvidencePointer;
-  try { pointer = JSON.parse(raw) as EvidencePointer; } catch { return { validation: { status: "FAIL", errorCode: "IMMUTABLE_EVIDENCE_INVALID" } }; }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    pointer = parsed as EvidencePointer;
+  } catch { return { validation: { status: "FAIL", errorCode: "IMMUTABLE_EVIDENCE_INVALID" } }; }
+  const evidenceRef = sanitizedEvidenceRef(pointer.reference);
+  const reference = typeof pointer.reference === "string" ? pointer.reference.trim() : "";
+  const sourcePath = typeof pointer.sourcePath === "string" ? pointer.sourcePath.trim() : "";
+  let isHttpsReference = false;
+  if (reference && !reference.startsWith("urn:sha256:")) {
+    let protocol: string;
+    try { protocol = new URL(reference).protocol; } catch { protocol = ""; }
+    if (protocol !== "https:") return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE", evidenceRef } };
+    isHttpsReference = true;
+  }
   const digest = immutableDigest(pointer.reference);
-  if (!digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_NOT_IMMUTABLE" } };
-  let bytes: Uint8Array;
-  try { bytes = await readEvidenceBytes(pointer); } catch { return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_UNREADABLE", evidenceRef: pointer.reference as string } }; }
-  const actualDigest = createHash("sha256").update(bytes).digest("hex");
-  if (actualDigest !== digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_DIGEST_MISMATCH", evidenceRef: pointer.reference as string } };
+  if (!digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_NOT_IMMUTABLE", evidenceRef } };
+  if (!sourcePath && !isHttpsReference) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_MISSING", evidenceRef } };
+  let sourceBytes: Uint8Array | undefined;
+  if (sourcePath) {
+    try { sourceBytes = await readSourceBytes(sourcePath); } catch (error) { return { validation: { status: "FAIL", errorCode: stableEvidenceError(error, "EVIDENCE_SOURCE_UNREADABLE"), evidenceRef } }; }
+    if (createHash("sha256").update(sourceBytes).digest("hex") !== digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_DIGEST_MISMATCH", evidenceRef } };
+  }
+  let referenceBytes: Uint8Array | undefined;
+  if (isHttpsReference) {
+    try { referenceBytes = await readReferenceBytes(reference); } catch (error) { return { validation: { status: "FAIL", errorCode: stableEvidenceError(error, "EVIDENCE_REFERENCE_UNREACHABLE"), evidenceRef } }; }
+    if (createHash("sha256").update(referenceBytes).digest("hex") !== digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_DIGEST_MISMATCH", evidenceRef } };
+  }
+  if (sourceBytes && referenceBytes && !sameBytes(sourceBytes, referenceBytes)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_REFERENCE_MISMATCH", evidenceRef } };
+  const bytes = sourceBytes ?? referenceBytes;
+  if (!bytes) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_MISSING", evidenceRef } };
   let evidence: BoundEvidence;
-  try { evidence = JSON.parse(new TextDecoder().decode(bytes)) as BoundEvidence; } catch { return { validation: { status: "FAIL", errorCode: "EVIDENCE_CONTENT_INVALID", evidenceRef: pointer.reference as string } }; }
-  if (evidence.category !== category) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CATEGORY_MISMATCH", evidenceRef: pointer.reference as string } };
-  if (evidence.candidateSha !== candidateSha) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CANDIDATE_SHA_MISMATCH", evidenceRef: pointer.reference as string } };
-  if (evidence.environment !== environment) return { validation: { status: "FAIL", errorCode: "EVIDENCE_ENVIRONMENT_MISMATCH", evidenceRef: pointer.reference as string } };
-  if (evidence.status !== "PASS") return { validation: { status: "FAIL", errorCode: "EVIDENCE_STATUS_NOT_PASS", evidenceRef: pointer.reference as string } };
-  if (typeof evidence.verifiedAt !== "string" || Number.isNaN(new Date(evidence.verifiedAt).getTime())) return { validation: { status: "FAIL", errorCode: "EVIDENCE_VERIFIED_AT_INVALID", evidenceRef: pointer.reference as string } };
-  if (!evidence.details || typeof evidence.details !== "object" || Array.isArray(evidence.details)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_DETAILS_MISSING", evidenceRef: pointer.reference as string } };
-  return { validation: { status: "PASS", evidenceRef: pointer.reference as string }, details: evidence.details as Record<string, unknown> };
+  try { evidence = JSON.parse(new TextDecoder().decode(bytes)) as BoundEvidence; } catch { return { validation: { status: "FAIL", errorCode: "EVIDENCE_CONTENT_INVALID", evidenceRef } }; }
+  if (evidence.category !== category) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CATEGORY_MISMATCH", evidenceRef } };
+  if (evidence.candidateSha !== candidateSha) return { validation: { status: "FAIL", errorCode: "EVIDENCE_CANDIDATE_SHA_MISMATCH", evidenceRef } };
+  if (evidence.environment !== environment) return { validation: { status: "FAIL", errorCode: "EVIDENCE_ENVIRONMENT_MISMATCH", evidenceRef } };
+  if (evidence.status !== "PASS") return { validation: { status: "FAIL", errorCode: "EVIDENCE_STATUS_NOT_PASS", evidenceRef } };
+  if (typeof evidence.verifiedAt !== "string" || Number.isNaN(new Date(evidence.verifiedAt).getTime())) return { validation: { status: "FAIL", errorCode: "EVIDENCE_VERIFIED_AT_INVALID", evidenceRef } };
+  if (!evidence.details || typeof evidence.details !== "object" || Array.isArray(evidence.details)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_DETAILS_MISSING", evidenceRef } };
+  return { validation: { status: "PASS", evidenceRef }, details: evidence.details as Record<string, unknown> };
 }
 
 function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }

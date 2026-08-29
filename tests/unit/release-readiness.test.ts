@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   REQUIRED_CI_JOBS, buildReleaseReadiness, readinessExitCode, validateAiEvidence, validateBackupEvidence,
   validateExactHeadCi, validateGenericEvidence, validateGithubProtection, validateMaintenanceEvidence,
@@ -21,6 +21,15 @@ async function evidence(category: ExternalEvidenceCategory, environment: "TEST" 
   await writeFile(sourcePath, content);
   const digest = createHash("sha256").update(content).digest("hex");
   return JSON.stringify({ reference: `urn:sha256:${digest}`, sourcePath });
+}
+
+async function evidenceFixture(category: ExternalEvidenceCategory, environment: "TEST" | "PROD", details: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}) {
+  const directory = await mkdtemp(join(tmpdir(), "zlb-evidence-")); temporaryDirectories.push(directory);
+  const sourcePath = join(directory, `${category}.json`);
+  const content = JSON.stringify({ category, candidateSha, environment, status: "PASS", verifiedAt, details, ...overrides });
+  await writeFile(sourcePath, content);
+  const digest = createHash("sha256").update(content).digest("hex");
+  return { content, digest, sourcePath, reference: `https://93.184.216.34/evidence.json?sha256=${digest}` };
 }
 
 const blocked = (): EvidenceValidation => ({ status: "BLOCKED_BY_EXTERNAL_ENV", errorCode: "TEST_EVIDENCE_MISSING" });
@@ -45,7 +54,104 @@ async function completeExternalEvidence() {
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  vi.unstubAllGlobals();
   delete process.env.REAL_RESTORE_DRILL_PASSED; delete process.env.FULL_V1_REHEARSAL_PASSED; delete process.env.UAT_SIGNED_OFF; delete process.env.REAL_MAINTENANCE_PROVIDER_READY;
+});
+
+describe("M3-008 external evidence sources", () => {
+  it("accepts valid sourcePath-only evidence bound by an immutable digest", async () => {
+    await expect(validateGenericEvidence(await evidence("uat", "TEST"), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it("rejects sourcePath-only evidence with a digest mismatch", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `urn:sha256:${"0".repeat(64)}` }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+  });
+
+  it("accepts valid HTTPS-reference-only evidence", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content)));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it("fails closed when an HTTPS-reference-only source is unreachable", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network unavailable"); }));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNREACHABLE" });
+  });
+
+  it("sourcePath must not bypass declared HTTPS reference", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network unavailable"); }));
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+  });
+
+  it("rejects a valid sourcePath when the HTTPS reference digest mismatches", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(`${fixture.content} `)));
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+  });
+
+  it("rejects a sourcePath digest mismatch even when HTTPS content is valid", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    await writeFile(fixture.sourcePath, `${fixture.content} `);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content)));
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+  });
+
+  it("accepts matching valid sourcePath and HTTPS content", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content)));
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it("rejects different sourcePath and HTTPS content", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content.replace('"status":"PASS"', '"status":"FAIL"'))));
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+  });
+
+  it("rejects unsafe reference schemes", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `file://${fixture.sourcePath}?sha256=${fixture.digest}` }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+  });
+
+  it("rejects loopback, private, link-local, and metadata HTTPS targets before fetch", async () => {
+    const digest = "0".repeat(64);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    for (const host of ["127.0.0.1", "10.0.0.1", "169.254.169.254"]) {
+      await expect(validateGenericEvidence(JSON.stringify({ reference: `https://${host}/evidence.json?sha256=${digest}` }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on HTTPS reference timeout", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("timed out", "TimeoutError"); }));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TIMEOUT" });
+  });
+
+  it("fails closed on non-2xx HTTPS responses", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503 })));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_HTTP_ERROR" });
+  });
+
+  it("fails closed on oversized HTTPS responses", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(1_048_577))));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TOO_LARGE" });
+  });
+
+  it("does not expose sensitive HTTPS query values in validation output", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const reference = `${fixture.reference}&token=secret-value`;
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network unavailable"); }));
+    const result = await validateGenericEvidence(JSON.stringify({ reference }), candidateSha, "uat", "TEST");
+    expect(result).toMatchObject({ status: "FAIL", evidenceRef: "https://93.184.216.34/evidence.json" });
+    expect(JSON.stringify(result)).not.toContain("secret-value");
+  });
 });
 
 describe("M3-008 production release evidence", () => {
@@ -62,7 +168,7 @@ describe("M3-008 production release evidence", () => {
   it("re-reads referenced content and rejects a mismatched SHA-256", async () => {
     const pointer = JSON.parse(await evidence("uat", "TEST", { p0Open: 0, p1Open: 0, businessSignoff: true, operationsSignoff: true })) as { reference: string; sourcePath: string };
     await writeFile(pointer.sourcePath, JSON.stringify({ category: "uat", candidateSha, environment: "TEST", status: "PASS", verifiedAt, details: { p0Open: 1 } }));
-    await expect(validateUatEvidence(JSON.stringify(pointer), candidateSha)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_DIGEST_MISMATCH" });
+    await expect(validateUatEvidence(JSON.stringify(pointer), candidateSha)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_SOURCE_DIGEST_MISMATCH" });
   });
 
   it("rejects category, candidate, environment, and category-schema mismatches", async () => {
