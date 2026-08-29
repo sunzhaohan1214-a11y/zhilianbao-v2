@@ -545,6 +545,10 @@ M1-008 home
 
 ## M3.4 实现记录（2026-08-28）
 
-固定五张结构化月度工作台账、历史 as-of Demand/批次/久未更新/待成效口径、范围解析、APPROVED Outcome Decimal 汇总、异步 Job、私有 Attachment、Excel 安全、响应式入口与专项测试进入本里程碑实现。不含报销、求助、排名、AI 叙述、M4 工作台或 V1 Migration 执行。
+状态：已实现并合入 main。固定五张结构化月度工作台账、历史 as-of Demand/批次/久未更新/待成效口径、范围解析、APPROVED Outcome Decimal 汇总、异步 Job、私有 Attachment、Excel 安全、响应式入口与专项测试进入本里程碑实现。不含报销、求助、排名、AI 叙述、M4 工作台或 V1 Migration 执行。
 
-**IMPLEMENTATION_PLAN.md v1.1 END**
+## M3-007 status
+
+Status: implemented in PR #28 and pending merge. System settings/versioning, Asia/Shanghai work calendar, capability-driven AdminShell, high-risk overview, batch/import pre-backup, map activation preview, AI/OCR config lifecycle and evaluation gate, health/storage aggregation, full redacted audit, backup catalog/provider abstraction, restore/maintenance orchestration and UI/API are implemented. Pre-merge recovery hardening adds explicit fake-provider gating, normalized environment and exact-schema restore guards, rechecked Provider preview, real post-restore validation, reentrant crash recovery/finalization, Provider-only catalog ingest, evidence-based compliance, complete restore UI actions, read-only `NOT_WIRED` SLA settings, and expanded Batch/Map impact previews. Production providers remain fail-closed; no real provider is configured, no real restore was executed, no migration was added, and M3-008 is not started.
+
+**IMPLEMENTATION_PLAN.md v1.2 END**

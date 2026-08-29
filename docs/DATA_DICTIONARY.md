@@ -1457,4 +1457,11 @@ M3-006 dictionary additions:
 - `MigrationBatch.reconciliation_json.resolutionSha256`: SHA-256 of the strictly validated resolution file; `resolution_version` stores its declared version.
 - `LegacyMigrationMap.source_entity=DEMAND_PROGRESS|ATTACHMENT`: independent immutable lineage for nested progress and copied attachments.
 
-**DATA_DICTIONARY.md v1.1 END**
+## M3-007 governed values
+
+- Setting keys are limited by `SYSTEM_SETTING_REGISTRY`; database rows outside the registry never become runtime configuration.
+- Defaults proven by PRD/code are claim cycle 30 natural days and normal/urgent review SLA 3/1 workdays. Admin contact may remain uninitialized. `system.business_timezone=Asia/Shanghai` is read-only.
+- Calendar `day_type` is `WORKDAY|HOLIDAY`; explicit override wins over Monday-Friday defaults.
+- Backup status is `REQUESTED|RUNNING|SUCCEEDED|FAILED`; Restore status is `DRAFT|PREVIEWED|CONFIRMED|EXECUTING|PROVIDER_SUCCEEDED|VALIDATION_REQUIRED|SUCCEEDED|FAILED|CANCELED`.
+
+**DATA_DICTIONARY.md v1.2 END**

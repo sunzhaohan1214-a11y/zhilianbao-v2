@@ -296,4 +296,8 @@ CI建议检查：
 - 人工消歧只返回授权后的最小 Candidate Summary：人员手机号脱敏，企业信用代码部分脱敏，人才不返回本人电话、邮箱或简历地址；候选仍只存在于 ADMIN/SUPER Import detail。
 - 人员并发 guard 只持久化带类型前缀的手机号 SHA-256，不在 guard 或日志中保存手机号明文。
 
-**SECURITY_SPEC.md v1.0 END**
+## M3-007 System Admin security
+
+ADMIN retains only its existing operational capabilities and cannot see or directly enter System Admin. System overview, full audit, sensitive health/storage details, system mutation, backup and restore require SUPER capabilities. AI config mutation additionally requires `ai.service_manage`. System settings never store database, COS, session, LLM/OCR or private-key values. Audit rendering recursively redacts phones, credentials, tokens, prompts/responses, invoice/body/content fields and masks IP detail. Production and deployment TEST/UAT default to unavailable Backup/Maintenance providers and fail closed. Fakes require the server-only double gate `ENABLE_FAKE_SYSTEM_PROVIDERS=true` and (`NODE_ENV=test` or `APP_ENV=test`); this flag is confined to the Playwright server and is not a deployment default. No SQL console, environment editor, role editor, migration execution UI, backup download/delete, or mobile restore entry exists.
+
+**SECURITY_SPEC.md v1.1 END**

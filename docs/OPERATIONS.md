@@ -457,4 +457,12 @@ WORKER_RUN_ONCE=true npm run start:worker
 
 单轮模式执行 stale recovery、有限批次 Outbox consume 和当前可领取 Job 后退出。Outbox handler 只允许短事务内 DB side effect 或幂等转 Job，外部网络调用必须交给 Job handler。监控至少区分 WAITING backlog、stale RUNNING、FAILED Job、未发布 Outbox 和 `failed_at` 毒消息。
 
-**OPERATIONS.md v1.0 END**
+## M3-007 backup and restore operations
+
+Expected policy remains nightly incremental/30 days, weekly full/12 weeks, critical pre-operation snapshots/180 days, RPO <=24h and RTO <=8h. The web process never runs `mysqldump` or exposes snapshot bytes. Without a real cloud `BackupProvider`, backup health is NOT_CONFIGURED/UNKNOWN and manual/pre-operation backup returns 503. Compliance is a five-part PASS/FAIL/UNKNOWN matrix; missing retention/policy evidence is UNKNOWN, never compliant. Provider catalog sync ingests metadata only.
+
+Restore is same-environment, same-provider, exact-schema only. Preview captures runtime environment, app version, Provider readiness and schema `20260901140000_m3_system_admin`; confirmation rechecks each value and reruns Provider preview. Backup and restore starts use stable Provider idempotency keys so an unknown network result remains resumable rather than being declared failed.
+
+Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. After Provider success, automatic validation performs `SELECT 1`, checks the required Prisma migration is finished/not rolled back/without failure logs, enforces exactly one current ACTIVE batch and at least one NORMAL account, probes up to three formal PASSED attachment objects through the configured storage adapter, and proves Job/Outbox queries execute. Any required failure keeps the restore active and maintenance enabled. Manual completion is reentrant, requires successful validation and explicit inspection, releases only the matching maintenance operation, and invalidates all sessions. Real provider integration and controlled restore drill remain M3-008.
+
+**OPERATIONS.md v1.1 END**

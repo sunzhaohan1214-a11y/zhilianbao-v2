@@ -27,7 +27,14 @@ test("Admin creates TEST boundary versions and concurrent activation leaves exac
   await login(page, e2eUsers.admin); await page.goto("/admin/maps"); await expect(page.getByRole("heading", { name: "边界与派出单位坐标" })).toBeVisible();
   const result = await page.evaluate(async ({ areaId }) => {
     const make = async (offset: number) => { const geoJson = { type: "Feature", properties: { name: "TEST ONLY" }, geometry: { type: "Polygon", coordinates: [[[119.3 + offset, 33.2], [119.4 + offset, 33.2], [119.4 + offset, 33.3], [119.3 + offset, 33.2]]] } }; const response = await fetch("/api/v2/admin/map/boundaries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ areaId, geoJson, sourceFilename: "TEST_ONLY.geojson", reason: `E2E create ${offset}` }) }); return (await response.json()).data; };
-    const versions = await Promise.all([make(0), make(0.01)]); const statuses = await Promise.all(versions.map((version) => fetch(`/api/v2/admin/map/boundaries/${version.id}/activate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "ACTIVATE", reason: "E2E concurrent activation" }) }).then((response) => response.status))); const list = await fetch(`/api/v2/map/boundaries/${areaId}?history=1`).then((response) => response.json()); return { statuses, items: list.data.items };
+    const versions = await Promise.all([make(0), make(0.01)]);
+    const previews = await Promise.all(versions.map((version) => fetch(`/api/v2/admin/map/boundaries/${version.id}/activate`).then((response) => response.json()).then((payload) => payload.data)));
+    const statuses = await Promise.all(versions.map((version, index) => fetch(`/api/v2/admin/map/boundaries/${version.id}/activate`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({ confirmation: "ACTIVATE", confirm: true, reason: "E2E concurrent activation", expectedCurrentBoundaryId: previews[index].expectedCurrentBoundaryId, expectedTargetVersion: previews[index].expectedTargetVersion, previewToken: previews[index].previewToken }),
+    }).then((response) => response.status)));
+    const list = await fetch(`/api/v2/map/boundaries/${areaId}?history=1`).then((response) => response.json()); return { statuses, items: list.data.items };
   }, { areaId: enterpriseE2e.areaAId });
-  expect(result.statuses).toEqual([200, 200]); expect(result.items).toHaveLength(2); expect(result.items.filter((item: { isCurrent: boolean }) => item.isCurrent)).toHaveLength(1);
+  expect(result.statuses.toSorted()).toEqual([200, 409]); expect(result.items).toHaveLength(2); expect(result.items.filter((item: { isCurrent: boolean }) => item.isCurrent)).toHaveLength(1);
 });

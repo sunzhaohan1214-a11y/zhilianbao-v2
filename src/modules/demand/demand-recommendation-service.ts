@@ -173,10 +173,13 @@ export class DemandRecommendationService {
       where: { demandId: demand.id, stage: "CURRENT", currentKey: 1 },
       include: { _count: { select: { items: true } } },
     });
+    const setting = await tx.systemSetting.findUnique({ where: { key: "demand.claim_cycle_natural_days" }, select: { valueJson: true } });
+    const configuredDays = typeof setting?.valueJson === "number" ? setting.valueJson : undefined;
     return isAlumniFallbackEligible({
       demand,
       latestCurrentRun: currentRun ? { status: currentRun.status, itemCount: currentRun._count.items } : null,
       now,
+      claimPeriodDays: configuredDays,
     });
   }
 
@@ -584,16 +587,19 @@ export class DemandRecommendationService {
     })) : [];
     const handlerOptions = isAdministrator(input.actor) ? await this.listTownshipHandlerOptions(demand.responsibleAreaId) : [];
     const responsibility = fullViewer ? await this.getCurrentDemandResponsibility(demand.id) : null;
+    const claimSetting = await this.repository.transaction((tx) => tx.systemSetting.findUnique({ where: { key: "demand.claim_cycle_natural_days" }, select: { valueJson: true } }));
+    const claimPeriodDays = typeof claimSetting?.valueJson === "number" ? claimSetting.valueJson : undefined;
     return {
       currentRun: selected ? safeRun(selected) : null,
       items: selected?.items.map(mapItem) ?? [],
       currentRuns: visibleRuns.map((run) => ({ ...safeRun(run), items: run.items.map(mapItem) })),
       runHistory,
       townshipHandlerOptions: handlerOptions,
-      claimDeadlineAt: getClaimDeadline(demand),
+      claimDeadlineAt: getClaimDeadline(demand, claimPeriodDays),
       alumniFallbackEligible: isAlumniFallbackEligible({
         demand,
         latestCurrentRun: currentRunForGate ? { status: currentRunForGate.status, itemCount: currentRunForGate._count.items } : null,
+        claimPeriodDays,
       }),
       demandAlreadyClaimed: demand.status !== "PENDING_CLAIM" || demand.currentOwnerPersonId !== null,
       responsibility,

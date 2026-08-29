@@ -6,6 +6,8 @@ import type { PermissionActor } from "@/modules/permissions/types";
 import { writeFoundationAudit, writeFoundationTransition, type MutationContext } from "./audit";
 import { FoundationError } from "./errors";
 import { batchActivationSchema, batchCloseSchema, batchCreateSchema, groupLeaderSchema, membershipSchema, membershipUpdateSchema } from "./schemas";
+import { BackupService } from "@/modules/system/backup-service";
+import { findSystemCommand, requireIdempotencyKey, saveSystemCommand, stableHash } from "@/modules/system/command";
 
 type ServiceInput = { actor: PermissionActor; context?: MutationContext };
 
@@ -14,7 +16,7 @@ function optional(value: string | null | undefined) { return value?.trim() ? val
 function isUnique(error: unknown): boolean { return typeof error === "object" && error !== null && "code" in error && error.code === "P2002"; }
 
 export class BatchService {
-  constructor(private readonly prisma = getPrismaClient()) {}
+  constructor(private readonly prisma = getPrismaClient(), private readonly backups = new BackupService(prisma)) {}
 
   async list(input: ServiceInput) {
     await authorizeActor({ actor: input.actor, action: "member.batch.manage", resource: { resourceType: "batch", requiredScope: "GLOBAL_OPERATIONAL" } });
@@ -48,25 +50,49 @@ export class BatchService {
 
   async activationPreview(input: ServiceInput & { batchId: string }) {
     await authorizeActor({ actor: input.actor, action: "member.batch.manage", resource: { resourceType: "batch", requiredScope: "SYSTEM" } });
-    const [target, current] = await Promise.all([
+    const now = new Date(); const [target, current] = await Promise.all([
       this.prisma.batch.findUnique({ where: { id: input.batchId }, include: { _count: { select: { memberships: true } } } }),
-      this.prisma.batch.findMany({ where: { isCurrent: true }, select: { id: true, name: true, status: true } }),
+      this.prisma.batch.findMany({ where: { isCurrent: true }, include: { _count: { select: { memberships: true } } } }),
     ]);
     if (!target) throw new FoundationError("BATCH_NOT_FOUND", "批次不存在");
     if (target.status === "CLOSED") throw new FoundationError("BATCH_STATE_CONFLICT", "已关闭批次不能激活");
     if (current.length > 1) throw new FoundationError("BATCH_STATE_CONFLICT", "当前批次配置不唯一");
-    return {
+    const currentId = current[0]?.id ?? null; const activeRelationWhere = { effectiveAt: { lte: now }, OR: [{ expiredAt: null }, { expiredAt: { gt: now } }] };
+    const [currentLeaders, targetLeaders, currentMinisters, targetMinisters, currentOwnerInProgress, crossBatchDemands, backupHealth] = await Promise.all([
+      currentId ? this.prisma.groupLeaderAssignment.count({ where: { batchId: currentId, ...activeRelationWhere } }) : 0,
+      this.prisma.groupLeaderAssignment.count({ where: { batchId: target.id, ...activeRelationWhere } }),
+      currentId ? this.prisma.roleAssignment.count({ where: { roleCode: "MINISTER", ...activeRelationWhere, person: { batchMemberships: { some: { batchId: currentId, status: "ACTIVE", startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] } } } } }) : 0,
+      this.prisma.roleAssignment.count({ where: { roleCode: "MINISTER", ...activeRelationWhere, person: { batchMemberships: { some: { batchId: target.id, status: "ACTIVE", startDate: { lte: now }, OR: [{ endDate: null }, { endDate: { gt: now } }] } } } } }),
+      currentId ? this.prisma.demand.count({ where: { status: "IN_PROGRESS", currentOwnerPerson: { batchMemberships: { some: { batchId: currentId, status: "ACTIVE" } } } } }) : 0,
+      currentId ? this.prisma.demand.count({ where: { status: "IN_PROGRESS", currentOwnerPerson: { batchMemberships: { some: { batchId: currentId, status: "ACTIVE" } }, NOT: { batchMemberships: { some: { batchId: target.id, status: "ACTIVE" } } } } } }) : 0,
+      this.backups.health(),
+    ]);
+    const backupReadiness = { provider: backupHealth.provider.provider, status: backupHealth.provider.status, ready: backupHealth.provider.ready };
+    const payload = {
       target: { id: target.id, name: target.name, membershipCount: target._count.memberships },
-      current: current[0] ?? null,
-      expectedCurrentBatchId: current[0]?.id ?? null,
+      current: current[0] ? { id: current[0].id, name: current[0].name, status: current[0].status, membershipCount: current[0]._count.memberships } : null,
+      expectedCurrentBatchId: currentId,
+      relationSummary: { current: { groupLeaderCount: currentLeaders, ministerCount: currentMinisters }, target: { groupLeaderCount: targetLeaders, ministerCount: targetMinisters } },
+      demandImpact: { currentOwnerInProgressCount: currentOwnerInProgress, crossBatchDemandCount: crossBatchDemands, warning: crossBatchDemands > 0 ? "存在当前负责人不属于目标批次的进行中需求，需要人工安排交接。" : null },
+      backupReadiness,
       warning: "切换后原团长权限立即失效，团员权限缓存将刷新。",
     };
+    return { ...payload, previewToken: stableHash(payload) };
   }
 
-  async activate(input: ServiceInput & { batchId: string; command: unknown }) {
+  async activate(input: ServiceInput & { batchId: string; command: unknown; idempotencyKey: string | null }) {
     await authorizeActor({ actor: input.actor, action: "member.batch.manage", resource: { resourceType: "batch", requiredScope: "SYSTEM" } });
     const command = batchActivationSchema.parse(input.command);
+    const keyHash = requireIdempotencyKey(input.idempotencyKey);
+    const payloadHash = stableHash({ batchId: input.batchId, command });
+    const prior = await this.prisma.$transaction((tx) => findSystemCommand(tx, { actorPersonId: input.actor.personId, action: "BATCH_SWITCH", keyHash, payloadHash }));
+    if (prior) return prior.responseJson;
+    const preview = await this.activationPreview({ ...input, batchId: input.batchId });
+    if (preview.previewToken !== command.previewToken || preview.expectedCurrentBatchId !== command.expectedCurrentBatchId) throw new FoundationError("BATCH_ACTIVATION_STALE", "批次影响预览已变化，请重新确认");
+    const backup = await this.backups.requestPreOperation({ ...input, type: "PRE_BATCH_SWITCH", reason: command.reason, idempotencyKey: `batch-switch:${input.idempotencyKey}` });
     return this.prisma.$transaction(async (tx) => {
+      const replay = await findSystemCommand(tx, { actorPersonId: input.actor.personId, action: "BATCH_SWITCH", keyHash, payloadHash });
+      if (replay) return replay.responseJson;
       await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM batches ORDER BY id FOR UPDATE`;
       const target = await tx.batch.findUnique({ where: { id: input.batchId } });
       if (!target) throw new FoundationError("BATCH_NOT_FOUND", "批次不存在");
@@ -105,8 +131,9 @@ export class BatchService {
         tx.batch.count({ where: { isCurrent: true, status: "ACTIVE" } }),
       ]);
       if (currentCount !== 1 || activeCurrentCount !== 1) throw new FoundationError("BATCH_STATE_CONFLICT", "批次切换未能保持唯一有效当前批次");
-      await writeFoundationTransition(tx, { ...input, entityType: "BATCH", entityId: target.id, fromState: target.status, toState: "ACTIVE_CURRENT", actionCode: "BATCH_ACTIVATED", metadata: { previousCurrentBatchId: currentId } });
-      await writeFoundationAudit(tx, { ...input, actionCode: "BATCH_ACTIVATED", entityType: "BATCH", entityId: target.id, before: { currentBatchId: currentId }, after: { currentBatchId: target.id } });
+      await writeFoundationTransition(tx, { ...input, entityType: "BATCH", entityId: target.id, fromState: target.status, toState: "ACTIVE_CURRENT", actionCode: "BATCH_ACTIVATED", reason: command.reason, metadata: { previousCurrentBatchId: currentId, preBackupRecordId: backup.id } });
+      await writeFoundationAudit(tx, { ...input, actionCode: "BATCH_ACTIVATED", entityType: "BATCH", entityId: target.id, reason: command.reason, before: { currentBatchId: currentId }, after: { currentBatchId: target.id, preBackupRecordId: backup.id } });
+      await saveSystemCommand(tx, { actorPersonId: input.actor.personId, action: "BATCH_SWITCH", keyHash, payloadHash, aggregateType: "BATCH", aggregateId: target.id, response: { id: updated.id, currentBatchId: updated.id, preBackupRecordId: backup.id } });
       return updated;
     });
   }

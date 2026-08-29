@@ -36,7 +36,10 @@ export const batchCreateSchema = z.object({
 
 export const batchActivationSchema = z.object({
   confirmation: z.literal("ACTIVATE"),
+  confirm: z.literal(true),
+  reason: text(500),
   expectedCurrentBatchId: z.union([z.uuid(), z.null()]),
+  previewToken: z.string().length(64),
 }).strict();
 
 export const batchCloseSchema = z.object({ reason: text(500) }).strict();

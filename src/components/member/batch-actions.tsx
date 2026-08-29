@@ -16,8 +16,9 @@ export function BatchActions({ batches, members, canSwitchCurrentBatch, canAssig
     const previewResponse = await fetch(`/api/v2/admin/batches/${batchId}/activate`);
     const preview = await previewResponse.json();
     if (!previewResponse.ok) return setMessage(preview.error?.message ?? "无法读取影响范围");
-    if (!window.confirm(`${preview.data.warning}\n确认切换到 ${preview.data.target.name}？`)) return setMessage("已取消");
-    const response = await fetch(`/api/v2/admin/batches/${batchId}/activate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "ACTIVATE", expectedCurrentBatchId: preview.data.expectedCurrentBatchId }) });
+    const reason = window.prompt("请输入批次切换原因（切换前必须完成云快照）");
+    if (!reason || !window.confirm(`${preview.data.warning}\n备份状态：${preview.data.backupReadiness.provider.status}\n确认切换到 ${preview.data.target.name}？`)) return setMessage("已取消");
+    const response = await fetch(`/api/v2/admin/batches/${batchId}/activate`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ confirmation: "ACTIVATE", confirm: true, reason, expectedCurrentBatchId: preview.data.expectedCurrentBatchId, previewToken: preview.data.previewToken }) });
     const payload = await response.json(); setMessage(response.ok ? "当前批次已切换，请刷新页面" : payload.error?.message ?? "切换失败");
   }
   async function leader(formData: FormData) {

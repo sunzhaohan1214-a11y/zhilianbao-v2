@@ -14,9 +14,15 @@ export type StoredObjectHead = {
   sizeBytes: number;
 };
 
+export type StorageHealthProbe = {
+  configured: boolean;
+  reachable: boolean;
+};
+
 export interface StorageAdapter {
   readonly bucket: string;
   readonly region: string;
+  healthProbe(): Promise<StorageHealthProbe>;
   createUploadAuthorization(input: { objectKey: string; expiresInSeconds: number }): Promise<UploadAuthorization>;
   headObject(objectKey: string): Promise<StoredObjectHead>;
   promoteObject(stagingObjectKey: string, finalObjectKey: string): Promise<StoredObjectHead>;

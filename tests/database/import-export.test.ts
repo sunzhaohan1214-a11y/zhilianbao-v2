@@ -6,12 +6,15 @@ import { getPrismaClient } from "@/lib/db/prisma";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { DataExportService } from "@/modules/import-export/export-service";
 import { ImportService } from "@/modules/import-export/import-service";
+import { ImportRepository } from "@/modules/import-export/repository";
 import { resolveCapabilities, type PermissionActor } from "@/modules/permissions";
+import { BackupService } from "@/modules/system/backup-service";
+import { FakeBackupProvider } from "@/modules/system/backup-provider";
 
 process.env.APP_ENV = "test";
 
 const prisma = getPrismaClient();
-const importService = new ImportService();
+const importService = new ImportService(new ImportRepository(prisma), new BackupService(prisma, new FakeBackupProvider()));
 const exportService = new DataExportService();
 const personIds: string[] = []; const accountIds: string[] = []; const areaIds: string[] = []; const batchIds: string[] = []; const attachmentIds: string[] = [];
 const importedPhones: string[] = []; const enterpriseIds: string[] = [];
@@ -53,6 +56,8 @@ beforeAll(async () => {
 afterAll(async () => {
   const importedPeople = await prisma.person.findMany({ where: { contactPhone: { in: importedPhones } }, select: { id: true, account: { select: { id: true } } } });
   const allPeople = [...personIds, ...importedPeople.map(({ id }) => id)]; const allAccounts = [...accountIds, ...importedPeople.flatMap(({ account }) => account ? [account.id] : [])];
+  await prisma.systemCommandIdempotency.deleteMany({ where: { actorPersonId: { in: allPeople } } });
+  await prisma.backupRecord.deleteMany({ where: { createdByPersonId: { in: allPeople } } });
   await prisma.auditLog.deleteMany({ where: { OR: [{ actorPersonId: { in: allPeople } }, { actorAccountId: { in: allAccounts } }, { entityType: { in: ["IMPORT_BATCH", "IMPORT_ROW", "ENTERPRISE_EXPORT", "TALENT_EXPORT"] } }] } });
   await prisma.stateTransitionHistory.deleteMany({ where: { actorPersonId: { in: allPeople } } });
   await prisma.importApplySnapshot.deleteMany({ where: { batchId: { in: batchIds } } }); await prisma.importCommandIdempotency.deleteMany({ where: { batchId: { in: batchIds } } });
@@ -75,14 +80,14 @@ describe("M3-005 real MySQL atomic import", () => {
     const credit = `91321023${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
     const body = await workbook(["企业名称", "信用代码", "镇区", "地址", "主营产品", "联系人", "联系人电话"], [["M3原子企业", credit, (await prisma.administrativeArea.findUniqueOrThrow({ where: { id: areaA } })).name, "测试路1号", "装备", "联系人甲", "13800009101"]]);
     const batch = await createBatch("ENTERPRISE", body, "enterprise.xlsx"); expect(batch.status).toBe("PREVIEW_READY"); expect(batch.blockingRowCount).toBe(0);
-    const key = randomUUID(); const results = await Promise.all([1, 2].map(() => importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: batch.previewVersion }, idempotencyKey: key })));
+    const key = randomUUID(); const results = await Promise.all([1, 2].map(() => importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: batch.previewVersion }, idempotencyKey: key })));
     expect(results[0]).toEqual(results[1]); const enterprise = await prisma.enterprise.findUniqueOrThrow({ where: { creditCode: credit } }); enterpriseIds.push(enterprise.id);
     expect(await prisma.enterprise.count({ where: { creditCode: credit } })).toBe(1); expect(await prisma.enterpriseVersion.count({ where: { enterpriseId: enterprise.id } })).toBe(1);
     expect(await prisma.importApplySnapshot.count({ where: { batchId: batch.id, createdEntityId: enterprise.id } })).toBe(1);
 
     const otherCredit = `91321023${randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase()}`;
     const conflictingBatch = await createBatch("ENTERPRISE", await workbook(["企业名称", "信用代码", "镇区", "地址", "主营产品"], [["M3幂等冲突企业", otherCredit, (await prisma.administrativeArea.findUniqueOrThrow({ where: { id: areaA } })).name, "测试路2号", "装备"]]), "idempotency-conflict.xlsx");
-    await expect(importService.confirm({ actor: admin, batchId: conflictingBatch.id, body: { confirm: true, expectedPreviewVersion: conflictingBatch.previewVersion }, idempotencyKey: key })).rejects.toMatchObject({ code: "IMPORT_IDEMPOTENCY_CONFLICT" });
+    await expect(importService.confirm({ actor: admin, batchId: conflictingBatch.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: conflictingBatch.previewVersion }, idempotencyKey: key })).rejects.toMatchObject({ code: "IMPORT_IDEMPOTENCY_CONFLICT" });
     expect(await prisma.enterprise.count({ where: { creditCode: otherCredit } })).toBe(0);
     expect(await prisma.importBatch.findUniqueOrThrow({ where: { id: conflictingBatch.id } })).toMatchObject({ status: "PREVIEW_READY" });
   });
@@ -97,7 +102,7 @@ describe("M3-005 real MySQL atomic import", () => {
       columns: headers.map((sourceHeader, index) => ({ sourceColumn: index + 1, sourceHeader, targetField: ["name", "creditCode", "responsibleArea", "address", "mainProducts"][index] })),
     } });
     expect(refreshed.previewVersion).toBeGreaterThan(oldPreviewVersion);
-    await expect(importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: oldPreviewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "IMPORT_PREVIEW_STALE" });
+    await expect(importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: oldPreviewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "IMPORT_PREVIEW_STALE" });
     expect(await prisma.enterprise.count({ where: { creditCode: credit } })).toBe(0);
   });
 
@@ -106,8 +111,8 @@ describe("M3-005 real MySQL atomic import", () => {
     const areaName = (await prisma.administrativeArea.findUniqueOrThrow({ where: { id: areaA } })).name;
     const winner = await createBatch("ENTERPRISE", await workbook(["企业名称", "信用代码", "镇区", "地址", "主营产品"], [["共享企业", shared, areaName, "地址", "产品"]]), "winner.xlsx");
     const loser = await createBatch("ENTERPRISE", await workbook(["企业名称", "信用代码", "镇区", "地址", "主营产品"], [["应回滚企业", unique, areaName, "地址", "产品"], ["共享企业冲突", shared, areaName, "地址", "产品"]]), "loser.xlsx");
-    await importService.confirm({ actor: admin, batchId: winner.id, body: { confirm: true, expectedPreviewVersion: winner.previewVersion }, idempotencyKey: randomUUID() });
-    await expect(importService.confirm({ actor: admin, batchId: loser.id, body: { confirm: true, expectedPreviewVersion: loser.previewVersion }, idempotencyKey: randomUUID() })).rejects.toBeTruthy();
+    await importService.confirm({ actor: admin, batchId: winner.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: winner.previewVersion }, idempotencyKey: randomUUID() });
+    await expect(importService.confirm({ actor: admin, batchId: loser.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: loser.previewVersion }, idempotencyKey: randomUUID() })).rejects.toBeTruthy();
     const existing = await prisma.enterprise.findUniqueOrThrow({ where: { creditCode: shared } }); enterpriseIds.push(existing.id);
     expect(await prisma.enterprise.count({ where: { creditCode: unique } })).toBe(0); expect(await prisma.importApplySnapshot.count({ where: { batchId: loser.id } })).toBe(0);
     expect(await prisma.importBatch.findUniqueOrThrow({ where: { id: loser.id } })).toMatchObject({ status: "FAILED" });
@@ -119,7 +124,7 @@ describe("M3-005 real MySQL atomic import", () => {
     const existingAccount = await prisma.account.create({ data: { personId: existingPerson.id, phone: existingPhone, passwordHash: "must-not-change", status: "DISABLED" } });
     const body = await workbook(["姓名", "手机号", "批次", "成员类型", "开始日期", "创建账号"], [["M3已有成员", existingPhone, memberBatchName, "在任", "2026-01-01", "是"], ["M3历史往届", historicalPhone, memberBatchName, "历史往届", "2026-01-01", "否"]]);
     const batch = await createBatch("MEMBER", body, "members.xlsx"); expect(batch.blockingRowCount).toBe(0);
-    await importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() });
+    await importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() });
     expect(await prisma.account.findUniqueOrThrow({ where: { id: existingAccount.id } })).toMatchObject({ passwordHash: "must-not-change", status: "DISABLED" });
     const historical = await prisma.person.findFirstOrThrow({ where: { contactPhone: historicalPhone } }); expect(await prisma.account.count({ where: { personId: historical.id } })).toBe(0);
   });
@@ -136,8 +141,8 @@ describe("M3-005 real MySQL atomic import", () => {
     expect(second.blockingRowCount).toBe(0);
 
     const settled = await Promise.allSettled([
-      importService.confirm({ actor: admin, batchId: first.id, body: { confirm: true, expectedPreviewVersion: first.previewVersion }, idempotencyKey: randomUUID() }),
-      importService.confirm({ actor: admin, batchId: second.id, body: { confirm: true, expectedPreviewVersion: second.previewVersion }, idempotencyKey: randomUUID() }),
+      importService.confirm({ actor: admin, batchId: first.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: first.previewVersion }, idempotencyKey: randomUUID() }),
+      importService.confirm({ actor: admin, batchId: second.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: second.previewVersion }, idempotencyKey: randomUUID() }),
     ]);
     expect(settled.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(settled.filter(({ status }) => status === "rejected")).toHaveLength(1);
@@ -163,8 +168,8 @@ describe("M3-005 real MySQL atomic import", () => {
     expect(second).toMatchObject({ status: "PREVIEW_READY", blockingRowCount: 0 });
 
     const settled = await Promise.allSettled([
-      importService.confirm({ actor: admin, batchId: first.id, body: { confirm: true, expectedPreviewVersion: first.previewVersion }, idempotencyKey: randomUUID() }),
-      importService.confirm({ actor: admin, batchId: second.id, body: { confirm: true, expectedPreviewVersion: second.previewVersion }, idempotencyKey: randomUUID() }),
+      importService.confirm({ actor: admin, batchId: first.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: first.previewVersion }, idempotencyKey: randomUUID() }),
+      importService.confirm({ actor: admin, batchId: second.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: second.previewVersion }, idempotencyKey: randomUUID() }),
     ]);
     expect(settled.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
     expect(settled.filter(({ status }) => status === "rejected")).toHaveLength(1);
@@ -188,7 +193,7 @@ describe("M3-005 real MySQL atomic import", () => {
     expect(batch).toMatchObject({ status: "PREVIEW_READY", blockingRowCount: 1 });
     expect(batch.rows[0]).toMatchObject({ action: "MANUAL_REVIEW", resolutionStatus: "NEEDS_REVIEW" });
     expect(batch.rows[0].issuesJson).toEqual(expect.arrayContaining([expect.objectContaining({ code: "PERSON_ARCHIVED_REQUIRES_GOVERNANCE" })]));
-    await expect(importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "IMPORT_BLOCKING_ROWS" });
+    await expect(importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "IMPORT_BLOCKING_ROWS" });
     expect(await prisma.person.count({ where: { contactPhone: phone } })).toBe(1);
     expect(await prisma.person.findUniqueOrThrow({ where: { id: archived.id } })).toMatchObject({ personStatus: "ARCHIVED" });
   });
@@ -203,7 +208,7 @@ describe("M3-005 real MySQL atomic import", () => {
     expect(batch.rows[0]).toMatchObject({ action: "MANUAL_REVIEW", resolutionStatus: "NEEDS_REVIEW" });
     expect(batch.rows[0].issuesJson).toEqual(expect.arrayContaining([expect.objectContaining({ code: "ENTERPRISE_DISABLED_REQUIRES_GOVERNANCE" })]));
     const resolved = await importService.resolveRow({ actor: admin, batchId: batch.id, rowId: batch.rows[0].id, body: { action: "SKIP", reason: "先走企业治理流程" } });
-    await importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, expectedPreviewVersion: resolved.previewVersion }, idempotencyKey: randomUUID() });
+    await importService.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST import apply", expectedPreviewVersion: resolved.previewVersion }, idempotencyKey: randomUUID() });
     expect(await prisma.enterprise.findUniqueOrThrow({ where: { id: disabled.id } })).toMatchObject({ name: "M3停用企业", address: "原地址", mainProducts: "原产品", status: "DISABLED" });
   });
 });
@@ -216,4 +221,6 @@ describe("M3-005 scoped export", () => {
     const names: string[] = []; sheet.eachRow((row, number) => { if (number > 1) names.push(String(row.getCell(1).value ?? "")); });
     expect(names).toContain("M3范围内企业"); expect(names).not.toContain("M3范围外企业");
   });
+  it("keeps a preview-ready import at zero business mutation when pre-backup fails", async () => { const body = await workbook(["企业名称", "统一社会信用代码", "负责区域", "地址", "主营产品"], [[`TEST prebackup enterprise ${randomUUID()}`, `PB${randomUUID().replaceAll("-", "").slice(0, 16)}`, (await prisma.administrativeArea.findUniqueOrThrow({ where: { id: areaA } })).name, "TEST address", "TEST product"]]); const batch = await createBatch("ENTERPRISE", body, "prebackup-failure.xlsx"); const before = await prisma.enterprise.count(); const failing = new ImportService(new ImportRepository(prisma), new BackupService(prisma, new FakeBackupProvider({ failCreate: true }))); await expect(failing.confirm({ actor: admin, batchId: batch.id, body: { confirm: true, reason: "TEST prebackup failure", expectedPreviewVersion: batch.previewVersion }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "BACKUP_PROVIDER_UNAVAILABLE" }); expect(await prisma.enterprise.count()).toBe(before); expect(await prisma.importBatch.findUniqueOrThrow({ where: { id: batch.id } })).toMatchObject({ status: "PREVIEW_READY", appliedAt: null }); });
+
 });

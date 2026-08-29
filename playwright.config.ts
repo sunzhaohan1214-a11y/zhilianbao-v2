@@ -17,6 +17,7 @@ export default defineConfig({
     url: "http://127.0.0.1:3000/health",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: { ...process.env, APP_ENV: "test", APP_VERSION: "m3-007-e2e", ENABLE_FAKE_SYSTEM_PROVIDERS: "true" },
   },
   projects: [
     {
