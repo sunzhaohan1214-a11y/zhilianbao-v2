@@ -120,6 +120,7 @@ describe("M3-008 fixed-scale real-MySQL performance gate", () => {
     };
     await mkdir("artifacts", { recursive: true });
     await writeFile("artifacts/performance.json", `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    console.log(`[performance-report] ${JSON.stringify(report)}`);
     expect(report.errors).toBe(thresholds.errorRate);
     expect(report.p95Ms.read).toBeLessThanOrEqual(thresholds.readP95Ms);
     expect(report.p95Ms.write).toBeLessThanOrEqual(thresholds.writeP95Ms);
