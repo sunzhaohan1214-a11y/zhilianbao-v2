@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { lookup } from "node:dns/promises";
-import { readFile, stat } from "node:fs/promises";
-import { isIP } from "node:net";
+import { lookup as dnsLookup } from "node:dns/promises";
+import type { Stats } from "node:fs";
+import { lstat, open, type FileHandle } from "node:fs/promises";
+import { request as httpsRequest } from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 
 export const READINESS_STATUSES = [
   "PASS", "FAIL", "BLOCKED_BY_EXTERNAL_ENV", "BLOCKED_BY_SOURCE_DATA", "BLOCKED_BY_UAT", "NOT_APPLICABLE",
@@ -37,7 +39,23 @@ export type ExternalEvidenceCategory = "scanner" | "backup" | "maintenance" | "r
 type EvidencePointer = { reference?: unknown; sourcePath?: unknown };
 type BoundEvidence = { category?: unknown; candidateSha?: unknown; environment?: unknown; status?: unknown; verifiedAt?: unknown; details?: unknown };
 const MAX_EVIDENCE_BYTES = 1_048_576;
+const EVIDENCE_READ_CHUNK_BYTES = 65_536;
+const EVIDENCE_DNS_TIMEOUT_MS = 2_000;
 const EVIDENCE_TIMEOUT_MS = 8_000;
+
+type ResolvedAddress = { address: string; family: 4 | 6 };
+type ReferenceResponse = { statusCode: number; contentLength?: string; body: AsyncIterable<Uint8Array | Buffer | string>; cancel?: () => void };
+type ReferenceRequest = (input: { url: URL; addresses: readonly ResolvedAddress[]; signal: AbortSignal }) => Promise<ReferenceResponse>;
+type EvidenceFileHandle = Pick<FileHandle, "close" | "read" | "stat">;
+export type EvidenceLoadingDependencies = {
+  resolveHost?: (hostname: string) => Promise<ResolvedAddress[]>;
+  requestReference?: ReferenceRequest;
+  openSource?: (sourcePath: string) => Promise<EvidenceFileHandle>;
+  lstatSource?: (sourcePath: string) => Promise<Stats>;
+  afterSourceOpen?: (sourcePath: string) => void | Promise<void>;
+  dnsTimeoutMs?: number;
+  requestTimeoutMs?: number;
+};
 
 export function isCommitSha(value: string | undefined): value is string {
   return Boolean(value && /^[a-f0-9]{40}$/i.test(value));
@@ -73,22 +91,98 @@ function isUnsafeIpv4(value: string): boolean {
   const [a, b] = parts;
   return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127)
     || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
-    || (a === 192 && b === 0) || (a === 192 && b === 2) || (a === 198 && (b === 18 || b === 19 || b === 51))
+    || (a === 192 && [0, 2, 31, 52, 88, 175].includes(b)) || (a === 198 && (b === 18 || b === 19 || b === 51))
     || (a === 203 && b === 0) || a >= 224;
+}
+
+function ipv4Bytes(value: string): number[] | null {
+  if (isIP(value) !== 4) return null;
+  return value.split(".").map(Number);
+}
+
+function ipv6Bytes(value: string): number[] | null {
+  const normalized = value.replace(/^\[|\]$/g, "").toLowerCase();
+  if (isIP(normalized) !== 6 || normalized.includes("%")) return null;
+  const halves = normalized.split("::");
+  if (halves.length > 2) return null;
+  const parseHalf = (half: string): number[] | null => {
+    if (!half) return [];
+    const words: number[] = [];
+    for (const part of half.split(":")) {
+      if (part.includes(".")) {
+        const bytes = ipv4Bytes(part);
+        if (!bytes) return null;
+        words.push((bytes[0] << 8) | bytes[1], (bytes[2] << 8) | bytes[3]);
+      } else {
+        const word = Number.parseInt(part, 16);
+        if (!/^[a-f0-9]{1,4}$/.test(part) || !Number.isInteger(word)) return null;
+        words.push(word);
+      }
+    }
+    return words;
+  };
+  const head = parseHalf(halves[0]);
+  const tail = parseHalf(halves[1] ?? "");
+  if (!head || !tail) return null;
+  const missing = 8 - head.length - tail.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
+  const words = [...head, ...Array.from({ length: missing }, () => 0), ...tail];
+  return words.flatMap((word) => [word >> 8, word & 0xff]);
+}
+
+function normalizedIpBytes(value: string): number[] | null {
+  const normalized = value.replace(/^\[|\]$/g, "").toLowerCase();
+  const ipv4 = ipv4Bytes(normalized);
+  if (ipv4) return [...Array.from({ length: 10 }, () => 0), 0xff, 0xff, ...ipv4];
+  return ipv6Bytes(normalized);
 }
 
 function isUnsafeIpAddress(value: string): boolean {
   const normalized = value.replace(/^\[|\]$/g, "").toLowerCase();
   if (isIP(normalized) === 4) return isUnsafeIpv4(normalized);
-  if (isIP(normalized) !== 6) return true;
-  const mappedIpv4 = /(?:^|:)ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized)?.[1];
-  if (mappedIpv4) return isUnsafeIpv4(mappedIpv4);
-  const first = Number.parseInt(normalized.split(":")[0] || "0", 16);
-  return normalized === "::" || normalized === "::1" || (first & 0xfe00) === 0xfc00
-    || (first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00 || normalized.startsWith("2001:db8:");
+  const bytes = ipv6Bytes(normalized);
+  if (!bytes) return true;
+  const embeddedIpv4 = bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff
+    ? bytes.slice(12).join(".")
+    : null;
+  if (embeddedIpv4) return isUnsafeIpv4(embeddedIpv4);
+  const ipv4Compatible = bytes.slice(0, 12).every((byte) => byte === 0);
+  const unspecifiedOrLoopback = ipv4Compatible;
+  const uniqueLocal = (bytes[0] & 0xfe) === 0xfc;
+  const linkOrSiteLocal = bytes[0] === 0xfe && ((bytes[1] & 0xc0) === 0x80 || (bytes[1] & 0xc0) === 0xc0);
+  const multicast = bytes[0] === 0xff;
+  const documentation = bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8;
+  const discardOnly = bytes[0] === 0x01 && bytes.slice(1, 8).every((byte) => byte === 0);
+  const nat64Special = bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b
+    && ((bytes[4] === 0x00 && bytes[5] === 0x01) || bytes.slice(4, 12).every((byte) => byte === 0));
+  const protocolAssignments = bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] <= 0x01;
+  const sixToFour = bytes[0] === 0x20 && bytes[1] === 0x02;
+  return unspecifiedOrLoopback || uniqueLocal || linkOrSiteLocal || multicast || documentation || discardOnly
+    || nat64Special || protocolAssignments || sixToFour;
 }
 
-async function assertSafeHttpsReference(reference: string): Promise<URL> {
+function sameIpAddress(left: string, right: string): boolean {
+  const leftBytes = normalizedIpBytes(left);
+  const rightBytes = normalizedIpBytes(right);
+  return Boolean(leftBytes && rightBytes && leftBytes.length === rightBytes.length && leftBytes.every((byte, index) => byte === rightBytes[index]));
+}
+
+function dnsDeadline<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("EVIDENCE_REFERENCE_DNS_TIMEOUT")), timeoutMs);
+    operation.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      () => { clearTimeout(timer); reject(new Error("EVIDENCE_REFERENCE_UNREACHABLE")); },
+    );
+  });
+}
+
+async function defaultResolveHost(hostname: string): Promise<ResolvedAddress[]> {
+  const addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  return addresses.flatMap(({ address, family }) => family === 4 || family === 6 ? [{ address, family }] : []);
+}
+
+async function assertSafeHttpsReference(reference: string, dependencies: EvidenceLoadingDependencies): Promise<{ url: URL; addresses: ResolvedAddress[] }> {
   let url: URL;
   try { url = new URL(reference); } catch { throw new Error("EVIDENCE_REFERENCE_UNSAFE"); }
   if (url.protocol !== "https:" || url.username || url.password) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
@@ -96,56 +190,140 @@ async function assertSafeHttpsReference(reference: string): Promise<URL> {
   if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
   if (isIP(hostname)) {
     if (isUnsafeIpAddress(hostname)) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
-    return url;
+    return { url, addresses: [{ address: hostname, family: isIP(hostname) as 4 | 6 }] };
   }
-  let addresses: Array<{ address: string; family: number }>;
-  try { addresses = await lookup(hostname, { all: true, verbatim: true }); } catch { throw new Error("EVIDENCE_REFERENCE_UNREACHABLE"); }
+  const resolveHost = dependencies.resolveHost ?? defaultResolveHost;
+  const addresses = await dnsDeadline(resolveHost(hostname), dependencies.dnsTimeoutMs ?? EVIDENCE_DNS_TIMEOUT_MS);
   if (!addresses.length || addresses.some(({ address }) => isUnsafeIpAddress(address))) throw new Error("EVIDENCE_REFERENCE_UNSAFE");
-  return url;
+  return { url, addresses };
 }
 
-async function readLimitedResponse(response: Response): Promise<Uint8Array> {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_EVIDENCE_BYTES) throw new Error("EVIDENCE_REFERENCE_TOO_LARGE");
-  if (!response.body) return new Uint8Array();
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_EVIDENCE_BYTES) {
-      await reader.cancel();
+function defaultRequestReference({ url, addresses, signal }: { url: URL; addresses: readonly ResolvedAddress[]; signal: AbortSignal }): Promise<ReferenceResponse> {
+  const selected = addresses[0];
+  const pinnedLookup: LookupFunction = (_hostname, options, callback) => {
+    if (options.all) callback(null, [{ address: selected.address, family: selected.family }]);
+    else callback(null, selected.address, selected.family);
+  };
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(url, {
+      agent: false,
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal,
+      lookup: pinnedLookup,
+    }, (response) => {
+      const contentLengthValue = Array.isArray(response.headers["content-length"])
+        ? response.headers["content-length"][0]
+        : response.headers["content-length"];
+      resolve({ statusCode: response.statusCode ?? 0, contentLength: contentLengthValue, body: response, cancel: () => response.destroy() });
+    });
+    request.on("socket", (socket) => {
+      socket.once("secureConnect", () => {
+        if (!socket.remoteAddress || !sameIpAddress(socket.remoteAddress, selected.address)) {
+          request.destroy(new Error("EVIDENCE_REFERENCE_UNSAFE"));
+        }
+      });
+    });
+    request.on("error", (error) => reject(new Error(stableEvidenceError(error, signal.aborted ? "EVIDENCE_REFERENCE_TIMEOUT" : "EVIDENCE_REFERENCE_UNREACHABLE"))));
+    request.end();
+  });
+}
+
+function abortable<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error("EVIDENCE_REFERENCE_TIMEOUT"));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new Error("EVIDENCE_REFERENCE_TIMEOUT"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
+
+function sameFileIdentity(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function readSourceBytes(sourcePath: string, dependencies: EvidenceLoadingDependencies): Promise<Uint8Array> {
+  const lstatSource = dependencies.lstatSource ?? lstat;
+  const openSource = dependencies.openSource ?? ((path: string) => open(path, "r"));
+  let pathInfo: Stats;
+  let handle: EvidenceFileHandle | undefined;
+  try {
+    pathInfo = await lstatSource(sourcePath);
+    if (pathInfo.isSymbolicLink() || !pathInfo.isFile()) throw new Error("EVIDENCE_SOURCE_INVALID");
+    handle = await openSource(sourcePath);
+    const initial = await handle.stat();
+    const openedPathInfo = await lstatSource(sourcePath);
+    if (!initial.isFile() || openedPathInfo.isSymbolicLink() || !openedPathInfo.isFile()
+      || !sameFileIdentity(pathInfo, initial) || !sameFileIdentity(initial, openedPathInfo)) throw new Error("EVIDENCE_SOURCE_CHANGED");
+    if (initial.size > MAX_EVIDENCE_BYTES) throw new Error("EVIDENCE_SOURCE_TOO_LARGE");
+    await dependencies.afterSourceOpen?.(sourcePath);
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const capacity = Math.min(EVIDENCE_READ_CHUNK_BYTES, MAX_EVIDENCE_BYTES + 1 - total);
+      const buffer = Buffer.allocUnsafe(capacity);
+      const { bytesRead } = await handle.read(buffer, 0, capacity, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > MAX_EVIDENCE_BYTES) throw new Error("EVIDENCE_SOURCE_TOO_LARGE");
+      chunks.push(new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead));
+    }
+    const final = await handle.stat();
+    if (!sameFileIdentity(initial, final) || initial.size !== final.size || initial.mtimeMs !== final.mtimeMs) throw new Error("EVIDENCE_SOURCE_CHANGED");
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return bytes;
+  } catch (error) {
+    throw new Error(stableEvidenceError(error, "EVIDENCE_SOURCE_UNREADABLE"));
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function readReferenceBytes(reference: string, dependencies: EvidenceLoadingDependencies): Promise<Uint8Array> {
+  const { url, addresses } = await assertSafeHttpsReference(reference, dependencies);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), dependencies.requestTimeoutMs ?? EVIDENCE_TIMEOUT_MS);
+  let response: ReferenceResponse | undefined;
+  try {
+    response = await (dependencies.requestReference ?? defaultRequestReference)({ url, addresses, signal: controller.signal });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      response.cancel?.();
+      throw new Error("EVIDENCE_REFERENCE_HTTP_ERROR");
+    }
+    const declaredLength = Number(response.contentLength);
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_EVIDENCE_BYTES) {
+      response.cancel?.();
       throw new Error("EVIDENCE_REFERENCE_TOO_LARGE");
     }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return bytes;
-}
-
-async function readSourceBytes(sourcePath: string): Promise<Uint8Array> {
-  let info;
-  try { info = await stat(sourcePath); } catch { throw new Error("EVIDENCE_SOURCE_UNREADABLE"); }
-  if (!info.isFile()) throw new Error("EVIDENCE_SOURCE_INVALID");
-  if (info.size > MAX_EVIDENCE_BYTES) throw new Error("EVIDENCE_SOURCE_TOO_LARGE");
-  try { return await readFile(sourcePath); } catch { throw new Error("EVIDENCE_SOURCE_UNREADABLE"); }
-}
-
-async function readReferenceBytes(reference: string): Promise<Uint8Array> {
-  const url = await assertSafeHttpsReference(reference);
-  let response: Response;
-  try {
-    response = await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(EVIDENCE_TIMEOUT_MS), redirect: "error" });
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    const iterator = response.body[Symbol.asyncIterator]();
+    while (true) {
+      const { done, value: chunk } = await abortable(iterator.next(), controller.signal);
+      if (done) break;
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk) : new Uint8Array(chunk);
+      total += bytes.byteLength;
+      if (total > MAX_EVIDENCE_BYTES) {
+        response.cancel?.();
+        throw new Error("EVIDENCE_REFERENCE_TOO_LARGE");
+      }
+      chunks.push(bytes);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return bytes;
   } catch (error) {
-    const name = error instanceof Error ? error.name : "";
-    throw new Error(name === "TimeoutError" || name === "AbortError" ? "EVIDENCE_REFERENCE_TIMEOUT" : "EVIDENCE_REFERENCE_UNREACHABLE");
+    if (controller.signal.aborted) response?.cancel?.();
+    throw new Error(stableEvidenceError(error, controller.signal.aborted ? "EVIDENCE_REFERENCE_TIMEOUT" : "EVIDENCE_REFERENCE_UNREACHABLE"));
+  } finally {
+    clearTimeout(timer);
   }
-  if (!response.ok) throw new Error("EVIDENCE_REFERENCE_HTTP_ERROR");
-  return readLimitedResponse(response);
 }
 
 function stableEvidenceError(error: unknown, fallback: string): string {
@@ -156,7 +334,7 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
 }
 
-async function parseBoundEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus): Promise<{ validation: EvidenceValidation; details?: Record<string, unknown> }> {
+async function parseBoundEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus, dependencies: EvidenceLoadingDependencies = {}): Promise<{ validation: EvidenceValidation; details?: Record<string, unknown> }> {
   if (!raw?.trim()) return { validation: { status: missingStatus, errorCode: "IMMUTABLE_EVIDENCE_MISSING" } };
   let pointer: EvidencePointer;
   try {
@@ -179,12 +357,12 @@ async function parseBoundEvidence(raw: string | undefined, candidateSha: string,
   if (!sourcePath && !isHttpsReference) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_MISSING", evidenceRef } };
   let sourceBytes: Uint8Array | undefined;
   if (sourcePath) {
-    try { sourceBytes = await readSourceBytes(sourcePath); } catch (error) { return { validation: { status: "FAIL", errorCode: stableEvidenceError(error, "EVIDENCE_SOURCE_UNREADABLE"), evidenceRef } }; }
+    try { sourceBytes = await readSourceBytes(sourcePath, dependencies); } catch (error) { return { validation: { status: "FAIL", errorCode: stableEvidenceError(error, "EVIDENCE_SOURCE_UNREADABLE"), evidenceRef } }; }
     if (createHash("sha256").update(sourceBytes).digest("hex") !== digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_DIGEST_MISMATCH", evidenceRef } };
   }
   let referenceBytes: Uint8Array | undefined;
   if (isHttpsReference) {
-    try { referenceBytes = await readReferenceBytes(reference); } catch (error) { return { validation: { status: "FAIL", errorCode: stableEvidenceError(error, "EVIDENCE_REFERENCE_UNREACHABLE"), evidenceRef } }; }
+    try { referenceBytes = await readReferenceBytes(reference, dependencies); } catch (error) { return { validation: { status: "FAIL", errorCode: stableEvidenceError(error, "EVIDENCE_REFERENCE_UNREACHABLE"), evidenceRef } }; }
     if (createHash("sha256").update(referenceBytes).digest("hex") !== digest) return { validation: { status: "FAIL", errorCode: "EVIDENCE_REFERENCE_DIGEST_MISMATCH", evidenceRef } };
   }
   if (sourceBytes && referenceBytes && !sameBytes(sourceBytes, referenceBytes)) return { validation: { status: "FAIL", errorCode: "EVIDENCE_SOURCE_REFERENCE_MISMATCH", evidenceRef } };
@@ -206,6 +384,10 @@ function finiteAtMost(value: unknown, maximum: number): boolean { return typeof 
 
 export async function validateGenericEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus = "BLOCKED_BY_EXTERNAL_ENV"): Promise<EvidenceValidation> {
   return (await parseBoundEvidence(raw, candidateSha, category, environment, missingStatus)).validation;
+}
+
+export async function validateGenericEvidenceWithDependencies(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus, dependencies: EvidenceLoadingDependencies): Promise<EvidenceValidation> {
+  return (await parseBoundEvidence(raw, candidateSha, category, environment, missingStatus, dependencies)).validation;
 }
 
 export async function validateScannerEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {

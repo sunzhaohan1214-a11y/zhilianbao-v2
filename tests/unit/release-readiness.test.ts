@@ -1,18 +1,24 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   REQUIRED_CI_JOBS, buildReleaseReadiness, readinessExitCode, validateAiEvidence, validateBackupEvidence,
-  validateExactHeadCi, validateGenericEvidence, validateGithubProtection, validateMaintenanceEvidence,
+  validateExactHeadCi, validateGenericEvidence as validateGenericEvidenceWithoutDependencies, validateGenericEvidenceWithDependencies, validateGithubProtection, validateMaintenanceEvidence,
   validateMigrationEvidence, validatePreflightEvidence, validateRestoreEvidence, validateScannerEvidence,
-  validateUatEvidence, type EvidenceValidation, type ExternalEvidenceCategory, type ReleaseGateInputs,
+  validateUatEvidence, type EvidenceLoadingDependencies, type EvidenceValidation, type ExternalEvidenceCategory, type ReleaseGateInputs,
 } from "@/modules/hardening/release-readiness";
 
 const candidateSha = "1".repeat(40);
 const verifiedAt = "2026-08-29T00:00:00.000Z";
 const temporaryDirectories: string[] = [];
+
+function validateGenericEvidence(raw: string | undefined, sha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: Parameters<typeof validateGenericEvidenceWithoutDependencies>[4] = "BLOCKED_BY_EXTERNAL_ENV", dependencies?: EvidenceLoadingDependencies) {
+  return dependencies
+    ? validateGenericEvidenceWithDependencies(raw, sha, category, environment, missingStatus, dependencies)
+    : validateGenericEvidenceWithoutDependencies(raw, sha, category, environment, missingStatus);
+}
 
 async function evidence(category: ExternalEvidenceCategory, environment: "TEST" | "PROD", details: Record<string, unknown> = {}, overrides: Record<string, unknown> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "zlb-evidence-")); temporaryDirectories.push(directory);
@@ -30,6 +36,17 @@ async function evidenceFixture(category: ExternalEvidenceCategory, environment: 
   await writeFile(sourcePath, content);
   const digest = createHash("sha256").update(content).digest("hex");
   return { content, digest, sourcePath, reference: `https://93.184.216.34/evidence.json?sha256=${digest}` };
+}
+
+function responseBody(...chunks: Array<string | Uint8Array>): AsyncIterable<string | Uint8Array> {
+  return (async function* body() { for (const chunk of chunks) yield chunk; })();
+}
+
+function referenceDependencies(content: string, overrides: Partial<EvidenceLoadingDependencies> = {}): EvidenceLoadingDependencies {
+  return {
+    requestReference: vi.fn(async () => ({ statusCode: 200, contentLength: String(Buffer.byteLength(content)), body: responseBody(content) })),
+    ...overrides,
+  };
 }
 
 const blocked = (): EvidenceValidation => ({ status: "BLOCKED_BY_EXTERNAL_ENV", errorCode: "TEST_EVIDENCE_MISSING" });
@@ -70,45 +87,41 @@ describe("M3-008 external evidence sources", () => {
 
   it("accepts valid HTTPS-reference-only evidence", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content)));
-    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "PASS" });
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", referenceDependencies(fixture.content))).resolves.toMatchObject({ status: "PASS" });
   });
 
   it("fails closed when an HTTPS-reference-only source is unreachable", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network unavailable"); }));
-    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNREACHABLE" });
+    const dependencies: EvidenceLoadingDependencies = { requestReference: vi.fn(async () => { throw new TypeError("network unavailable"); }) };
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNREACHABLE" });
   });
 
   it("sourcePath must not bypass declared HTTPS reference", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network unavailable"); }));
-    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+    const dependencies: EvidenceLoadingDependencies = { requestReference: vi.fn(async () => { throw new TypeError("network unavailable"); }) };
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "FAIL" });
   });
 
   it("rejects a valid sourcePath when the HTTPS reference digest mismatches", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(`${fixture.content} `)));
-    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", referenceDependencies(`${fixture.content} `))).resolves.toMatchObject({ status: "FAIL" });
   });
 
   it("rejects a sourcePath digest mismatch even when HTTPS content is valid", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
     await writeFile(fixture.sourcePath, `${fixture.content} `);
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content)));
-    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", referenceDependencies(fixture.content))).resolves.toMatchObject({ status: "FAIL" });
   });
 
   it("accepts matching valid sourcePath and HTTPS content", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content)));
-    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "PASS" });
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", referenceDependencies(fixture.content))).resolves.toMatchObject({ status: "PASS" });
   });
 
   it("rejects different sourcePath and HTTPS content", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(fixture.content.replace('"status":"PASS"', '"status":"FAIL"'))));
-    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL" });
+    const remoteContent = fixture.content.replace('"status":"PASS"', '"status":"FAIL"');
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", referenceDependencies(remoteContent))).resolves.toMatchObject({ status: "FAIL" });
   });
 
   it("rejects unsafe reference schemes", async () => {
@@ -116,41 +129,154 @@ describe("M3-008 external evidence sources", () => {
     await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `file://${fixture.sourcePath}?sha256=${fixture.digest}` }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
   });
 
-  it("rejects loopback, private, link-local, and metadata HTTPS targets before fetch", async () => {
+  it("rejects loopback, private, link-local, metadata, and documentation IPv4 targets before request", async () => {
     const digest = "0".repeat(64);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    for (const host of ["127.0.0.1", "10.0.0.1", "169.254.169.254"]) {
-      await expect(validateGenericEvidence(JSON.stringify({ reference: `https://${host}/evidence.json?sha256=${digest}` }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+    const requestReference = vi.fn();
+    for (const host of ["127.0.0.1", "localhost", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.0.1", "169.254.169.254", "192.88.99.1", "198.51.100.1"]) {
+      await expect(validateGenericEvidence(JSON.stringify({ reference: `https://${host}/evidence.json?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
     }
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
+  it("rejects hexadecimal IPv4-mapped IPv6 loopback and private targets before request", async () => {
+    const digest = "0".repeat(64);
+    const requestReference = vi.fn();
+    for (const host of ["[::ffff:7f00:1]", "[::ffff:a00:1]"]) {
+      await expect(validateGenericEvidence(JSON.stringify({ reference: `https://${host}/evidence.json?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+    }
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
+  it("rejects IPv6 loopback, link-local, unique-local, and documentation targets", async () => {
+    const digest = "0".repeat(64);
+    const requestReference = vi.fn();
+    for (const host of ["[::1]", "[fe80::1]", "[fc00::1]", "[64:ff9b::a00:1]", "[2001:db8::1]", "[2002:0a00:0001::]"]) {
+      await expect(validateGenericEvidence(JSON.stringify({ reference: `https://${host}/evidence.json?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+    }
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
+  it("rejects hostnames when DNS returns private or mixed public/private addresses", async () => {
+    const digest = "0".repeat(64);
+    const requestReference = vi.fn();
+    for (const addresses of [
+      [{ address: "10.0.0.1", family: 4 as const }],
+      [{ address: "93.184.216.34", family: 4 as const }, { address: "127.0.0.1", family: 4 as const }],
+    ]) {
+      await expect(validateGenericEvidence(JSON.stringify({ reference: `https://evidence.example/item?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { resolveHost: vi.fn(async () => addresses), requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+    }
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
+  it("times out DNS independently and never starts an HTTPS request", async () => {
+    const digest = "0".repeat(64);
+    const requestReference = vi.fn();
+    const resolveHost = vi.fn(() => new Promise<Array<{ address: string; family: 4 }>>(() => undefined));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: `https://evidence.example/item?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { resolveHost, requestReference, dnsTimeoutMs: 5 })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_DNS_TIMEOUT" });
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
+  it("passes the complete vetted DNS set to a single pinned HTTPS request", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const reference = fixture.reference.replace("93.184.216.34", "evidence.example");
+    const addresses = [{ address: "93.184.216.34", family: 4 as const }, { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 as const }];
+    const resolveHost = vi.fn(async () => addresses);
+    const requestReference = vi.fn(async (input: { url: URL; addresses: readonly typeof addresses[number][] }) => {
+      expect(input.url.hostname).toBe("evidence.example");
+      expect(input.addresses).toEqual(addresses);
+      return { statusCode: 200, body: responseBody(fixture.content) };
+    });
+    await expect(validateGenericEvidence(JSON.stringify({ reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { resolveHost, requestReference })).resolves.toMatchObject({ status: "PASS" });
+    expect(resolveHost).toHaveBeenCalledTimes(1);
+    expect(requestReference).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed on HTTPS reference timeout", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("timed out", "TimeoutError"); }));
-    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TIMEOUT" });
+    const requestReference: NonNullable<EvidenceLoadingDependencies["requestReference"]> = vi.fn(({ signal }) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("timed out", "AbortError")), { once: true })));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { requestReference, requestTimeoutMs: 5 })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TIMEOUT" });
   });
 
-  it("fails closed on non-2xx HTTPS responses", async () => {
+  it("keeps the HTTPS timeout active while the response body is stalled", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503 })));
-    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_HTTP_ERROR" });
+    const cancel = vi.fn();
+    const body = { [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<Uint8Array>>(() => undefined) }) };
+    const requestReference: NonNullable<EvidenceLoadingDependencies["requestReference"]> = vi.fn(async () => ({ statusCode: 200, body, cancel }));
+    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { requestReference, requestTimeoutMs: 5 })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TIMEOUT" });
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it("fails closed on oversized HTTPS responses", async () => {
+  it("fails closed on redirects and non-2xx HTTPS responses", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(1_048_577))));
-    await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TOO_LARGE" });
+    for (const statusCode of [302, 503]) {
+      const dependencies: EvidenceLoadingDependencies = { requestReference: vi.fn(async () => ({ statusCode, body: responseBody("unavailable") })) };
+      await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_HTTP_ERROR" });
+    }
+  });
+
+  it("fails closed on declared and streamed oversized HTTPS responses", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const bodies = [
+      { statusCode: 200, contentLength: "1048577", body: responseBody() },
+      { statusCode: 200, body: responseBody(new Uint8Array(1_048_576), new Uint8Array(1)) },
+    ];
+    for (const response of bodies) {
+      const dependencies: EvidenceLoadingDependencies = { requestReference: vi.fn(async () => response) };
+      await expect(validateGenericEvidence(JSON.stringify({ reference: fixture.reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_TOO_LARGE" });
+    }
   });
 
   it("does not expose sensitive HTTPS query values in validation output", async () => {
     const fixture = await evidenceFixture("uat", "TEST");
     const reference = `${fixture.reference}&token=secret-value`;
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network unavailable"); }));
-    const result = await validateGenericEvidence(JSON.stringify({ reference }), candidateSha, "uat", "TEST");
+    const dependencies: EvidenceLoadingDependencies = { requestReference: vi.fn(async () => { throw new TypeError("network unavailable"); }) };
+    const result = await validateGenericEvidence(JSON.stringify({ reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies);
     expect(result).toMatchObject({ status: "FAIL", evidenceRef: "https://93.184.216.34/evidence.json" });
     expect(JSON.stringify(result)).not.toContain("secret-value");
+  });
+
+  it("rejects local symbolic links before opening the target", async () => {
+    const openSource = vi.fn();
+    const symbolicLink = { isSymbolicLink: () => true, isFile: () => false } as never;
+    const raw = JSON.stringify({ sourcePath: "ignored", reference: `urn:sha256:${"0".repeat(64)}` });
+    await expect(validateGenericEvidence(raw, candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { lstatSource: vi.fn(async () => symbolicLink), openSource })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_SOURCE_INVALID" });
+    expect(openSource).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized local files without an unbounded read", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    await writeFile(fixture.sourcePath, new Uint8Array(1_048_577));
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `urn:sha256:${fixture.digest}` }), candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_SOURCE_TOO_LARGE" });
+  });
+
+  it("rejects a local file that grows beyond the cap after the first handle stat", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const dependencies: EvidenceLoadingDependencies = { afterSourceOpen: async (sourcePath) => writeFile(sourcePath, new Uint8Array(1_048_577)) };
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `urn:sha256:${fixture.digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_SOURCE_TOO_LARGE" });
+  });
+
+  it("detects local file mutation through before/after handle metadata", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const dependencies: EvidenceLoadingDependencies = { afterSourceOpen: async (sourcePath) => writeFile(sourcePath, `${fixture.content} changed`) };
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `urn:sha256:${fixture.digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_SOURCE_CHANGED" });
+  });
+
+  it("keeps reading the opened file handle when the path is replaced", async () => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const movedPath = `${fixture.sourcePath}.opened`;
+    const dependencies: EvidenceLoadingDependencies = {
+      afterSourceOpen: async (sourcePath) => {
+        await rename(sourcePath, movedPath);
+        await writeFile(sourcePath, "replacement must not be read");
+      },
+    };
+    await expect(validateGenericEvidence(JSON.stringify({ sourcePath: fixture.sourcePath, reference: `urn:sha256:${fixture.digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", dependencies)).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it("rejects non-regular local evidence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "zlb-evidence-dir-")); temporaryDirectories.push(directory);
+    const raw = JSON.stringify({ sourcePath: directory, reference: `urn:sha256:${"0".repeat(64)}` });
+    await expect(validateGenericEvidence(raw, candidateSha, "uat", "TEST")).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_SOURCE_INVALID" });
   });
 });
 
