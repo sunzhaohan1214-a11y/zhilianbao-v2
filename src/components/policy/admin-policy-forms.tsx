@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { uploadAttachmentToCos, type BrowserUploadIntent } from "@/modules/attachment/client/cos-browser-uploader";
+import { waitForAttachmentScan } from "@/modules/attachment/client/wait-for-attachment-scan";
 
 type Option = { id: string; name: string };
 type CoreDefaults = { title: string; issuingDepartment: string; publicationDate: string; level: string; applicationDeadline?: string | null; tagIds: string[] };
@@ -26,6 +27,7 @@ async function upload(file: File) {
   else await uploadAttachmentToCos(intentResponse, file).promise;
   await api(`/api/v2/attachments/${intentResponse.attachmentId}/complete`, {});
   if (intentResponse.upload.type === "TEST_MEMORY") await api(`/api/v2/test/attachments/${intentResponse.attachmentId}/scan`, {});
+  await waitForAttachmentScan(() => api(`/api/v2/attachments/${intentResponse.attachmentId}/complete`, {}) as Promise<{ scanStatus: string }>);
   return intentResponse.attachmentId;
 }
 

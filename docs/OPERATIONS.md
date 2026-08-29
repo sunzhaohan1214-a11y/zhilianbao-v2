@@ -473,3 +473,17 @@ The operational source of truth is `docs/RELEASE_READINESS.md`, with detailed ch
 The official CynosDB adapter may create/list/reconcile snapshots. It does not expose credentials/private endpoints and does not enable web-triggered restore. Restore drills use `RollbackToNewCluster` only, require TEST identity, fixed confirmation, cost acknowledgment, target prefix and manual cleanup. In-place source restoration remains an approved production runbook action outside application code.
 
 Production release requires `backupReady`, a successful backup no older than 24 hours, production scanner readiness, protected main, exact-head checks, UAT, V1 full rehearsal/reconciliation and restore evidence. Missing external evidence remains BLOCKED and must not be converted into a code pass.
+
+## 25. On-demand attachment scan job
+
+New uploads remain private temporary attachments with `scanStatus=PENDING`; the application creates no business `AttachmentLink` and issues no preview/download URL until the status is `PASSED`. `REJECTED` and exhausted/failed scans remain fail-closed and cannot be referenced.
+
+The normal Worker remains available for steady traffic. A scale-to-zero scheduler may instead run the same application image with this command:
+
+```bash
+node worker-dist/attachment-scan-main.js
+```
+
+The command recovers only stale `ATTACHMENT_SCAN` leases, claims at most one due scan JobTask with `FOR UPDATE SKIP LOCKED`, runs the existing handler, persists success or retry/backoff, and exits. It does not consume Outbox or unrelated jobs. An idle invocation exits successfully. Multiple invocations remain safe because JobTask enqueue and claim are idempotent/lease-protected.
+
+Deployment TEST and PROD must explicitly inject `FILE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST`, `CLAMAV_PORT` and `CLAMAV_TIMEOUT_MS`; `APP_ENV=test` is not a provider identity and never enables a fake. Keep the database, COS and scanner endpoint configuration in the deployment Secret/runtime configuration, never in the image. The scheduler, private network path, ClamAV endpoint or sidecar, retry cadence, alerts and minimum-instance setting remain cloud wiring; prefer minimum instances zero where cold-start latency is acceptable. Before enabling traffic, prove clean acceptance, EICAR rejection, retry after scanner outage, and zero business links/signed URLs for non-passed attachments in the real TEST environment.

@@ -282,13 +282,14 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
 
     const linkedPending = await intentAndUpload({ actor: owner, service: runtime.service, storage: runtime.storage });
     await runtime.service.complete({ actor: owner, attachmentId: linkedPending.attachmentId });
-    await runtime.linkService.linkAttachment({
+    await expect(runtime.linkService.linkAttachment({
       attachmentId: linkedPending.attachmentId,
       entityType: "TEST_RESOURCE",
       entityId: randomUUID(),
       relationType: "FILE",
       authorizedDomainActorPersonId: owner.personId,
-    });
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: linkedPending.attachmentId } })).isTemporary).toBe(true);
     await expect(runtime.service.access({
       actor: owner,
       attachmentId: linkedPending.attachmentId,
@@ -300,7 +301,7 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
       attachmentId: linkedPending.attachmentId,
       action: "PREVIEW",
       context: requestContext(),
-    })).rejects.toMatchObject({ code: "ATTACHMENT_FORBIDDEN", status: 403 });
+    })).rejects.toMatchObject({ code: "FORBIDDEN_SCOPE", status: 403 });
     expect(signedUrl).not.toHaveBeenCalled();
     expect(await prisma.attachmentAccessLog.count({ where: { attachmentId: linkedPending.attachmentId } })).toBe(0);
 
@@ -428,8 +429,8 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
       entityId: randomUUID(),
       relationType: "FILE",
       authorizedDomainActorPersonId: actor.personId,
-    })).resolves.toMatchObject({ attachmentId: pendingScan.attachmentId });
-    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: pendingScan.attachmentId } })).isTemporary).toBe(false);
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: pendingScan.attachmentId } })).isTemporary).toBe(true);
     await expect(runtime.service.access({
       actor,
       attachmentId: pendingScan.attachmentId,
@@ -446,7 +447,8 @@ describe("M0-005 attachment lifecycle on real MySQL", () => {
       entityId: randomUUID(),
       relationType: "FILE",
       authorizedDomainActorPersonId: actor.personId,
-    })).resolves.toMatchObject({ attachmentId: scanning.attachmentId });
+    })).rejects.toMatchObject({ code: "ATTACHMENT_STATE_CONFLICT" });
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: scanning.attachmentId } })).isTemporary).toBe(true);
 
     const passed = await intentAndUpload({ actor, service: runtime.service, storage: runtime.storage });
     await runtime.service.complete({ actor, attachmentId: passed.attachmentId });

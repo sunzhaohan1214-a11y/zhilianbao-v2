@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { uploadAttachmentToCos, type BrowserUploadIntent } from "@/modules/attachment/client/cos-browser-uploader";
+import { waitForAttachmentScan } from "@/modules/attachment/client/wait-for-attachment-scan";
 
 type PublicAttachmentIntent = BrowserUploadIntent & { attachmentId: string; uploadToken: string };
 type PublicAttachmentReference = { attachmentId: string; uploadToken: string };
@@ -60,6 +61,16 @@ export function PublicDemandForm({ responsibleAreaId }: { responsibleAreaId: str
       });
       const completePayload = await completeResponse.json();
       if (!completeResponse.ok) throw new Error(completePayload.error?.message ?? "附件确认失败");
+      await waitForAttachmentScan(async () => {
+        const response = await fetch(`/api/v2/public/demand-leads/attachments/${intent.attachmentId}/complete`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ uploadToken: intent.uploadToken }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error?.message ?? "附件状态查询失败");
+        return payload.data;
+      });
       references.push({ attachmentId: intent.attachmentId, uploadToken: intent.uploadToken });
     }
     return references;

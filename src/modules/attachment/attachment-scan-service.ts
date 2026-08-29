@@ -25,74 +25,82 @@ export class AttachmentScanService {
       throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "附件扫描任务正在处理");
     }
 
-    let content: Buffer;
     try {
-      content = await this.storage.readObject(attachment.objectKey);
-    } catch (error) {
-      await this.repository.markScanFailed(attachment.id, "STORAGE_UNAVAILABLE");
-      throw error;
-    }
-    const digest = sha256(content);
-    if (
-      content.byteLength < 1
-      || content.byteLength > MAX_ATTACHMENT_SIZE_BYTES
-      || content.byteLength !== Number(attachment.actualSizeBytes)
-    ) {
-      await this.repository.markScanRejected({
-        id: attachment.id,
-        reason: "FINAL_SIZE_MISMATCH",
-        actualSizeBytes: BigInt(content.byteLength),
-        sha256: digest,
-      });
-      return { attachmentId, scanStatus: "REJECTED" as const };
-    }
+      let content: Buffer;
+      try {
+        content = await this.storage.readObject(attachment.objectKey);
+      } catch (error) {
+        await this.repository.markScanFailed(attachment.id, "STORAGE_UNAVAILABLE");
+        throw error;
+      }
+      const digest = sha256(content);
+      if (
+        content.byteLength < 1
+        || content.byteLength > MAX_ATTACHMENT_SIZE_BYTES
+        || content.byteLength !== Number(attachment.actualSizeBytes)
+      ) {
+        await this.repository.markScanRejected({
+          id: attachment.id,
+          reason: "FINAL_SIZE_MISMATCH",
+          actualSizeBytes: BigInt(content.byteLength),
+          sha256: digest,
+        });
+        return { attachmentId, scanStatus: "REJECTED" as const };
+      }
 
-    let detected;
-    try {
-      detected = await inspectAttachmentContent({
-        buffer: content,
-        extension: attachment.extension,
-        declaredMimeType: attachment.declaredMimeType,
-      });
-    } catch {
-      await this.repository.markScanRejected({
-        id: attachment.id,
-        reason: "TYPE_MISMATCH_OR_UNSUPPORTED",
-        actualSizeBytes: BigInt(content.byteLength),
-        sha256: digest,
-      });
-      return { attachmentId, scanStatus: "REJECTED" as const };
-    }
+      let detected;
+      try {
+        detected = await inspectAttachmentContent({
+          buffer: content,
+          extension: attachment.extension,
+          declaredMimeType: attachment.declaredMimeType,
+        });
+      } catch {
+        await this.repository.markScanRejected({
+          id: attachment.id,
+          reason: "TYPE_MISMATCH_OR_UNSUPPORTED",
+          actualSizeBytes: BigInt(content.byteLength),
+          sha256: digest,
+        });
+        return { attachmentId, scanStatus: "REJECTED" as const };
+      }
 
-    let scan;
-    try {
-      scan = await this.scanner.scan({
-        content,
-        filename: attachment.originalFilename,
-        detectedMimeType: detected.mimeType,
-      });
-    } catch {
-      await this.repository.markScanFailed(attachment.id, "SCANNER_UNAVAILABLE");
-      throw new AttachmentError("ATTACHMENT_SCANNER_UNAVAILABLE", "文件安全检查服务暂时不可用");
-    }
-    if (!scan.clean) {
-      await this.repository.markScanRejected({
+      let scan;
+      try {
+        scan = await this.scanner.scan({
+          content,
+          filename: attachment.originalFilename,
+          detectedMimeType: detected.mimeType,
+        });
+      } catch {
+        await this.repository.markScanFailed(attachment.id, "SCANNER_UNAVAILABLE");
+        throw new AttachmentError("ATTACHMENT_SCANNER_UNAVAILABLE", "文件安全检查服务暂时不可用");
+      }
+      if (!scan.clean) {
+        await this.repository.markScanRejected({
+          id: attachment.id,
+          reason: "MALWARE_DETECTED",
+          actualSizeBytes: BigInt(content.byteLength),
+          sha256: digest,
+          detectedMimeType: detected.mimeType,
+          detectedFileType: detected.extension,
+        });
+        return { attachmentId, scanStatus: "REJECTED" as const };
+      }
+      await this.repository.markScanPassed({
         id: attachment.id,
-        reason: "MALWARE_DETECTED",
         actualSizeBytes: BigInt(content.byteLength),
         sha256: digest,
         detectedMimeType: detected.mimeType,
         detectedFileType: detected.extension,
       });
-      return { attachmentId, scanStatus: "REJECTED" as const };
+      return { attachmentId, scanStatus: "PASSED" as const, sha256: digest };
+    } catch (error) {
+      // A lost DB acknowledgement after the external scan must remain retryable. The
+      // conditional write never downgrades an already terminal PASSED/REJECTED row.
+      try { await this.repository.markScanFailed(attachment.id, "SCAN_PROCESSING_FAILED"); }
+      catch { /* The Job lease/retry remains the durable recovery path. */ }
+      throw error;
     }
-    await this.repository.markScanPassed({
-      id: attachment.id,
-      actualSizeBytes: BigInt(content.byteLength),
-      sha256: digest,
-      detectedMimeType: detected.mimeType,
-      detectedFileType: detected.extension,
-    });
-    return { attachmentId, scanStatus: "PASSED" as const, sha256: digest };
   }
 }

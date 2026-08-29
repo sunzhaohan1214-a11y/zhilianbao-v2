@@ -45,8 +45,16 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+      clamav:
+        image: clamav/clamav:stable
+        ports:
+          - 3310:3310
     env:
       APP_ENV: test
+      FILE_SCAN_PROVIDER: clamav
+      CLAMAV_HOST: 127.0.0.1
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT_MS: 5000
       DATABASE_URL: mysql://root:ci-root-password@127.0.0.1:3306/zhilianbao_v2_e2e_test
       APP_BASE_URL: http://127.0.0.1:3000
       ADMIN_CONTACT_PHONE: 0514-XXXXXXXX
@@ -121,6 +129,7 @@ jobs:
       - name: Verify image config contains no database or cloud credentials
         run: '! docker image inspect zhilianbao-v2:m3-008 --format "{{json .Config.Env}}" | grep -E "DATABASE_URL|SECRET_(ID|KEY)|GITHUB_TOKEN"'
       - run: docker run --rm zhilianbao-v2:m3-008 node worker-dist/main.js --help
+      - run: docker run --rm zhilianbao-v2:m3-008 node worker-dist/attachment-scan-main.js --help
 
   security:
     runs-on: ubuntu-latest
@@ -205,8 +214,16 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+      clamav:
+        image: clamav/clamav:stable
+        ports:
+          - 3310:3310
     env:
       APP_ENV: test
+      FILE_SCAN_PROVIDER: clamav
+      CLAMAV_HOST: 127.0.0.1
+      CLAMAV_PORT: 3310
+      CLAMAV_TIMEOUT_MS: 5000
       DATABASE_URL: mysql://root:ci-root-password@127.0.0.1:3306/zhilianbao_v2_browser_test
       APP_BASE_URL: http://127.0.0.1:3000
       ADMIN_CONTACT_PHONE: 0514-XXXXXXXX

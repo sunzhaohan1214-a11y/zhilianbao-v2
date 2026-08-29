@@ -306,7 +306,7 @@ ADMIN retains only its existing operational capabilities and cannot see or direc
 - Minimum CSP allowlist permits only self and the required Tencent map/cloud origins; framing and objects are denied. Production HSTS is emitted only when HTTPS is explicitly confirmed.
 - `nosniff`, strict-origin referrer policy, restrictive permissions policy, frame denial, and removal of the framework signature are mandatory.
 - Structured logs recursively redact credentials, sessions, authorization/cookies, phone/ID values, AI prompt/response and invoice bodies. Unknown exceptions expose only stable error codes.
-- Attachment scanning fails closed outside explicit TEST fakes. Production selection requires ClamAV; CI proves both clean acceptance and malware rejection against a real daemon.
+- Attachment scanning fails closed unless `FILE_SCAN_PROVIDER=clamav` and a valid daemon endpoint are explicitly configured. `APP_ENV=test` never selects a fake scanner; fake adapters exist only for constructor-injected unit/integration tests. CI proves both clean acceptance and malware rejection against a real daemon.
 - High/critical dependency advisories, secret patterns, unsafe Prisma/raw SQL, dangerous HTML/eval, production `db push`, and runtime schema creation fail the security job.
 - The route matrix rechecks authentication, capability, object visibility and state; ordinary ADMIN never inherits SUPER-only system/AI/reimbursement authority.
 - Runtime containers use the `nextjs` non-root user and contain no `.env` or committed test evidence.

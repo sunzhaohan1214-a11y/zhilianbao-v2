@@ -1,4 +1,5 @@
 import { uploadAttachmentToCos, type BrowserUploadIntent } from "@/modules/attachment/client/cos-browser-uploader";
+import { waitForAttachmentScan } from "@/modules/attachment/client/wait-for-attachment-scan";
 
 type InternalAttachmentIntent = BrowserUploadIntent & { attachmentId: string };
 
@@ -43,6 +44,16 @@ export async function uploadFormalAttachments(files: readonly File[]): Promise<s
     });
     const completePayload = await completeResponse.json();
     if (!completeResponse.ok) throw new Error(completePayload.error?.message ?? "附件确认失败");
+    if (intent.upload.type === "TEST_MEMORY") {
+      const scanResponse = await fetch(`/api/v2/test/attachments/${intent.attachmentId}/scan`, { method: "POST" });
+      if (!scanResponse.ok) throw new Error("测试附件安全扫描失败");
+    }
+    await waitForAttachmentScan(async () => {
+      const response = await fetch(`/api/v2/attachments/${intent.attachmentId}/complete`, { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error?.message ?? "附件状态查询失败");
+      return payload.data;
+    });
     attachmentIds.push(intent.attachmentId);
   }
   return attachmentIds;

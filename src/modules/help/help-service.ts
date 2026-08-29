@@ -107,11 +107,11 @@ export class HelpService {
         || !(attachment.isTemporary === true || attachment.isTemporary === 1)
         || attachment.linkId !== null
         || attachment.uploadStatus !== "UPLOADED"
-        || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+        || attachment.scanStatus !== "PASSED"
       ) {
         throw new HelpError(
           "HELP_ATTACHMENT_INVALID",
-          "仅可使用本人已上传且等待扫描或已通过扫描的临时附件",
+          "仅可使用本人已上传且通过安全扫描的临时附件",
         );
       }
     }

@@ -200,8 +200,8 @@ export class ReimbursementService {
       const file = rows[0];
       if (!file || rows.length !== 1 || file.uploadedByPersonId !== input.actor.personId || !(file.isTemporary === true || file.isTemporary === 1)
         || !["jpg", "jpeg", "png", "heic", "heif", "pdf", "ofd"].includes(file.extension)
-        || file.linkId || file.uploadStatus !== "UPLOADED" || !["PENDING", "SCANNING", "PASSED"].includes(file.scanStatus)) {
-        throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "仅可添加本人已上传且等待扫描或扫描通过的临时票据");
+        || file.linkId || file.uploadStatus !== "UPLOADED" || file.scanStatus !== "PASSED") {
+        throw new ReimbursementError("REIMBURSEMENT_INVOICE_INVALID", "仅可添加本人已上传且通过安全扫描的临时票据");
       }
       const invoice = await tx.reimbursementInvoice.create({ data: { reimbursementId: item.id, attachmentId: body.attachmentId } });
       await tx.attachmentLink.create({ data: { attachmentId: body.attachmentId, entityType: "REIMBURSEMENT_INVOICE", entityId: item.id, relationType: "INVOICE", createdByPersonId: input.actor.personId } });

@@ -128,8 +128,8 @@ export class AttachmentRepository {
   }
 
   async markScanFailed(id: string, reason: string): Promise<void> {
-    await this.prisma.attachment.update({
-      where: { id },
+    await this.prisma.attachment.updateMany({
+      where: { id, scanStatus: "SCANNING" },
       data: { scanStatus: "FAILED", scanReason: reason },
     });
   }
@@ -229,7 +229,7 @@ export class AttachmentRepository {
       const attachment = await tx.attachment.findUniqueOrThrow({ where: { id: input.attachmentId } });
       if (
         attachment.uploadStatus !== "UPLOADED"
-        || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+        || attachment.scanStatus !== "PASSED"
       ) return { attachment, link: null };
       const link = await tx.attachmentLink.upsert({
         where: {

@@ -123,11 +123,11 @@ export class TalentService {
         !(attachment.isTemporary === true || attachment.isTemporary === 1) ||
         attachment.linkId !== null ||
         attachment.uploadStatus !== "UPLOADED" ||
-        !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+        attachment.scanStatus !== "PASSED"
       )
         throw new TalentError(
           "TALENT_ATTACHMENT_INVALID",
-          "仅可提交本人本次上传且等待扫描或已通过扫描的临时附件",
+          "仅可提交本人本次上传且已通过安全扫描的临时附件",
         );
     }
     if (unique.length) {

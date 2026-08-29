@@ -67,13 +67,15 @@ describe("M2-006 real MySQL policy lifecycle", () => {
     expect(results.map(({ versionNo }) => versionNo).sort()).toEqual([2, 3]); expect(await prisma.attachmentLink.count({ where: { entityType: "POLICY_CONTENT_VERSION", entityId: oldVersionId } })).toBe(1);
   });
 
-  it("accepts production pending scans for drafts while enforcing uploader ownership, row locks and publish gates", async () => {
+  it("refuses policy links before PASSED while enforcing uploader ownership and row locks", async () => {
     const pendingAttachmentId = await attachment(admin.personId, "PENDING");
-    const pendingDraft = await service().create({ actor: admin, policy: input(pendingAttachmentId) }); policyIds.push(pendingDraft.id);
-    await expect(service().extract({ actor: admin, policyId: pendingDraft.id })).rejects.toMatchObject({ code: "POLICY_ATTACHMENT_NOT_READY" });
-    await service().confirmInterpretation({ actor: admin, policyId: pendingDraft.id, core: { title: pendingDraft.title, issuingDepartment: pendingDraft.issuingDepartment, publicationDate: "2026-08-27", level: pendingDraft.level, applicationDeadline: null, tagIds: [tagId] }, interpretation: interpretation(pendingAttachmentId) });
-    await expect(service().publish({ actor: admin, policyId: pendingDraft.id })).rejects.toMatchObject({ code: "POLICY_ATTACHMENT_NOT_READY" });
+    await expect(service().create({ actor: admin, policy: input(pendingAttachmentId) }))
+      .rejects.toMatchObject({ code: "POLICY_ATTACHMENT_NOT_READY" });
+    expect(await prisma.attachmentLink.count({ where: { attachmentId: pendingAttachmentId } })).toBe(0);
+    expect((await prisma.attachment.findUniqueOrThrow({ where: { id: pendingAttachmentId } })).isTemporary).toBe(true);
     await prisma.attachment.update({ where: { id: pendingAttachmentId }, data: { scanStatus: "PASSED" } });
+    const pendingDraft = await service().create({ actor: admin, policy: input(pendingAttachmentId) }); policyIds.push(pendingDraft.id);
+    await service().confirmInterpretation({ actor: admin, policyId: pendingDraft.id, core: { title: pendingDraft.title, issuingDepartment: pendingDraft.issuingDepartment, publicationDate: "2026-08-27", level: pendingDraft.level, applicationDeadline: null, tagIds: [tagId] }, interpretation: interpretation(pendingAttachmentId) });
     await expect(service().publish({ actor: admin, policyId: pendingDraft.id })).resolves.toMatchObject({ publicationStatus: "PUBLISHED" });
 
     const otherAdminAttachment = await attachment(adminB.personId);

@@ -1,4 +1,6 @@
 export * from "./errors";
+export * from "./attachment-scan-job-runtime";
+export * from "./worker-identity";
 export * from "./handler-registry";
 export * from "./job-repository";
 export * from "./job-runner";

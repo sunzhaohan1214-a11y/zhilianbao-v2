@@ -286,15 +286,20 @@ describe("M1-003 real MySQL formal demand workflow", () => {
     expect(stableDetail.provenances[0]).not.toHaveProperty("sourceSnapshot");
   });
 
-  it("freezes attachments during review and blocks publication until every attachment passes", async () => {
+  it("refuses business links before PASSED and rechecks a linked attachment before review", async () => {
     const scanning = await attachment("SCANNING");
-    const draft = await createDraft(township, { attachmentIds: [scanning.id] });
+    await expect(createDraft(township, { attachmentIds: [scanning.id] }))
+      .rejects.toMatchObject({ code: "DEMAND_ATTACHMENT_INVALID" });
+    expect(await prisma.attachmentLink.count({ where: { attachmentId: scanning.id } })).toBe(0);
+    const passed = await attachment("PASSED");
+    const draft = await createDraft(township, { attachmentIds: [passed.id] });
+    await prisma.attachment.update({ where: { id: passed.id }, data: { scanStatus: "SCANNING" } });
+    await expect(submit(draft.id)).rejects.toMatchObject({ code: "DEMAND_ATTACHMENT_INVALID" });
+    await prisma.attachment.update({ where: { id: passed.id }, data: { scanStatus: "PASSED" } });
     await submit(draft.id);
     await expect(service.updateDraft({ actor: township, demandId: draft.id, changes: { attachmentIds: [] } })).rejects.toMatchObject({ code: "DEMAND_STATE_CONFLICT" });
-    await expect(service.review({ actor: admin, demandId: draft.id, review: { decision: "APPROVE" } })).rejects.toMatchObject({ code: "DEMAND_ATTACHMENT_NOT_PASSED" });
-    await prisma.attachment.update({ where: { id: scanning.id }, data: { scanStatus: "PASSED" } });
     await expect(service.review({ actor: admin, demandId: draft.id, review: { decision: "APPROVE" } })).resolves.toMatchObject({ status: "PENDING_CLAIM" });
-    const link = await prisma.attachmentLink.findFirstOrThrow({ where: { attachmentId: scanning.id, entityType: "DEMAND", entityId: draft.id } });
+    const link = await prisma.attachmentLink.findFirstOrThrow({ where: { attachmentId: passed.id, entityType: "DEMAND", entityId: draft.id } });
     await expect(prisma.attachmentLink.delete({ where: { id: link.id } })).rejects.toThrow();
   });
 
