@@ -137,34 +137,127 @@ function normalizedIpBytes(value: string): number[] | null {
   return ipv6Bytes(normalized);
 }
 
-function isUnsafeIpAddress(value: string): boolean {
+/**
+ * IANA IPv6 Special-Purpose Address Registry, last updated 2025-10-09.
+ * Every registry entry is rejected for release-evidence HTTPS endpoints,
+ * including the entries whose specialised protocol semantics are globally
+ * reachable. These are not ordinary public evidence origins.
+ * https://www.iana.org/assignments/iana-ipv6-special-registry/
+ */
+export const IANA_IPV6_SPECIAL_PURPOSE_PREFIXES = [
+  "::1/128",
+  "::/128",
+  "::ffff:0:0/96",
+  "64:ff9b::/96",
+  "64:ff9b:1::/48",
+  "100::/64",
+  "100:0:0:1::/64",
+  "2001::/23",
+  "2001::/32",
+  "2001:1::1/128",
+  "2001:1::2/128",
+  "2001:1::3/128",
+  "2001:2::/48",
+  "2001:3::/32",
+  "2001:4:112::/48",
+  "2001:10::/28",
+  "2001:20::/28",
+  "2001:30::/28",
+  "2001:db8::/32",
+  "2002::/16",
+  "2620:4f:8000::/48",
+  "3fff::/20",
+  "5f00::/16",
+  "fc00::/7",
+  "fe80::/10",
+] as const;
+
+/**
+ * ALLOCATED entries in IANA's IPv6 Global Unicast Address Space registry,
+ * last updated 2025-10-10. Unlisted and RESERVED parts of 2000::/3 fail
+ * closed rather than being treated as ordinary public destinations.
+ * https://www.iana.org/assignments/ipv6-unicast-address-assignments/
+ */
+export const IANA_IPV6_ALLOCATED_GLOBAL_UNICAST_PREFIXES = [
+  "2001::/23",
+  "2001:200::/23",
+  "2001:400::/23",
+  "2001:600::/23",
+  "2001:800::/22",
+  "2001:c00::/23",
+  "2001:e00::/23",
+  "2001:1200::/23",
+  "2001:1400::/22",
+  "2001:1800::/23",
+  "2001:1a00::/23",
+  "2001:1c00::/22",
+  "2001:2000::/19",
+  "2001:4000::/23",
+  "2001:4200::/23",
+  "2001:4400::/23",
+  "2001:4600::/23",
+  "2001:4800::/23",
+  "2001:4a00::/23",
+  "2001:4c00::/23",
+  "2001:5000::/20",
+  "2001:8000::/19",
+  "2001:a000::/20",
+  "2001:b000::/20",
+  "2002::/16",
+  "2003::/18",
+  "2400::/12",
+  "2410::/12",
+  "2600::/12",
+  "2610::/23",
+  "2620::/23",
+  "2630::/12",
+  "2800::/12",
+  "2a00::/12",
+  "2a10::/12",
+  "2c00::/12",
+] as const;
+
+function prefixMatches(addressBytes: readonly number[], networkBytes: readonly number[], prefixLength: number): boolean {
+  if (addressBytes.length !== 16 || networkBytes.length !== 16 || !Number.isInteger(prefixLength) || prefixLength < 0 || prefixLength > 128) return false;
+  const completeBytes = Math.floor(prefixLength / 8);
+  for (let index = 0; index < completeBytes; index += 1) {
+    if (addressBytes[index] !== networkBytes[index]) return false;
+  }
+  const remainingBits = prefixLength % 8;
+  if (remainingBits === 0) return true;
+  const mask = (0xff << (8 - remainingBits)) & 0xff;
+  return (addressBytes[completeBytes] & mask) === (networkBytes[completeBytes] & mask);
+}
+
+export function ipv6PrefixMatches(address: string, cidr: string): boolean {
+  const separator = cidr.lastIndexOf("/");
+  if (separator <= 0 || separator === cidr.length - 1) return false;
+  const addressBytes = ipv6Bytes(address);
+  const networkBytes = ipv6Bytes(cidr.slice(0, separator));
+  const prefixLength = Number(cidr.slice(separator + 1));
+  return Boolean(addressBytes && networkBytes && prefixMatches(addressBytes, networkBytes, prefixLength));
+}
+
+export function isSafePublicIpAddress(value: string): boolean {
   const normalized = value.replace(/^\[|\]$/g, "").toLowerCase();
-  if (isIP(normalized) === 4) return isUnsafeIpv4(normalized);
+  if (isIP(normalized) === 4) return !isUnsafeIpv4(normalized);
   const bytes = ipv6Bytes(normalized);
-  if (!bytes) return true;
-  const embeddedIpv4 = bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff
-    ? bytes.slice(12).join(".")
-    : null;
-  if (embeddedIpv4) return isUnsafeIpv4(embeddedIpv4);
-  const ipv4Compatible = bytes.slice(0, 12).every((byte) => byte === 0);
-  const unspecifiedOrLoopback = ipv4Compatible;
-  const uniqueLocal = (bytes[0] & 0xfe) === 0xfc;
-  const linkOrSiteLocal = bytes[0] === 0xfe && ((bytes[1] & 0xc0) === 0x80 || (bytes[1] & 0xc0) === 0xc0);
-  const multicast = bytes[0] === 0xff;
-  const documentation = bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8;
-  const discardOnly = bytes[0] === 0x01 && bytes.slice(1, 8).every((byte) => byte === 0);
-  const nat64Special = bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b
-    && ((bytes[4] === 0x00 && bytes[5] === 0x01) || bytes.slice(4, 12).every((byte) => byte === 0));
-  const protocolAssignments = bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] <= 0x01;
-  const sixToFour = bytes[0] === 0x20 && bytes[1] === 0x02;
-  return unspecifiedOrLoopback || uniqueLocal || linkOrSiteLocal || multicast || documentation || discardOnly
-    || nat64Special || protocolAssignments || sixToFour;
+  if (!bytes || !IANA_IPV6_ALLOCATED_GLOBAL_UNICAST_PREFIXES.some((prefix) => ipv6PrefixMatches(normalized, prefix))) return false;
+  return !IANA_IPV6_SPECIAL_PURPOSE_PREFIXES.some((prefix) => ipv6PrefixMatches(normalized, prefix));
+}
+
+function isUnsafeIpAddress(value: string): boolean {
+  return !isSafePublicIpAddress(value);
 }
 
 function sameIpAddress(left: string, right: string): boolean {
   const leftBytes = normalizedIpBytes(left);
   const rightBytes = normalizedIpBytes(right);
   return Boolean(leftBytes && rightBytes && leftBytes.length === rightBytes.length && leftBytes.every((byte, index) => byte === rightBytes[index]));
+}
+
+export function isPinnedSafeRemoteAddress(remoteAddress: string | undefined, pinnedAddress: string): boolean {
+  return Boolean(remoteAddress && isSafePublicIpAddress(remoteAddress) && sameIpAddress(remoteAddress, pinnedAddress));
 }
 
 function dnsDeadline<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
@@ -219,7 +312,7 @@ function defaultRequestReference({ url, addresses, signal }: { url: URL; address
     });
     request.on("socket", (socket) => {
       socket.once("secureConnect", () => {
-        if (!socket.remoteAddress || !sameIpAddress(socket.remoteAddress, selected.address)) {
+        if (!isPinnedSafeRemoteAddress(socket.remoteAddress, selected.address)) {
           request.destroy(new Error("EVIDENCE_REFERENCE_UNSAFE"));
         }
       });

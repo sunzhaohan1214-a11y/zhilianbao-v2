@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  REQUIRED_CI_JOBS, buildReleaseReadiness, readinessExitCode, validateAiEvidence, validateBackupEvidence,
+  IANA_IPV6_ALLOCATED_GLOBAL_UNICAST_PREFIXES, IANA_IPV6_SPECIAL_PURPOSE_PREFIXES, REQUIRED_CI_JOBS, buildReleaseReadiness, ipv6PrefixMatches, isPinnedSafeRemoteAddress, isSafePublicIpAddress, readinessExitCode, validateAiEvidence, validateBackupEvidence,
   validateExactHeadCi, validateGenericEvidence as validateGenericEvidenceWithoutDependencies, validateGenericEvidenceWithDependencies, validateGithubProtection, validateMaintenanceEvidence,
   validateMigrationEvidence, validatePreflightEvidence, validateRestoreEvidence, validateScannerEvidence,
   validateUatEvidence, type EvidenceLoadingDependencies, type EvidenceValidation, type ExternalEvidenceCategory, type ReleaseGateInputs,
@@ -56,6 +56,30 @@ function inputs(overrides: Partial<ReleaseGateInputs> = {}): ReleaseGateInputs {
   return { mode: "prod", appEnvironment: "PROD", appVersion: candidateSha, fakeProvidersEnabled: false, scannerConfigured: true, backupConfigured: true, scannerEvidence: blocked(), backupEvidence: blocked(), maintenanceEvidence: blocked(), restoreEvidence: blocked(), migrationEvidence: blocked(), githubProtection: blocked(), exactHeadCi: blocked(), uatEvidence: blocked(), preflightEvidence: blocked(), ...overrides };
 }
 
+function ipv6BigInt(value: string): bigint {
+  const halves = value.toLowerCase().split("::");
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves[1] ? halves[1].split(":") : [];
+  const words = halves.length === 2 ? [...head, ...Array.from({ length: 8 - head.length - tail.length }, () => "0"), ...tail] : head;
+  return words.reduce((result, word) => (result << BigInt(16)) | BigInt(`0x${word || "0"}`), BigInt(0));
+}
+
+function expandedIpv6(value: bigint): string {
+  return Array.from({ length: 8 }, (_, index) => Number((value >> BigInt((7 - index) * 16)) & BigInt(0xffff)).toString(16)).join(":");
+}
+
+function cidrBoundarySamples(cidr: string): { first: string; interior: string; last: string; neighbor: string } {
+  const [address, rawLength] = cidr.split("/");
+  const prefixLength = Number(rawLength);
+  const hostBits = BigInt(128 - prefixLength);
+  const hostMask = hostBits === BigInt(0) ? BigInt(0) : (BigInt(1) << hostBits) - BigInt(1);
+  const network = ipv6BigInt(address) & (((BigInt(1) << BigInt(128)) - BigInt(1)) ^ hostMask);
+  const last = network | hostMask;
+  const interior = network | (hostMask >> BigInt(1));
+  const neighbor = last < (BigInt(1) << BigInt(128)) - BigInt(1) ? last + BigInt(1) : network - BigInt(1);
+  return { first: expandedIpv6(network), interior: expandedIpv6(interior), last: expandedIpv6(last), neighbor: expandedIpv6(neighbor) };
+}
+
 async function completeExternalEvidence() {
   return {
     scannerEvidence: await validateScannerEvidence(await evidence("scanner", "PROD", { provider: "clamav", health: "READY", cleanAccepted: true, eicarRejected: true }), candidateSha),
@@ -73,6 +97,75 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   vi.unstubAllGlobals();
   delete process.env.REAL_RESTORE_DRILL_PASSED; delete process.env.FULL_V1_REHEARSAL_PASSED; delete process.env.UAT_SIGNED_OFF; delete process.env.REAL_MAINTENANCE_PROVIDER_READY;
+});
+
+describe("M3-008 IPv6 public-address classification", () => {
+  it.each([
+    ["fc00::1", "fc00::/7", true], ["fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "fc00::/7", true], ["fe00::1", "fc00::/7", false],
+    ["fe80::1", "fe80::/10", true], ["febf:ffff::1", "fe80::/10", true], ["fec0::1", "fe80::/10", false],
+    ["3fff::1", "3fff::/20", true], ["3fff:0fff:ffff::1", "3fff::/20", true], ["3fff:1000::1", "3fff::/20", false], ["4000::1", "3fff::/20", false],
+    ["5f00::1", "5f00::/16", true], ["5f00:ffff::1", "5f00::/16", true], ["5eff::1", "5f00::/16", false], ["6000::1", "5f00::/16", false],
+    ["2001::1", "2001::/23", true], ["2001:1ff:ffff::1", "2001::/23", true], ["2001:200::1", "2001::/23", false],
+    ["2001:db8::1", "2001:db8::/32", true], ["2001:db9::1", "2001:db8::/32", false],
+    ["64:ff9b:1::1", "64:ff9b:1::/48", true], ["64:ff9b:2::1", "64:ff9b:1::/48", false],
+    ["100:0:0:1::1", "100:0:0:1::/64", true], ["100:0:0:1:ffff::1", "100:0:0:1::/64", true], ["100:0:0:2::1", "100:0:0:1::/64", false],
+    ["::ffff:127.0.0.1", "::ffff:0:0/96", true], ["::fffe:ffff:ffff", "::ffff:0:0/96", false],
+  ] as const)("matches %s against %s as %s", (address, prefix, expected) => {
+    expect(ipv6PrefixMatches(address, prefix)).toBe(expected);
+  });
+
+  it.each(IANA_IPV6_SPECIAL_PURPOSE_PREFIXES)("matches the first, interior, and last address of IANA prefix %s only", (prefix) => {
+    const samples = cidrBoundarySamples(prefix);
+    expect(ipv6PrefixMatches(samples.first, prefix)).toBe(true);
+    expect(ipv6PrefixMatches(samples.interior, prefix)).toBe(true);
+    expect(ipv6PrefixMatches(samples.last, prefix)).toBe(true);
+    expect(ipv6PrefixMatches(samples.neighbor, prefix)).toBe(false);
+    expect(isSafePublicIpAddress(samples.first)).toBe(false);
+    expect(isSafePublicIpAddress(samples.interior)).toBe(false);
+    expect(isSafePublicIpAddress(samples.last)).toBe(false);
+  });
+
+  it.each(IANA_IPV6_ALLOCATED_GLOBAL_UNICAST_PREFIXES)("matches all boundaries of IANA allocated global-unicast prefix %s", (prefix) => {
+    const samples = cidrBoundarySamples(prefix);
+    expect(ipv6PrefixMatches(samples.first, prefix)).toBe(true);
+    expect(ipv6PrefixMatches(samples.interior, prefix)).toBe(true);
+    expect(ipv6PrefixMatches(samples.last, prefix)).toBe(true);
+    expect(ipv6PrefixMatches(samples.neighbor, prefix)).toBe(false);
+  });
+
+  it.each([
+    "::1", "::", "fc00::1", "fd00::1", "fe80::1", "fec0::1", "ff02::1", "2001:db8::1", "3fff::1", "5f00::1",
+    "100::1", "100:0:0:1::1", "64:ff9b::1", "64:ff9b:1::1", "2002::1", "2001:1::1", "2001:3::1", "2620:4f:8000::1",
+    "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:10.0.0.1", "::ffff:a00:1", "::ffff:169.254.169.254", "::ffff:a9fe:a9fe",
+    "::ffff:172.16.0.1", "::ffff:ac10:1", "::ffff:192.168.0.1", "::ffff:c0a8:1", "::127.0.0.1", "3FFF:0000:0000:0000:0000:0000:0000:0001",
+    "2d00::1", "3000::1", "3ffe::1", "3fff:1000::1", "4000::1", "6000::1", "not-an-ip", "fe80::1%eth0",
+  ])("rejects non-public or special-purpose IPv6 address %s", (address) => {
+    expect(isSafePublicIpAddress(address)).toBe(false);
+  });
+
+  it.each([
+    "2001:4860:4860::8888",
+    "2404:6800:4005:80a::200e",
+    "2606:2800:220:1:248:1893:25c8:1946",
+    "2606:4700:4700::1111",
+    "2a00:1450:4009:80b::200e",
+  ])("allows classifier-only global public unicast sample %s", (address) => {
+    expect(isSafePublicIpAddress(address)).toBe(true);
+  });
+
+  it("normalizes equivalent IPv6 forms and fails closed on malformed CIDRs", () => {
+    expect(ipv6PrefixMatches("3FFF:0000:0000:0000:0000:0000:0000:0001", "3fff::/20")).toBe(true);
+    expect(ipv6PrefixMatches("::ffff:127.0.0.1", "::ffff:0:0/96")).toBe(true);
+    expect(ipv6PrefixMatches("3fff::1", "invalid/20")).toBe(false);
+    expect(ipv6PrefixMatches("3fff::1", "3fff::/129")).toBe(false);
+  });
+
+  it("requires the connected remote address to remain public and equal to the pinned address", () => {
+    expect(isPinnedSafeRemoteAddress("2606:2800:220:1:0248:1893:25c8:1946", "2606:2800:220:1:248:1893:25c8:1946")).toBe(true);
+    expect(isPinnedSafeRemoteAddress("3fff::1", "3fff::1")).toBe(false);
+    expect(isPinnedSafeRemoteAddress("2606:4700:4700::1111", "2606:4700:4700::1001")).toBe(false);
+    expect(isPinnedSafeRemoteAddress(undefined, "2606:4700:4700::1111")).toBe(false);
+  });
 });
 
 describe("M3-008 external evidence sources", () => {
@@ -156,6 +249,14 @@ describe("M3-008 external evidence sources", () => {
     expect(requestReference).not.toHaveBeenCalled();
   });
 
+  it.each(["[3fff::1]", "[5f00::1]", "[100:0:0:1::1]"])("rejects current IANA special-purpose IPv6 gap %s before request", async (host) => {
+    const fixture = await evidenceFixture("uat", "TEST");
+    const requestReference = vi.fn(async () => ({ statusCode: 200, body: responseBody(fixture.content) }));
+    const reference = fixture.reference.replace("93.184.216.34", host);
+    await expect(validateGenericEvidence(JSON.stringify({ reference }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
   it("rejects hostnames when DNS returns private or mixed public/private addresses", async () => {
     const digest = "0".repeat(64);
     const requestReference = vi.fn();
@@ -165,6 +266,17 @@ describe("M3-008 external evidence sources", () => {
     ]) {
       await expect(validateGenericEvidence(JSON.stringify({ reference: `https://evidence.example/item?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { resolveHost: vi.fn(async () => addresses), requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
     }
+    expect(requestReference).not.toHaveBeenCalled();
+  });
+
+  it.each(["3fff::1", "5f00::1", "100:0:0:1::1"])("rejects DNS results containing special-purpose IPv6 address %s", async (unsafeAddress) => {
+    const digest = "0".repeat(64);
+    const requestReference = vi.fn();
+    const addresses = [
+      { address: "2606:4700:4700::1111", family: 6 as const },
+      { address: unsafeAddress, family: 6 as const },
+    ];
+    await expect(validateGenericEvidence(JSON.stringify({ reference: `https://evidence.example/item?sha256=${digest}` }), candidateSha, "uat", "TEST", "BLOCKED_BY_EXTERNAL_ENV", { resolveHost: vi.fn(async () => addresses), requestReference })).resolves.toMatchObject({ status: "FAIL", errorCode: "EVIDENCE_REFERENCE_UNSAFE" });
     expect(requestReference).not.toHaveBeenCalled();
   });
 
