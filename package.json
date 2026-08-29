@@ -32,6 +32,7 @@
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:reset:test": "node scripts/reset-test-database.mjs",
     "test:e2e:critical": "playwright test --project=chromium",
     "test:e2e:compat": "playwright test tests/e2e/browser-compat.spec.ts --project=chromium --project=firefox --project=webkit-mobile",
     "test:e2e:weak-network": "playwright test tests/e2e/weak-network.spec.ts --project=chromium",

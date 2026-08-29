@@ -47,18 +47,21 @@ test("@compat login, home, demand, attachment, report and system basics render w
   await expect(page.getByText(/M3-008 浏览器兼容/)).toBeVisible();
 
   const pdf = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n");
+  const mutationHeaders = { origin: new URL(page.url()).origin };
   const intent = await page.request.post("/api/v2/attachments/upload-intent", {
+    headers: mutationHeaders,
     data: { filename: "browser-compat.pdf", declaredMimeType: "application/pdf", expectedSizeBytes: pdf.byteLength },
   });
   expect(intent.status()).toBe(201);
   const attachmentId = (await intent.json()).data.attachmentId as string;
   expect((await page.request.post(`/api/v2/test/attachments/${attachmentId}/upload`, {
+    headers: mutationHeaders,
     data: { base64: pdf.toString("base64") },
   })).status()).toBe(200);
-  expect((await page.request.post(`/api/v2/attachments/${attachmentId}/complete`)).status()).toBe(200);
-  expect((await page.request.post(`/api/v2/test/attachments/${attachmentId}/scan`)).status()).toBe(200);
+  expect((await page.request.post(`/api/v2/attachments/${attachmentId}/complete`, { headers: mutationHeaders })).status()).toBe(200);
+  expect((await page.request.post(`/api/v2/test/attachments/${attachmentId}/scan`, { headers: mutationHeaders })).status()).toBe(200);
   expect((await page.request.get(`/api/v2/attachments/${attachmentId}/access?action=preview`)).status()).toBe(200);
-  expect((await page.request.post(`/api/v2/attachments/${attachmentId}/abort`)).status()).toBe(200);
+  expect((await page.request.post(`/api/v2/attachments/${attachmentId}/abort`, { headers: mutationHeaders })).status()).toBe(200);
 
   await page.context().clearCookies();
   await login(page, e2eUsers.admin);
