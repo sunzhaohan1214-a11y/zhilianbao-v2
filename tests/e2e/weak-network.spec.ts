@@ -23,7 +23,7 @@ test("@weak-network AI query exposes loading, prevents duplicate submission, and
   const submit = page.getByRole("button", { name: "查询" });
   await submit.dblclick();
   await expect(page.getByRole("status")).toContainText("请勿重复提交");
-  await expect(page.getByRole("alert")).toContainText("网络暂不可用");
+  await expect(page.getByRole("alert").filter({ hasText: "网络暂不可用" })).toContainText("网络暂不可用");
   expect(calls).toBe(1);
   await page.getByRole("button", { name: "重试" }).click();
   await expect(page.getByText("已安全重试")).toBeVisible();

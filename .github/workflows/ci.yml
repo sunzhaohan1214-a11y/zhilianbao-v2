@@ -75,6 +75,7 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     env:
+      APP_ENV: test
       DATABASE_URL: mysql://root:ci-root-password@127.0.0.1:3306/zhilianbao_v2_test
       AUTH_RATE_LIMIT_SECRET: ci-auth-rate-limit-secret-not-for-production
     steps:
