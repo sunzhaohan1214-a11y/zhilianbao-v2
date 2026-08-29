@@ -29,16 +29,27 @@ describe("TencentCynosDbBackupProvider", () => {
   it("paginates and maps provider backup metadata", async () => {
     const describe = vi.fn()
       .mockResolvedValueOnce({ TotalCount: 101, BackupList: Array.from({ length: 100 }, (_, index) => ({ BackupId: index + 1, BackupStatus: "success", BackupMethod: "auto", SnapShotType: "full", SnapshotTime: "2026-08-29T00:00:00Z" })) })
-      .mockResolvedValueOnce({ TotalCount: 101, BackupList: [{ BackupId: 101, BackupStatus: "creating", BackupMethod: "manual" }] });
+      .mockResolvedValueOnce({ TotalCount: 101, BackupList: [{ BackupId: 101, BackupStatus: "creating", BackupMethod: "manual", StartTime: "2026-08-29T00:01:00Z" }] });
     const provider = new TencentCynosDbBackupProvider(config, client({ DescribeBackupList: describe }));
     const items = await provider.listBackups();
     expect(items).toHaveLength(101);
     expect(items[0]).toMatchObject({ providerBackupId: "1", backupType: "AUTO_FULL", status: "SUCCEEDED", sourceEnvironment: "TEST" });
+    expect(items[0]).not.toHaveProperty("schemaVersion");
+    expect(items[0]).not.toHaveProperty("appVersion");
+    expect(items[0]).not.toHaveProperty("verifiedAt");
     expect(items[100]).toMatchObject({ providerBackupId: "101", backupType: "MANUAL", status: "RUNNING" });
   });
 
+  it("fails closed when a provider catalog item has no usable snapshot time", async () => {
+    const missing = new TencentCynosDbBackupProvider(config, client({ DescribeBackupList: vi.fn().mockResolvedValue({ TotalCount: 1, BackupList: [{ BackupId: 1, BackupStatus: "success" }] }) }));
+    await expect(missing.listBackups()).rejects.toThrow("BACKUP_PROVIDER_SNAPSHOT_TIME_MISSING");
+
+    const invalid = new TencentCynosDbBackupProvider(config, client({ DescribeBackupList: vi.fn().mockResolvedValue({ TotalCount: 1, BackupList: [{ BackupId: 2, BackupStatus: "success", SnapshotTime: "not-a-time" }] }) }));
+    await expect(invalid.listBackups()).rejects.toThrow("BACKUP_PROVIDER_SNAPSHOT_TIME_INVALID");
+  });
+
   it("reconciles a deterministic name before creating a duplicate", async () => {
-    const describe = vi.fn().mockResolvedValue({ TotalCount: 1, BackupList: [{ BackupId: 77, BackupName: "zlb-test-row-1", BackupStatus: "success", BackupMethod: "manual" }] });
+    const describe = vi.fn().mockResolvedValue({ TotalCount: 1, BackupList: [{ BackupId: 77, BackupName: "zlb-test-row-1", BackupStatus: "success", BackupMethod: "manual", SnapshotTime: "2026-08-29T00:00:00Z" }] });
     const create = vi.fn();
     const provider = new TencentCynosDbBackupProvider(config, client({ DescribeBackupList: describe, CreateBackup: create }));
     await expect(provider.createSnapshot({ backupType: "MANUAL", reason: "test", idempotencyKey: "row-1" })).resolves.toMatchObject({ providerBackupId: "77" });
@@ -53,7 +64,7 @@ describe("TencentCynosDbBackupProvider", () => {
   });
 
   it("fails closed when provider name reconciliation is ambiguous", async () => {
-    const duplicate = { BackupId: 1, BackupName: "zlb-test-row-3", BackupStatus: "success" };
+    const duplicate = { BackupId: 1, BackupName: "zlb-test-row-3", BackupStatus: "success", SnapshotTime: "2026-08-29T00:00:00Z" };
     const provider = new TencentCynosDbBackupProvider(config, client({ DescribeBackupList: vi.fn().mockResolvedValue({ TotalCount: 2, BackupList: [duplicate, { ...duplicate, BackupId: 2 }] }) }));
     await expect(provider.createSnapshot({ backupType: "MANUAL", reason: "test", idempotencyKey: "row-3" })).rejects.toThrow("BACKUP_PROVIDER_AMBIGUOUS");
   });

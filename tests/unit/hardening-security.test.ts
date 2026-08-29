@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { applicationSecurityHeaders } from "../../next.config";
 import { redactLogValue, writeLog } from "@/lib/logging/logger";
 import { ClamAvFileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
+import { isProductionCodeOrConfig, scanDangerousCodeText, scanSecretText } from "@/modules/hardening/security-scanners";
 
 async function clamServer(response: string | null) {
   const sockets = new Set<Socket>();
@@ -56,6 +57,30 @@ describe("M3-008 security headers and logging", () => {
     writeLog("info", { module: "test", requestId: "request-1", result: "pass", secretKey: "do-not-log" });
     const payload = JSON.parse(String(output.mock.calls[0]?.[0]));
     expect(payload).toMatchObject({ level: "info", module: "test", requestId: "request-1", result: "pass", secretKey: "[REDACTED]" });
+  });
+
+  it("redacts sensitive substrings inside ordinary keys, arrays, and nested objects", () => {
+    expect(redactLogValue({
+      message: "Authorization: Bearer fake-token-123456 contact 13800138000 user@example.com",
+      rows: ["mysql://root:real-password@db.internal:3306/prod", { note: "token=plain-secret-value" }],
+    })).toEqual({
+      message: "Authorization:[REDACTED] contact [REDACTED] [REDACTED]",
+      rows: ["mysql://[REDACTED]@db.internal:3306/prod", { note: "token=[REDACTED]" }],
+    });
+  });
+
+  it("rejects non-placeholder secret assignments including .env.example bypasses", () => {
+    expect(scanSecretText(".env.example", "SESSION_SECRET=real-production-secret-value")).toEqual([
+      { file: ".env.example", line: 1, rule: "SECRET_VARIABLE_VALUE" },
+    ]);
+    expect(scanSecretText(".env.example", "SESSION_SECRET=replace-with-a-long-random-secret\nDATABASE_URL=mysql://USER:PASSWORD@HOST:3306/example")).toEqual([]);
+  });
+
+  it("scans production root config and blocks dangerous constructs there", () => {
+    expect(isProductionCodeOrConfig("next.config.ts")).toBe(true);
+    expect(scanDangerousCodeText("next.config.ts", "const factory = eval(config.source)")).toEqual([
+      { file: "next.config.ts", line: 1, rule: "EVAL" },
+    ]);
   });
 });
 

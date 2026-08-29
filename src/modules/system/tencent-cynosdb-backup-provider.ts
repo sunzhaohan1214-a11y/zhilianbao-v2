@@ -1,7 +1,6 @@
 import { cynosdb } from "tencentcloud-sdk-nodejs-cynosdb";
 import type { BackupType } from "@/generated/prisma/client";
 import type { BackupProvider, ProviderBackup, ProviderHealth, RestoreProviderStatus } from "./backup-provider";
-import { CURRENT_SCHEMA_VERSION, currentAppVersion } from "./runtime";
 
 type BackupFile = {
   BackupId?: number;
@@ -51,8 +50,10 @@ function mappedBackupType(file: BackupFile): BackupType {
 
 function snapshotAt(file: BackupFile): Date {
   const candidate = file.SnapshotTime ?? file.FinishTime ?? file.StartTime;
-  const parsed = candidate ? new Date(candidate) : new Date();
-  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  if (!candidate) throw new Error("BACKUP_PROVIDER_SNAPSHOT_TIME_MISSING");
+  const parsed = new Date(candidate);
+  if (Number.isNaN(parsed.getTime())) throw new Error("BACKUP_PROVIDER_SNAPSHOT_TIME_INVALID");
+  return parsed;
 }
 
 export class TencentCynosDbBackupProvider implements BackupProvider {
@@ -89,9 +90,6 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
       sourceEnvironment: this.config.environment.toUpperCase(),
       status: providerStatus(file.BackupStatus),
       snapshotAt: when,
-      schemaVersion: CURRENT_SCHEMA_VERSION,
-      appVersion: currentAppVersion(),
-      verifiedAt: file.BackupStatus === "success" ? when : undefined,
       errorCode: file.BackupStatus === "fail" ? "CYNOSDB_BACKUP_FAILED" : undefined,
     };
   }
@@ -138,7 +136,6 @@ export class TencentCynosDbBackupProvider implements BackupProvider {
     return {
       providerBackupId: `pending-${name}`, backupType: input.backupType,
       sourceEnvironment: this.config.environment.toUpperCase(), status: "RUNNING", snapshotAt: new Date(),
-      schemaVersion: CURRENT_SCHEMA_VERSION, appVersion: currentAppVersion(),
     };
   }
 

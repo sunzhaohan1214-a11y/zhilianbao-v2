@@ -121,7 +121,7 @@ jobs:
           - 3310:3310
     env:
       APP_ENV: test
-      APP_VERSION: m3-008-ci
+      APP_VERSION: ${{ github.sha }}
       FILE_SCAN_PROVIDER: clamav
       CLAMAV_HOST: 127.0.0.1
       CLAMAV_PORT: 3310
