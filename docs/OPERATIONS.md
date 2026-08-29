@@ -422,6 +422,7 @@ COS bucket 必须保持 private。应用只向浏览器签发限定单个 stagin
 环境变量：
 
 ```text
+ATTACHMENT_STORAGE_PROVIDER
 COS_REGION
 COS_BUCKET
 COS_SECRET_ID
@@ -431,6 +432,8 @@ INVOICE_OCR_API_KEY
 ATTACHMENT_SIGNED_URL_TTL_SECONDS
 ATTACHMENT_UPLOAD_TTL_SECONDS
 ```
+
+`ATTACHMENT_STORAGE_PROVIDER` has no default. Deployed TEST and PROD must set it to `cos`; missing COS bucket, region or credentials fails closed during attachment runtime construction. `memory` is restricted to explicit local/unit/integration/E2E use with `ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE=true`, a local/test application identity, and a non-production Node runtime. `APP_ENV=test` alone never selects memory, and a production-built TEST deployment cannot enable it. The protected test upload routes also require this explicit memory configuration.
 
 `INVOICE_OCR_ENDPOINT` 必须指向专业票据 OCR/电子票据解析服务，`INVOICE_OCR_API_KEY` 只通过服务端 Secret 注入。任一项未配置时，报销票据识别任务进入可解释的人工录入降级状态；不得改用通用大模型猜测金额、票号或费用分类。
 
@@ -486,4 +489,4 @@ node worker-dist/attachment-scan-main.js
 
 The command recovers only stale `ATTACHMENT_SCAN` leases, claims at most one due scan JobTask with `FOR UPDATE SKIP LOCKED`, runs the existing handler, persists success or retry/backoff, and exits. It does not consume Outbox or unrelated jobs. An idle invocation exits successfully. Multiple invocations remain safe because JobTask enqueue and claim are idempotent/lease-protected.
 
-Deployment TEST and PROD must explicitly inject `FILE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST`, `CLAMAV_PORT` and `CLAMAV_TIMEOUT_MS`; `APP_ENV=test` is not a provider identity and never enables a fake. Keep the database, COS and scanner endpoint configuration in the deployment Secret/runtime configuration, never in the image. The scheduler, private network path, ClamAV endpoint or sidecar, retry cadence, alerts and minimum-instance setting remain cloud wiring; prefer minimum instances zero where cold-start latency is acceptable. Before enabling traffic, prove clean acceptance, EICAR rejection, retry after scanner outage, and zero business links/signed URLs for non-passed attachments in the real TEST environment.
+Deployment TEST and PROD Web/scan-job processes must both explicitly inject `ATTACHMENT_STORAGE_PROVIDER=cos` and the same COS bucket/region identity, plus `FILE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST`, `CLAMAV_PORT` and `CLAMAV_TIMEOUT_MS`; `APP_ENV=test` is not a storage or scanner provider identity. Keep database, COS credentials and scanner endpoint configuration in deployment Secret/runtime configuration, never in the image. The scheduler, private network path, ClamAV endpoint or sidecar, retry cadence, alerts and minimum-instance setting remain cloud wiring; prefer minimum instances zero where cold-start latency is acceptable. Before enabling traffic, prove a Web-uploaded object is readable by a separate scan-job process, clean acceptance, EICAR rejection, retry after scanner outage, and zero business links/signed URLs for non-passed attachments in the real TEST environment.

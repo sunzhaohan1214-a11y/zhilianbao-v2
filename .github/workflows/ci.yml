@@ -51,6 +51,10 @@ jobs:
           - 3310:3310
     env:
       APP_ENV: test
+      ATTACHMENT_STORAGE_PROVIDER: memory
+      ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE: "true"
+      COS_BUCKET: test-private-bucket-1250000000
+      COS_REGION: ap-test
       FILE_SCAN_PROVIDER: clamav
       CLAMAV_HOST: 127.0.0.1
       CLAMAV_PORT: 3310
@@ -94,6 +98,10 @@ jobs:
           --health-retries=10
     env:
       APP_ENV: test
+      ATTACHMENT_STORAGE_PROVIDER: memory
+      ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE: "true"
+      COS_BUCKET: test-private-bucket-1250000000
+      COS_REGION: ap-test
       DATABASE_URL: mysql://root:ci-root-password@127.0.0.1:3306/zhilianbao_v2_test
       AUTH_RATE_LIMIT_SECRET: ci-auth-rate-limit-secret-not-for-production
     steps:
@@ -220,6 +228,10 @@ jobs:
           - 3310:3310
     env:
       APP_ENV: test
+      ATTACHMENT_STORAGE_PROVIDER: memory
+      ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE: "true"
+      COS_BUCKET: test-private-bucket-1250000000
+      COS_REGION: ap-test
       FILE_SCAN_PROVIDER: clamav
       CLAMAV_HOST: 127.0.0.1
       CLAMAV_PORT: 3310

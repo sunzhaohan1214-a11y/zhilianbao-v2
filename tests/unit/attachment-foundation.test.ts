@@ -14,8 +14,8 @@ import { createStagingObjectKey, finalObjectKeyFromStaging } from "@/modules/att
 import { AttachmentParentAuthorizerRegistry } from "@/modules/attachment/parent-authorization";
 import type { AttachmentRepository } from "@/modules/attachment/repository/attachment-repository";
 import { ClamAvFileScanAdapter, FakeCleanScanner, UnavailableFileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
-import { createFileScanAdapter } from "@/modules/attachment/runtime";
-import { buildCosUploadPolicy, COS_UPLOAD_ACTIONS } from "@/modules/attachment/storage/cos-storage-adapter";
+import { createAttachmentStorageRuntime, createFileScanAdapter, testMemoryAttachmentStorageEnabled } from "@/modules/attachment/runtime";
+import { buildCosUploadPolicy, CosStorageAdapter, COS_UPLOAD_ACTIONS } from "@/modules/attachment/storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "@/modules/attachment/storage/in-memory-storage-adapter";
 import type { PermissionActor } from "@/modules/permissions/types";
 
@@ -201,6 +201,57 @@ describe("M3-008 explicit attachment scanner selection", () => {
     expect(readState).toHaveBeenCalledTimes(3);
     await expect(waitForAttachmentScan(async () => ({ scanStatus: "REJECTED" }), { intervalMs: 0 }))
       .rejects.toThrow("文件安全扫描未通过");
+  });
+});
+
+describe("on-demand explicit attachment storage selection", () => {
+  const base = {
+    COS_BUCKET: "unit-private-bucket-1250000000",
+    COS_REGION: "ap-test",
+  };
+
+  it("does not derive memory storage from APP_ENV=test or silently fall back when Provider is missing", () => {
+    expect(testMemoryAttachmentStorageEnabled({ APP_ENV: "test" })).toBe(false);
+    expect(() => createAttachmentStorageRuntime({ ...base, APP_ENV: "test" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+    expect(() => createAttachmentStorageRuntime({ ...base, APP_ENV: "test", ATTACHMENT_STORAGE_PROVIDER: "memory" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+  });
+
+  it("allows memory only behind the explicit non-production test gate", () => {
+    const environment = {
+      ...base,
+      APP_ENV: "test",
+      NODE_ENV: "test",
+      ATTACHMENT_STORAGE_PROVIDER: "memory",
+      ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE: "true",
+    };
+    expect(testMemoryAttachmentStorageEnabled(environment)).toBe(true);
+    expect(createAttachmentStorageRuntime(environment).storage).toBeInstanceOf(InMemoryStorageAdapter);
+    expect(() => createAttachmentStorageRuntime({ ...environment, NODE_ENV: "production" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+  });
+
+  it("makes separate deployed TEST processes select COS and rejects incomplete COS configuration", () => {
+    const testCredentials = {
+      ["COS_SECRET_ID"]: "test-only",
+      ["COS_SECRET_KEY"]: "test-only",
+    };
+    const deployedTest = {
+      ...base,
+      ...testCredentials,
+      APP_ENV: "test",
+      NODE_ENV: "production",
+      ATTACHMENT_STORAGE_PROVIDER: "cos",
+    };
+    const web = createAttachmentStorageRuntime(deployedTest);
+    const scanJob = createAttachmentStorageRuntime(deployedTest);
+    expect(web.storage).toBeInstanceOf(CosStorageAdapter);
+    expect(scanJob.storage).toBeInstanceOf(CosStorageAdapter);
+    expect({ bucket: web.storage.bucket, region: web.storage.region })
+      .toEqual({ bucket: scanJob.storage.bucket, region: scanJob.storage.region });
+    expect(() => createAttachmentStorageRuntime({ ...deployedTest, ["COS_SECRET_KEY"]: "" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
   });
 });
 

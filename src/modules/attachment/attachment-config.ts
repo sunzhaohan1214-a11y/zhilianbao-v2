@@ -15,7 +15,7 @@ function positiveInteger(value: string | undefined, fallback: number, maximum: n
   return parsed;
 }
 
-export function loadAttachmentConfig(environment: NodeJS.ProcessEnv = process.env): AttachmentConfig {
+export function loadAttachmentConfig(environment: Record<string, string | undefined> = process.env): AttachmentConfig {
   const bucket = environment.COS_BUCKET?.trim();
   const region = environment.COS_REGION?.trim();
   if (!bucket || !region) {

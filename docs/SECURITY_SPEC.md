@@ -307,6 +307,7 @@ ADMIN retains only its existing operational capabilities and cannot see or direc
 - `nosniff`, strict-origin referrer policy, restrictive permissions policy, frame denial, and removal of the framework signature are mandatory.
 - Structured logs recursively redact credentials, sessions, authorization/cookies, phone/ID values, AI prompt/response and invoice bodies. Unknown exceptions expose only stable error codes.
 - Attachment scanning fails closed unless `FILE_SCAN_PROVIDER=clamav` and a valid daemon endpoint are explicitly configured. `APP_ENV=test` never selects a fake scanner; fake adapters exist only for constructor-injected unit/integration tests. CI proves both clean acceptance and malware rejection against a real daemon.
+- Attachment storage has no environment-derived default. Deployed TEST/PROD explicitly select COS and fail closed on missing COS configuration; in-memory storage requires an explicit test-only double gate and is impossible under a production Node runtime. Test upload routes refuse to operate against COS or an implicit provider.
 - High/critical dependency advisories, secret patterns, unsafe Prisma/raw SQL, dangerous HTML/eval, production `db push`, and runtime schema creation fail the security job.
 - The route matrix rechecks authentication, capability, object visibility and state; ordinary ADMIN never inherits SUPER-only system/AI/reimbursement authority.
 - Runtime containers use the `nextjs` non-root user and contain no `.env` or committed test evidence.

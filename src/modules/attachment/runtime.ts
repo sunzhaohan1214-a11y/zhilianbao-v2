@@ -1,4 +1,5 @@
 import { loadAttachmentConfig } from "./attachment-config";
+import { AttachmentError } from "./attachment-errors";
 import { AttachmentCleanupService } from "./attachment-cleanup-service";
 import { AttachmentLinkService } from "./attachment-link-service";
 import { AttachmentScanService } from "./attachment-scan-service";
@@ -33,23 +34,7 @@ type AttachmentRuntime = {
 const globalRuntime = globalThis as typeof globalThis & { __zlbAttachmentRuntime?: AttachmentRuntime };
 
 function createRuntime(): AttachmentRuntime {
-  const isTest = process.env.APP_ENV === "test";
-  const config = isTest
-    ? {
-        bucket: process.env.COS_BUCKET || "test-private-bucket-1250000000",
-        region: process.env.COS_REGION || "ap-test",
-        uploadTtlSeconds: 900,
-        signedUrlTtlSeconds: 300,
-      }
-    : loadAttachmentConfig();
-  const storage: StorageAdapter = isTest
-    ? new InMemoryStorageAdapter(config)
-    : new CosStorageAdapter({
-        bucket: config.bucket,
-        region: config.region,
-        secretId: process.env.COS_SECRET_ID ?? "",
-        secretKey: process.env.COS_SECRET_KEY ?? "",
-      });
+  const { config, storage } = createAttachmentStorageRuntime();
   const repository = new AttachmentRepository();
   const parentAuthorizers = new AttachmentParentAuthorizerRegistry();
   registerPolicyAttachmentAuthorizer(parentAuthorizers);
@@ -74,6 +59,38 @@ function createRuntime(): AttachmentRuntime {
   };
 }
 
+export function testMemoryAttachmentStorageEnabled(environment: Record<string, string | undefined> = process.env): boolean {
+  const appEnvironment = environment.APP_ENV?.trim().toLowerCase();
+  const nodeEnvironment = environment.NODE_ENV?.trim().toLowerCase();
+  return environment.ATTACHMENT_STORAGE_PROVIDER?.trim().toLowerCase() === "memory"
+    && environment.ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE === "true"
+    && nodeEnvironment !== "production"
+    && (nodeEnvironment === "test" || appEnvironment === "test" || appEnvironment === "local");
+}
+
+export function createAttachmentStorageRuntime(environment: Record<string, string | undefined> = process.env): {
+  config: ReturnType<typeof loadAttachmentConfig>;
+  storage: StorageAdapter;
+} {
+  const config = loadAttachmentConfig(environment);
+  const provider = environment.ATTACHMENT_STORAGE_PROVIDER?.trim().toLowerCase();
+  if (provider === "cos") {
+    return {
+      config,
+      storage: new CosStorageAdapter({
+        bucket: config.bucket,
+        region: config.region,
+        secretId: environment.COS_SECRET_ID ?? "",
+        secretKey: environment.COS_SECRET_KEY ?? "",
+      }),
+    };
+  }
+  if (provider === "memory" && testMemoryAttachmentStorageEnabled(environment)) {
+    return { config, storage: new InMemoryStorageAdapter(config) };
+  }
+  throw new AttachmentError("ATTACHMENT_STORAGE_UNAVAILABLE", "附件存储 Provider 未显式配置或当前环境不允许使用内存存储");
+}
+
 export function createFileScanAdapter(environment: Record<string, string | undefined> = process.env): FileScanAdapter {
   if (environment.FILE_SCAN_PROVIDER?.trim().toLowerCase() !== "clamav") return new UnavailableFileScanAdapter();
   const host = environment.CLAMAV_HOST?.trim() ?? "";
@@ -89,7 +106,7 @@ export function getAttachmentRuntime(): AttachmentRuntime {
 }
 
 export function requireTestStorageAdapter(): InMemoryStorageAdapter {
-  if (process.env.APP_ENV !== "test") throw new Error("TEST_ATTACHMENT_STORAGE_DISABLED");
+  if (!testMemoryAttachmentStorageEnabled()) throw new Error("TEST_ATTACHMENT_STORAGE_DISABLED");
   const storage = getAttachmentRuntime().storage;
   if (!(storage instanceof InMemoryStorageAdapter)) throw new Error("TEST_ATTACHMENT_STORAGE_DISABLED");
   return storage;

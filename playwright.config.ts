@@ -18,7 +18,16 @@ export default defineConfig({
     url: "http://127.0.0.1:3000/health",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { ...process.env, APP_ENV: "test", APP_VERSION: "m3-008-e2e", ENABLE_FAKE_SYSTEM_PROVIDERS: "true" },
+    env: {
+      ...process.env,
+      APP_ENV: "test",
+      APP_VERSION: "m3-008-e2e",
+      ATTACHMENT_STORAGE_PROVIDER: "memory",
+      ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE: "true",
+      COS_BUCKET: "test-private-bucket-1250000000",
+      COS_REGION: "ap-test",
+      ENABLE_FAKE_SYSTEM_PROVIDERS: "true",
+    },
   },
   projects: [
     {
