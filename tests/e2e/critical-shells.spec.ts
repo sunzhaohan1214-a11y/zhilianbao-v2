@@ -35,5 +35,9 @@ test("health and readiness endpoints report their real scope", async ({ request 
 
   const ready = await request.get("/ready");
   expect(ready.ok()).toBe(true);
-  expect(await ready.json()).toMatchObject({ status: "ready", database: "not-configured" });
+  expect(await ready.json()).toMatchObject({
+    status: "ready",
+    checks: { application: "ok", configuration: "ok", database: "ok" },
+    database: "reachable",
+  });
 });
