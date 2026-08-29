@@ -1,5 +1,3 @@
-import { hostname } from "node:os";
-import { randomBytes } from "node:crypto";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
@@ -26,14 +24,7 @@ import { JobRepository } from "./job-repository";
 import { JobRunner, type WorkerLogger } from "./job-runner";
 import { jobPayloadSchemas } from "./job-types";
 import type { WorkerConfig } from "./worker-config";
-
-export function createWorkerId(): string {
-  return `${hostname().slice(0, 40)}:${process.pid}:${randomBytes(4).toString("hex")}`.slice(0, 100);
-}
-
-export const jsonWorkerLogger: WorkerLogger = (entry) => {
-  console.log(JSON.stringify({ timestamp: new Date().toISOString(), module: "worker", ...entry }));
-};
+import { createWorkerId, jsonWorkerLogger } from "./worker-identity";
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

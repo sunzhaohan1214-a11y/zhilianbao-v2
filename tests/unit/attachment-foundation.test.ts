@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AttachmentError } from "@/modules/attachment/attachment-errors";
 import { AttachmentScanService } from "@/modules/attachment/attachment-scan-service";
 import { createAttachmentUploadTask } from "@/modules/attachment/client/cos-browser-uploader";
+import { waitForAttachmentScan } from "@/modules/attachment/client/wait-for-attachment-scan";
 import {
   inspectAttachmentContent,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -12,8 +13,9 @@ import {
 import { createStagingObjectKey, finalObjectKeyFromStaging } from "@/modules/attachment/object-keys";
 import { AttachmentParentAuthorizerRegistry } from "@/modules/attachment/parent-authorization";
 import type { AttachmentRepository } from "@/modules/attachment/repository/attachment-repository";
-import { FakeCleanScanner, UnavailableFileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
-import { buildCosUploadPolicy, COS_UPLOAD_ACTIONS } from "@/modules/attachment/storage/cos-storage-adapter";
+import { ClamAvFileScanAdapter, FakeCleanScanner, UnavailableFileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
+import { createAttachmentStorageRuntime, createFileScanAdapter, testMemoryAttachmentStorageEnabled } from "@/modules/attachment/runtime";
+import { buildCosUploadPolicy, CosStorageAdapter, COS_UPLOAD_ACTIONS } from "@/modules/attachment/storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "@/modules/attachment/storage/in-memory-storage-adapter";
 import type { PermissionActor } from "@/modules/permissions/types";
 
@@ -167,6 +169,89 @@ describe("M0-005 scan transitions", () => {
       .rejects.toMatchObject({ code: "ATTACHMENT_SCANNER_UNAVAILABLE" });
     expect(repository.markScanFailed).toHaveBeenCalledWith(attachmentId, "SCANNER_UNAVAILABLE");
     expect(repository.markScanPassed).not.toHaveBeenCalled();
+  });
+
+  it("keeps a lost terminal DB acknowledgement retryable without downgrading a terminal row", async () => {
+    const repository = scanRepository();
+    const storage = new InMemoryStorageAdapter();
+    const content = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n");
+    storage.putObjectForTest("attachments/2026/08/a/file", content);
+    repository.findById.mockResolvedValue({ ...await repository.findById(), actualSizeBytes: BigInt(content.byteLength) });
+    repository.markScanPassed.mockRejectedValueOnce(new Error("DB_ACK_LOST"));
+    const service = new AttachmentScanService(repository as unknown as AttachmentRepository, storage, new FakeCleanScanner());
+
+    await expect(service.processAttachmentScan(attachmentId)).rejects.toThrow("DB_ACK_LOST");
+    expect(repository.markScanFailed).toHaveBeenCalledWith(attachmentId, "SCAN_PROCESSING_FAILED");
+  });
+});
+
+describe("M3-008 explicit attachment scanner selection", () => {
+  it("never selects a fake from APP_ENV and requires an explicit ClamAV provider", () => {
+    expect(createFileScanAdapter({ APP_ENV: "test" })).toBeInstanceOf(UnavailableFileScanAdapter);
+    expect(createFileScanAdapter({ APP_ENV: "test", FILE_SCAN_PROVIDER: "clamav", CLAMAV_HOST: "127.0.0.1", CLAMAV_PORT: "3310" }))
+      .toBeInstanceOf(ClamAvFileScanAdapter);
+    expect(createFileScanAdapter({ APP_ENV: "test", FILE_SCAN_PROVIDER: "clamav", CLAMAV_HOST: "" }))
+      .toBeInstanceOf(UnavailableFileScanAdapter);
+  });
+
+  it("waits for PASSED and rejects terminal non-clean states before returning an attachment id", async () => {
+    const states = ["PENDING", "SCANNING", "PASSED"];
+    const readState = vi.fn(async () => ({ scanStatus: states.shift() ?? "PASSED" }));
+    await expect(waitForAttachmentScan(readState, { intervalMs: 0, timeoutMs: 1_000 })).resolves.toBeUndefined();
+    expect(readState).toHaveBeenCalledTimes(3);
+    await expect(waitForAttachmentScan(async () => ({ scanStatus: "REJECTED" }), { intervalMs: 0 }))
+      .rejects.toThrow("文件安全扫描未通过");
+  });
+});
+
+describe("on-demand explicit attachment storage selection", () => {
+  const base = {
+    COS_BUCKET: "unit-private-bucket-1250000000",
+    COS_REGION: "ap-test",
+  };
+
+  it("does not derive memory storage from APP_ENV=test or silently fall back when Provider is missing", () => {
+    expect(testMemoryAttachmentStorageEnabled({ APP_ENV: "test" })).toBe(false);
+    expect(() => createAttachmentStorageRuntime({ ...base, APP_ENV: "test" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+    expect(() => createAttachmentStorageRuntime({ ...base, APP_ENV: "test", ATTACHMENT_STORAGE_PROVIDER: "memory" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+  });
+
+  it("allows memory only behind the explicit non-production test gate", () => {
+    const environment = {
+      ...base,
+      APP_ENV: "test",
+      NODE_ENV: "test",
+      ATTACHMENT_STORAGE_PROVIDER: "memory",
+      ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE: "true",
+    };
+    expect(testMemoryAttachmentStorageEnabled(environment)).toBe(true);
+    expect(createAttachmentStorageRuntime(environment).storage).toBeInstanceOf(InMemoryStorageAdapter);
+    expect(() => createAttachmentStorageRuntime({ ...environment, NODE_ENV: "production" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+  });
+
+  it("makes separate deployed TEST processes select COS and rejects incomplete COS configuration", () => {
+    const testCredentials = {
+      ["COS_SECRET_ID"]: "test-only",
+      ["COS_SECRET_KEY"]: "test-only",
+    };
+    const deployedTest = {
+      ...base,
+      ...testCredentials,
+      APP_ENV: "test",
+      NODE_ENV: "production",
+      ATTACHMENT_STORAGE_PROVIDER: "cos",
+    };
+    const web = createAttachmentStorageRuntime(deployedTest);
+    const scanJob = createAttachmentStorageRuntime(deployedTest);
+    expect(web.storage).toBeInstanceOf(CosStorageAdapter);
+    expect(scanJob.storage).toBeInstanceOf(CosStorageAdapter);
+    expect({ bucket: web.storage.bucket, region: web.storage.region })
+      .toEqual({ bucket: scanJob.storage.bucket, region: scanJob.storage.region });
+    expect(() => createAttachmentStorageRuntime({ ...deployedTest, ["COS_SECRET_KEY"]: "" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
   });
 });
 

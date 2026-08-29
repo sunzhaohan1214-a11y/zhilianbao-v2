@@ -116,7 +116,7 @@ async function login(page: import("@playwright/test").Page, user: { phone: strin
 test("normal member sees the fixed real-data home order and approved four-tab shell", async ({ page }) => {
   await login(page, e2eUsers.normal);
   await expect(page.getByText("问政策、查企业、找团员")).toBeVisible();
-  await expect(page.getByRole("link", { name: "问政策" })).toHaveAttribute("href", "/resources/policies");
+  await expect(page.getByRole("link", { name: "问荷宝" })).toHaveAttribute("href", "/ai");
   await expect(page.getByRole("link", { name: "查企业" })).toHaveAttribute("href", "/resources/enterprises");
   await expect(page.getByRole("link", { name: "找团员" })).toHaveAttribute("href", "/resources/members");
   await expect(page.getByRole("heading", { name: "当前在宝" })).toBeVisible();

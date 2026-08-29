@@ -332,9 +332,9 @@ export class TripService {
         attachment.uploadedByPersonId !== input.actorPersonId
         || !attachment.isTemporary
         || attachment.uploadStatus !== "UPLOADED"
-        || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+        || attachment.scanStatus !== "PASSED"
       ) {
-        throw new TripError("TRIP_ATTACHMENT_INVALID", "附件当前状态或归属不允许关联行程");
+        throw new TripError("TRIP_ATTACHMENT_INVALID", "附件必须归属当前操作人并通过安全扫描后才能关联行程");
       }
       await tx.attachmentLink.create({ data: {
         attachmentId,

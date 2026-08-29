@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { getReadiness } from "../../src/lib/health";
 
 describe("readiness payload", () => {
-  it("reports application readiness without claiming a database connection", () => {
-    expect(getReadiness()).toMatchObject({
+  it("does not require a deployment database probe in the local environment", async () => {
+    await expect(getReadiness({ environment: { APP_ENV: "local" } })).resolves.toMatchObject({
       status: "ready",
-      checks: { application: "ok", configuration: "ok" },
-      database: "not-configured",
+      checks: { application: "ok", configuration: "not-required", database: "not-required" },
+      database: "not-required",
     });
   });
 });

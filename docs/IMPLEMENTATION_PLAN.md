@@ -551,4 +551,10 @@ M1-008 home
 
 Status: implemented in PR #28 and pending merge. System settings/versioning, Asia/Shanghai work calendar, capability-driven AdminShell, high-risk overview, batch/import pre-backup, map activation preview, AI/OCR config lifecycle and evaluation gate, health/storage aggregation, full redacted audit, backup catalog/provider abstraction, restore/maintenance orchestration and UI/API are implemented. Pre-merge recovery hardening adds explicit fake-provider gating, normalized environment and exact-schema restore guards, rechecked Provider preview, real post-restore validation, reentrant crash recovery/finalization, Provider-only catalog ingest, evidence-based compliance, complete restore UI actions, read-only `NOT_WIRED` SLA settings, and expanded Batch/Map impact previews. Production providers remain fail-closed; no real provider is configured, no real restore was executed, no migration was added, and M3-008 is not started.
 
+## B-M3-008 Final hardening
+
+Status: implemented in PR #29 and pending merge. The milestone adds release-readiness truth states; seven exact-head CI gates; security headers, dependency/secret/code scanning and real ClamAV CI; fixed-scale MySQL performance; Chromium/Firefox/WebKit and weak-network coverage; AI contract evaluation and permission-filtered structured Chat; official CynosDB backup integration; guarded restore-to-new-TEST-cluster tooling; read-only consistency audit; and release/UAT/operations runbooks. It adds no Prisma migration and starts no M4 scope.
+
+This is code-complete wording only. Production release remains `RELEASE_READY=NO` until the PR is merged and exact-head CI, protected main, UAT, V1 full rehearsal/reconciliation, production scanner, real backup, real restore drill/cleanup, maintenance and production preflight evidence are all complete.
+
 **IMPLEMENTATION_PLAN.md v1.2 END**

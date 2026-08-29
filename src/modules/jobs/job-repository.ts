@@ -1,4 +1,4 @@
-import type { JobStatus, JobTask, Prisma, PrismaClient } from "@/generated/prisma/client";
+import { Prisma, type JobStatus, type JobTask, type PrismaClient } from "@/generated/prisma/client";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { retryDelayMs, type RetryPolicyOptions } from "./retry-policy";
 import type { JobPayloadByType, JobType } from "./job-types";
@@ -37,15 +37,23 @@ export class JobRepository {
   }
 
   claimNext(workerId: string, now = new Date()): Promise<JobTask | null> {
+    return this.claimNextByTypes(workerId, undefined, now);
+  }
+
+  claimNextByTypes(workerId: string, jobTypes?: readonly JobType[], now = new Date()): Promise<JobTask | null> {
+    const typeFilter = jobTypes?.length
+      ? Prisma.sql`AND job_type IN (${Prisma.join(jobTypes)})`
+      : Prisma.empty;
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id
         FROM job_tasks
         WHERE status = 'WAITING' AND scheduled_at <= ${now}
+        ${typeFilter}
         ORDER BY priority DESC, scheduled_at ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
-      `;
+      `);
       if (rows.length === 0) return null;
       const changed = await tx.jobTask.updateMany({
         where: { id: rows[0].id, status: "WAITING" },
@@ -114,20 +122,25 @@ export class JobRepository {
     staleBefore: Date;
     now?: Date;
     limit?: number;
+    jobTypes?: readonly JobType[];
     retryPolicy?: RetryPolicyOptions;
     onRecover?: StaleRecoveryHook;
   }): Promise<number> {
     const now = input.now ?? new Date();
     const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
+    const typeFilter = input.jobTypes?.length
+      ? Prisma.sql`AND job_type IN (${Prisma.join(input.jobTypes)})`
+      : Prisma.empty;
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT id
         FROM job_tasks
         WHERE status = 'RUNNING' AND locked_at < ${input.staleBefore}
+        ${typeFilter}
         ORDER BY locked_at ASC
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED
-      `;
+      `);
       for (const row of rows) {
         const job = await tx.jobTask.findUniqueOrThrow({ where: { id: row.id } });
         await input.onRecover?.(tx, job);

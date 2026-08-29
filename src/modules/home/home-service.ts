@@ -14,8 +14,6 @@ import { TripService } from "@/modules/trip/trip-service";
 import { HOME_TODO_LABELS, isOutcomeFillTodoActionable, resolveHomeTodoPriority, sortHomeTodos } from "./home-todo-priority-resolver";
 import type { HomeDemand, HomeOverview, HomeRoleLabel, HomeTeamOverview, HomeTodo } from "./types";
 
-const TODO_SCAN_LIMIT = 50;
-
 export function homeRoleLabels(actor: PermissionActor): HomeRoleLabel[] {
   return [
     ...(actor.effectiveRoles.includes("GROUP_LEADER") ? ["团长" as const] : []),
@@ -201,7 +199,6 @@ export class HomeService {
     const todos = await this.prisma.todo.findMany({
       where: { personId: actor.personId, status: "OPEN" },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: TODO_SCAN_LIMIT,
     });
     if (todos.length === 0) return [];
 

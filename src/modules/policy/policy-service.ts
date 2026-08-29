@@ -283,8 +283,8 @@ export class PolicyService {
     const ids = [input.primaryAttachmentId, ...input.supplementaryAttachmentIds];
     if (new Set(ids).size !== ids.length) throw new PolicyError("POLICY_ATTACHMENT_DUPLICATE", "主文件与补充附件不能重复", 422);
     const attachments = await this.repository.lockAttachments(tx, ids);
-    if (!attachments || attachments.length !== ids.length || attachments.some((attachment) => attachment.uploadedByPersonId !== actorPersonId || !(attachment.isTemporary === true || attachment.isTemporary === 1) || attachment.linkId !== null || attachment.uploadStatus !== "UPLOADED" || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus))) {
-      throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "仅可关联本人本次上传且等待扫描或已通过扫描的临时附件", 422);
+    if (!attachments || attachments.length !== ids.length || attachments.some((attachment) => attachment.uploadedByPersonId !== actorPersonId || !(attachment.isTemporary === true || attachment.isTemporary === 1) || attachment.linkId !== null || attachment.uploadStatus !== "UPLOADED" || attachment.scanStatus !== "PASSED")) {
+      throw new PolicyError("POLICY_ATTACHMENT_NOT_READY", "仅可关联本人本次上传且已通过安全扫描的临时附件", 422);
     }
     await tx.attachmentLink.create({ data: { attachmentId: input.primaryAttachmentId, entityType: "POLICY_CONTENT_VERSION", entityId: versionId, relationType: "PRIMARY", createdByPersonId: actorPersonId } });
     if (input.supplementaryAttachmentIds.length) await tx.attachmentLink.createMany({ data: input.supplementaryAttachmentIds.map((attachmentId) => ({ attachmentId, entityType: "POLICY_CONTENT_VERSION", entityId: versionId, relationType: "SUPPLEMENTARY", createdByPersonId: actorPersonId })) });

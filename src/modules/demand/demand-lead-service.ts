@@ -197,9 +197,9 @@ export class DemandLeadService {
         !ownershipAllowed
         || !attachment.isTemporary
         || attachment.uploadStatus !== "UPLOADED"
-        || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+        || attachment.scanStatus !== "PASSED"
       ) {
-        throw new DemandLeadError("DEMAND_LEAD_ATTACHMENT_INVALID", "附件当前状态或归属不允许关联线索");
+        throw new DemandLeadError("DEMAND_LEAD_ATTACHMENT_INVALID", "附件必须归属当前提交并通过安全扫描后才能关联线索");
       }
       await tx.attachmentLink.create({ data: {
         attachmentId,

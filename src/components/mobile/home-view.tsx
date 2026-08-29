@@ -43,9 +43,9 @@ export function HomeView({ data }: { data: HomeOverview }) {
 
       <section aria-labelledby="haobao-title" className="rounded-[22px] border border-black/5 bg-white p-4">
         <div className="flex items-center gap-3"><MascotAvatar /><div><p className="text-xs font-medium text-blue-600">荷宝 AI</p><h2 id="haobao-title" className="mt-0.5 text-[17px] font-semibold">问政策、查企业、找团员</h2></div></div>
-        <p className="mt-3 text-sm leading-6 text-neutral-500">完整对话正在接入，当前可直接使用已上线的结构化检索。</p>
+        <p className="mt-3 text-sm leading-6 text-neutral-500">安全查询正式数据；无语义服务时自动降级到结构化检索。</p>
         <nav aria-label="荷宝结构化检索" className="mt-3 grid grid-cols-3 gap-2">
-          <Link href="/resources/policies" className="rounded-xl bg-neutral-100 px-2 py-2.5 text-center text-sm font-medium">问政策</Link>
+          <Link href="/ai" className="rounded-xl bg-neutral-100 px-2 py-2.5 text-center text-sm font-medium">问荷宝</Link>
           <Link href="/resources/enterprises" className="rounded-xl bg-neutral-100 px-2 py-2.5 text-center text-sm font-medium">查企业</Link>
           <Link href="/resources/members" className="rounded-xl bg-neutral-100 px-2 py-2.5 text-center text-sm font-medium">找团员</Link>
         </nav>

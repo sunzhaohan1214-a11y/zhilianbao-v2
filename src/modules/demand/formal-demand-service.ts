@@ -279,9 +279,9 @@ export class FormalDemandService {
         attachment.uploadedByPersonId !== input.actorPersonId
         || !attachment.isTemporary
         || attachment.uploadStatus !== "UPLOADED"
-        || !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)
+        || attachment.scanStatus !== "PASSED"
       ) {
-        throw new DemandError("DEMAND_ATTACHMENT_INVALID", "新附件必须由当前操作人上传且处于可关联状态");
+        throw new DemandError("DEMAND_ATTACHMENT_INVALID", "新附件必须由当前操作人上传并通过安全扫描");
       }
     }
 
@@ -325,8 +325,8 @@ export class FormalDemandService {
           scanStatus: attachment.scanStatus,
         });
       }
-      if (!requirePassed && !["PENDING", "SCANNING", "PASSED"].includes(attachment.scanStatus)) {
-        throw new DemandError("DEMAND_ATTACHMENT_INVALID", "附件安全扫描结果不允许提交审核", {
+      if (!requirePassed && attachment.scanStatus !== "PASSED") {
+        throw new DemandError("DEMAND_ATTACHMENT_INVALID", "附件通过安全扫描前不能建立业务引用", {
           attachmentId: attachment.id,
           scanStatus: attachment.scanStatus,
         });

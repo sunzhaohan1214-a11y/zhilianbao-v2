@@ -3,6 +3,7 @@
 import { type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { uploadAttachmentToCos, type BrowserUploadIntent } from "@/modules/attachment/client/cos-browser-uploader";
+import { waitForAttachmentScan } from "@/modules/attachment/client/wait-for-attachment-scan";
 
 type Candidate = { workEducationExperience?: string; representativeAchievements?: string };
 type Submitted = { requestId: string; attachmentId?: string; extractionId?: string; candidate?: Candidate };
@@ -14,7 +15,7 @@ async function api(url: string, body: unknown) {
   return result.data;
 }
 async function fileBase64(file: File) { const bytes = new Uint8Array(await file.arrayBuffer()); let binary = ""; for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192)); return btoa(binary); }
-async function upload(file: File) { const intent = await api("/api/v2/attachments/upload-intent", { filename: file.name, declaredMimeType: file.type || "application/octet-stream", expectedSizeBytes: file.size }) as BrowserUploadIntent & { attachmentId: string }; if (intent.upload.type === "TEST_MEMORY") await api(`/api/v2/test/attachments/${intent.attachmentId}/upload`, { base64: await fileBase64(file) }); else await uploadAttachmentToCos(intent, file).promise; await api(`/api/v2/attachments/${intent.attachmentId}/complete`, {}); if (intent.upload.type === "TEST_MEMORY") await api(`/api/v2/test/attachments/${intent.attachmentId}/scan`, {}); return intent.attachmentId; }
+async function upload(file: File) { const intent = await api("/api/v2/attachments/upload-intent", { filename: file.name, declaredMimeType: file.type || "application/octet-stream", expectedSizeBytes: file.size }) as BrowserUploadIntent & { attachmentId: string }; if (intent.upload.type === "TEST_MEMORY") await api(`/api/v2/test/attachments/${intent.attachmentId}/upload`, { base64: await fileBase64(file) }); else await uploadAttachmentToCos(intent, file).promise; await api(`/api/v2/attachments/${intent.attachmentId}/complete`, {}); if (intent.upload.type === "TEST_MEMORY") await api(`/api/v2/test/attachments/${intent.attachmentId}/scan`, {}); await waitForAttachmentScan(() => api(`/api/v2/attachments/${intent.attachmentId}/complete`, {}) as Promise<{ scanStatus: string }>); return intent.attachmentId; }
 
 export function TalentSubmitForm({ people }: { people: { id: string; name: string }[] }) {
   const router = useRouter(); const [message, setMessage] = useState(""); const [pending, setPending] = useState(false); const [submitted, setSubmitted] = useState<Submitted>();

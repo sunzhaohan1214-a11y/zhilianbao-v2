@@ -422,6 +422,7 @@ COS bucket 必须保持 private。应用只向浏览器签发限定单个 stagin
 环境变量：
 
 ```text
+ATTACHMENT_STORAGE_PROVIDER
 COS_REGION
 COS_BUCKET
 COS_SECRET_ID
@@ -431,6 +432,8 @@ INVOICE_OCR_API_KEY
 ATTACHMENT_SIGNED_URL_TTL_SECONDS
 ATTACHMENT_UPLOAD_TTL_SECONDS
 ```
+
+`ATTACHMENT_STORAGE_PROVIDER` has no default. Deployed TEST and PROD must set it to `cos`; missing COS bucket, region or credentials fails closed during attachment runtime construction. `memory` is restricted to explicit local/unit/integration/E2E use with `ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE=true`, a local/test application identity, and a non-production Node runtime. `APP_ENV=test` alone never selects memory, and a production-built TEST deployment cannot enable it. The protected test upload routes also require this explicit memory configuration.
 
 `INVOICE_OCR_ENDPOINT` 必须指向专业票据 OCR/电子票据解析服务，`INVOICE_OCR_API_KEY` 只通过服务端 Secret 注入。任一项未配置时，报销票据识别任务进入可解释的人工录入降级状态；不得改用通用大模型猜测金额、票号或费用分类。
 
@@ -466,3 +469,24 @@ Restore is same-environment, same-provider, exact-schema only. Preview captures 
 Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. After Provider success, automatic validation performs `SELECT 1`, checks the required Prisma migration is finished/not rolled back/without failure logs, enforces exactly one current ACTIVE batch and at least one NORMAL account, probes up to three formal PASSED attachment objects through the configured storage adapter, and proves Job/Outbox queries execute. Any required failure keeps the restore active and maintenance enabled. Manual completion is reentrant, requires successful validation and explicit inspection, releases only the matching maintenance operation, and invalidates all sessions. Real provider integration and controlled restore drill remain M3-008.
 
 **OPERATIONS.md v1.1 END**
+# M3-008 release operations addendum
+
+The operational source of truth is `docs/RELEASE_READINESS.md`, with detailed checklists in `UAT_CHECKLIST.md`, `PROD_RELEASE_CHECKLIST.md`, `RESTORE_DRILL_RUNBOOK.md`, `MONITORING_RUNBOOK.md`, `GITHUB_RELEASE_GATES.md`, and `DB_PRIVILEGE_RUNBOOK.md`.
+
+The official CynosDB adapter may create/list/reconcile snapshots. It does not expose credentials/private endpoints and does not enable web-triggered restore. Restore drills use `RollbackToNewCluster` only, require TEST identity, fixed confirmation, cost acknowledgment, target prefix and manual cleanup. In-place source restoration remains an approved production runbook action outside application code.
+
+Production release requires `backupReady`, a successful backup no older than 24 hours, production scanner readiness, protected main, exact-head checks, UAT, V1 full rehearsal/reconciliation and restore evidence. Missing external evidence remains BLOCKED and must not be converted into a code pass.
+
+## 25. On-demand attachment scan job
+
+New uploads remain private temporary attachments with `scanStatus=PENDING`; the application creates no business `AttachmentLink` and issues no preview/download URL until the status is `PASSED`. `REJECTED` and exhausted/failed scans remain fail-closed and cannot be referenced.
+
+The normal Worker remains available for steady traffic. A scale-to-zero scheduler may instead run the same application image with this command:
+
+```bash
+node worker-dist/attachment-scan-main.js
+```
+
+The command recovers only stale `ATTACHMENT_SCAN` leases, claims at most one due scan JobTask with `FOR UPDATE SKIP LOCKED`, runs the existing handler, persists success or retry/backoff, and exits. It does not consume Outbox or unrelated jobs. An idle invocation exits successfully. Multiple invocations remain safe because JobTask enqueue and claim are idempotent/lease-protected.
+
+Deployment TEST and PROD Web/scan-job processes must both explicitly inject `ATTACHMENT_STORAGE_PROVIDER=cos` and the same COS bucket/region identity, plus `FILE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST`, `CLAMAV_PORT` and `CLAMAV_TIMEOUT_MS`; `APP_ENV=test` is not a storage or scanner provider identity. Keep database, COS credentials and scanner endpoint configuration in deployment Secret/runtime configuration, never in the image. The scheduler, private network path, ClamAV endpoint or sidecar, retry cadence, alerts and minimum-instance setting remain cloud wiring; prefer minimum instances zero where cold-start latency is acceptable. Before enabling traffic, prove a Web-uploaded object is readable by a separate scan-job process, clean acceptance, EICAR rejection, retry after scanner outage, and zero business links/signed URLs for non-passed attachments in the real TEST environment.

@@ -12,23 +12,40 @@
     "dev": "next dev",
     "build": "npm run build:web && npm run build:worker",
     "build:web": "next build",
-    "build:worker": "esbuild src/worker/main.ts --bundle --platform=node --format=esm --target=node24 --outfile=worker-dist/main.js --packages=external",
+    "build:worker": "esbuild src/worker/main.ts src/worker/attachment-scan-main.ts --bundle --platform=node --format=esm --target=node24 --outdir=worker-dist --packages=external",
     "build:migration": "esbuild src/migration/main.ts --bundle --platform=node --format=esm --target=node24 --outfile=migration-dist/main.js --packages=external",
     "start": "next start",
     "start:web": "node server.js",
     "start:worker": "node worker-dist/main.js",
+    "start:attachment-scan-job": "node worker-dist/attachment-scan-main.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:worker": "vitest run tests/unit/worker-foundation.test.ts tests/integration/worker-runtime.test.ts",
+    "test:security": "vitest run tests/security tests/unit/hardening-security.test.ts",
+    "test:ai-eval:contract": "vitest run tests/unit/ai-evaluation.test.ts && node scripts/ai-eval.mjs --mode=contract",
+    "eval:ai:provider": "node scripts/ai-eval.mjs --mode=provider",
     "test:migration": "vitest run tests/unit/migration.test.ts",
     "migration:v1": "npm run build:migration --silent && node migration-dist/main.js",
     "test:database": "vitest run tests/database --maxWorkers=1",
+    "test:performance": "vitest run tests/performance --maxWorkers=1",
     "db:validate": "prisma validate",
     "db:generate": "prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
-    "test:e2e:critical": "playwright test --project=chromium"
+    "db:reset:test": "node scripts/reset-test-database.mjs",
+    "test:e2e:critical": "playwright test --project=chromium",
+    "test:e2e:compat": "playwright test tests/e2e/browser-compat.spec.ts --project=chromium --project=firefox --project=webkit-mobile",
+    "test:e2e:weak-network": "playwright test tests/e2e/weak-network.spec.ts --project=chromium",
+    "security:dependencies": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
+    "security:secrets": "node scripts/security-secrets.mjs",
+    "security:code": "node scripts/security-code.mjs",
+    "security:clamav": "esbuild scripts/clamav-integration.mjs --bundle --platform=node --format=esm --target=node24 --outfile=script-dist/clamav-integration.mjs --packages=external && node script-dist/clamav-integration.mjs",
+    "release:check": "node scripts/release-readiness.mjs",
+    "restore:drill": "node scripts/restore-drill.mjs",
+    "test:evidence": "node scripts/test-evidence.mjs",
+    "audit:data-consistency": "esbuild scripts/data-consistency.ts --bundle --platform=node --format=esm --target=node24 --outfile=script-dist/data-consistency.mjs --packages=external && node script-dist/data-consistency.mjs",
+    "audit:data-consistency:test": "esbuild scripts/seed-consistency-fixture.ts --bundle --platform=node --format=esm --target=node24 --outfile=script-dist/seed-consistency-fixture.mjs --packages=external && node script-dist/seed-consistency-fixture.mjs && npm run audit:data-consistency"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "5.3.0",
@@ -46,6 +63,7 @@
     "qcloud-cos-sts": "3.1.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "tencentcloud-sdk-nodejs-cynosdb": "4.1.302",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -61,5 +79,11 @@
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
     "vitest": "4.1.11"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "fast-xml-parser": "5.11.1",
+    "mariadb": "3.5.3",
+    "uuid": "11.1.1"
   }
 }

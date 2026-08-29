@@ -3,6 +3,8 @@ import type { JobRepository } from "@/modules/jobs/job-repository";
 import type { JobRunner } from "@/modules/jobs/job-runner";
 import { WorkerRuntime } from "@/modules/jobs/worker-runtime";
 import type { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
+import { AttachmentScanJobRuntime } from "@/modules/jobs/attachment-scan-job-runtime";
+import type { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 
 describe("M0-006 bounded Worker runtime", () => {
   it("runs recovery, Outbox and a bounded job batch in run-once mode", async () => {
@@ -99,5 +101,42 @@ describe("M0-006 bounded Worker runtime", () => {
     finish();
     await expect(running).resolves.toEqual({ graceful: true });
     expect(claimNext).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("on-demand attachment scan Job runtime", () => {
+  it("recovers and claims only one ATTACHMENT_SCAN job before exiting", async () => {
+    const now = new Date("2026-08-29T00:00:00.000Z");
+    const job = {
+      id: "scan-job",
+      jobType: "ATTACHMENT_SCAN",
+      payloadJson: { attachmentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+      status: "RUNNING",
+      priority: 0,
+      idempotencyKey: "attachment-scan:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      scheduledAt: now,
+      lockedAt: now,
+      lockedBy: "scan-worker",
+      retryCount: 0,
+      maxRetries: 3,
+      finishedAt: null,
+      lastError: null,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    const recoverStale = vi.fn().mockResolvedValue(1);
+    const claimNextByTypes = vi.fn().mockResolvedValue(job);
+    const run = vi.fn().mockResolvedValue(undefined);
+    const runtime = new AttachmentScanJobRuntime({ jobLockTimeoutMs: 10_000, heartbeatMs: 1_000 }, () => undefined, {
+      workerId: "scan-worker",
+      jobs: { recoverStale, claimNextByTypes } as unknown as JobRepository,
+      runner: { run } as unknown as JobRunner,
+      recovery: { recoverStaleScan: vi.fn() } as unknown as AttachmentRecoveryService,
+    });
+
+    await expect(runtime.run(now)).resolves.toEqual({ claimed: true, recovered: 1 });
+    expect(recoverStale).toHaveBeenCalledWith(expect.objectContaining({ jobTypes: ["ATTACHMENT_SCAN"] }));
+    expect(claimNextByTypes).toHaveBeenCalledWith("scan-worker", ["ATTACHMENT_SCAN"], now);
+    expect(run).toHaveBeenCalledWith(job, "scan-worker");
   });
 });
