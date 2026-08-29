@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { e2eUsers, seedAuthFixtures } from "./auth-fixtures";
+import { futureShanghaiPresenceInterval } from "./presence-time";
 
 declare global {
   interface Window { __presenceGpsCalls: number }
@@ -32,9 +33,20 @@ test("MEMBER_CURRENT reports Presence, sees current list, and never requests GPS
   });
   await login(page, e2eUsers.normal.phone, e2eUsers.normal.password);
   await page.goto("/presence/new");
-  await page.getByLabel("到宝时间").fill("2026-09-10T09:00");
-  await page.getByLabel("预计离宝时间").fill("2026-09-10T18:00");
+  const form = page.locator("form");
+  await expect(form).toHaveAttribute("aria-busy", "false");
+  const interval = futureShanghaiPresenceInterval();
+  const arrival = page.getByLabel("到宝时间");
+  const departure = page.getByLabel("预计离宝时间");
+  await arrival.fill(interval.arrivalAtLocal);
+  await departure.fill(interval.expectedDepartureAtLocal);
+  await expect(arrival).toHaveValue(interval.arrivalAtLocal);
+  await expect(departure).toHaveValue(interval.expectedDepartureAtLocal);
+  const responsePromise = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/v2/presence"
+      && response.request().method() === "POST");
   await page.getByRole("button", { name: "提交报备" }).click();
+  expect((await responsePromise).status()).toBe(201);
   await expect(page).toHaveURL(/\/presence$/);
   await expect(page.getByText("未来安排")).toBeVisible();
 
@@ -50,8 +62,9 @@ test("MEMBER_CURRENT reports Presence, sees current list, and never requests GPS
 
 test("platform alumni can report while ordinary users cannot browse other-person history", async ({ page }) => {
   await login(page, e2eUsers.alumni.phone, e2eUsers.alumni.password);
+  const interval = futureShanghaiPresenceInterval(new Date(), 8);
   const created = await apiPost(page, "/api/v2/presence", {
-    arrivalAt: "2026-09-11T09:00:00+08:00", expectedDepartureAt: "2026-09-11T18:00:00+08:00", note: "E2E 往届报备",
+    arrivalAt: interval.arrivalAtIso, expectedDepartureAt: interval.expectedDepartureAtIso, note: "E2E 往届报备",
   });
   expect(created.status).toBe(201);
   const forbidden = await page.evaluate(async () => {
