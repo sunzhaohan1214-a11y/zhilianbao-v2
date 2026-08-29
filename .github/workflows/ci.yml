@@ -4,9 +4,11 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches:
-      - main
-      - "feature/**"
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,6 +31,7 @@ jobs:
 
   critical-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       mysql:
         image: mysql:8.4
@@ -58,6 +61,13 @@ jobs:
       - run: npm run db:migrate:deploy
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:critical
+      - name: Upload critical E2E failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: critical-e2e-test-results-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
 
   database:
     runs-on: ubuntu-latest
