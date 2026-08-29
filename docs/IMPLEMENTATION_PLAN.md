@@ -553,7 +553,7 @@ Status: implemented in PR #28 and pending merge. System settings/versioning, Asi
 
 ## B-M3-008 Final hardening
 
-Status: implemented on `feature/b-m3-008-hardening`, PR pending creation and merge. The milestone adds release-readiness truth states; seven exact-head CI gates; security headers, dependency/secret/code scanning and real ClamAV CI; fixed-scale MySQL performance; Chromium/Firefox/WebKit and weak-network coverage; AI contract evaluation and permission-filtered structured Chat; official CynosDB backup integration; guarded restore-to-new-TEST-cluster tooling; read-only consistency audit; and release/UAT/operations runbooks. It adds no Prisma migration and starts no M4 scope.
+Status: implemented in PR #29 and pending merge. The milestone adds release-readiness truth states; seven exact-head CI gates; security headers, dependency/secret/code scanning and real ClamAV CI; fixed-scale MySQL performance; Chromium/Firefox/WebKit and weak-network coverage; AI contract evaluation and permission-filtered structured Chat; official CynosDB backup integration; guarded restore-to-new-TEST-cluster tooling; read-only consistency audit; and release/UAT/operations runbooks. It adds no Prisma migration and starts no M4 scope.
 
 This is code-complete wording only. Production release remains `RELEASE_READY=NO` until the PR is merged and exact-head CI, protected main, UAT, V1 full rehearsal/reconciliation, production scanner, real backup, real restore drill/cleanup, maintenance and production preflight evidence are all complete.
 
