@@ -83,13 +83,14 @@ export function validateGithubProtection(policy: Record<string, unknown> | null)
   const checks = Array.isArray(statusChecks?.checks) ? statusChecks.checks.map((item) => typeof item === "object" && item ? (item as { context?: unknown }).context : null).filter((item): item is string => typeof item === "string") : [];
   const required = new Set([...contexts, ...checks]);
   const enabled = (value: unknown) => typeof value === "object" && value !== null && (value as { enabled?: unknown }).enabled === true;
+  const explicitlyDisabled = (value: unknown) => typeof value === "object" && value !== null && (value as { enabled?: unknown }).enabled === false;
   const complete = Boolean(reviews)
     && Number(reviews?.required_approving_review_count ?? 0) >= 1
     && reviews?.dismiss_stale_reviews === true
     && REQUIRED_CI_JOBS.every((job) => required.has(job))
     && enabled(policy.required_conversation_resolution)
     && enabled(policy.enforce_admins)
-    && !enabled(policy.allow_force_pushes);
+    && explicitlyDisabled(policy.allow_force_pushes);
   return complete ? { status: "PASS" } : { status: "FAIL", errorCode: "GITHUB_REQUIRED_POLICY_INCOMPLETE" };
 }
 
@@ -128,11 +129,14 @@ function evidenceGate(code: string, category: ReadinessCategory, result: Evidenc
 }
 
 export function buildReleaseReadiness(input: ReleaseGateInputs, timestamp = new Date().toISOString()): ReleaseReadinessReport {
-  const envValid = ["LOCAL", "TEST", "PROD"].includes(input.appEnvironment);
+  const environmentKnown = ["LOCAL", "TEST", "PROD"].includes(input.appEnvironment);
+  const environmentMatchesMode = input.mode !== "prod" || input.appEnvironment === "PROD";
+  const environmentValid = environmentKnown && environmentMatchesMode;
+  const environmentError = input.mode === "prod" && input.appEnvironment !== "PROD" ? "PRODUCTION_APP_ENV_REQUIRED" : "APP_ENV_UNKNOWN";
   const shaValid = isCommitSha(input.appVersion);
   const gates: ReadinessGate[] = [
     { code: "PRODUCTION_EVALUATION_MODE", category: "production", status: input.mode === "prod" ? "PASS" : "BLOCKED_BY_EXTERNAL_ENV", requiredForProduction: true, codeReachable: false, errorCode: input.mode === "prod" ? undefined : "PRODUCTION_EVALUATION_NOT_REQUESTED" },
-    { code: "APP_ENV_VALID", category: "code", status: envValid ? "PASS" : "FAIL", requiredForProduction: true, codeReachable: true, errorCode: envValid ? undefined : "APP_ENV_UNKNOWN" },
+    { code: "APP_ENV_VALID", category: "code", status: environmentValid ? "PASS" : "FAIL", requiredForProduction: true, codeReachable: true, errorCode: environmentValid ? undefined : environmentError },
     { code: "APP_VERSION_CANDIDATE_SHA", category: "code", status: shaValid ? "PASS" : input.mode === "prod" ? "FAIL" : "BLOCKED_BY_EXTERNAL_ENV", requiredForProduction: true, codeReachable: input.mode === "prod", version: input.appVersion, candidateSha: shaValid ? input.appVersion : undefined, errorCode: shaValid ? undefined : "APP_VERSION_NOT_COMMIT_SHA" },
     { code: "FAKE_PROVIDERS_DISABLED_IN_PROD", category: "security", status: input.mode === "prod" && input.fakeProvidersEnabled ? "FAIL" : "PASS", requiredForProduction: true, codeReachable: true, errorCode: input.mode === "prod" && input.fakeProvidersEnabled ? "PRODUCTION_FAKE_PROVIDER_ENABLED" : undefined },
     { code: "SECURITY_HARNESS_AVAILABLE", category: "security", status: "PASS", requiredForProduction: false, codeReachable: true, version: "m3-008-v2" },

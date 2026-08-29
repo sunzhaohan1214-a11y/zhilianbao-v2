@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   REQUIRED_CI_JOBS,
   buildReleaseReadiness,
+  readinessExitCode,
   validateBackupEvidence,
   validateExactHeadCi,
   validateGenericEvidence,
@@ -74,6 +75,15 @@ describe("M3-008 production release evidence", () => {
     expect(validateGithubProtection({ protected: true })).toEqual({ status: "FAIL", errorCode: "GITHUB_REQUIRED_POLICY_INCOMPLETE" });
   });
 
+  it("requires allow_force_pushes to be explicitly disabled in a complete branch policy", () => {
+    const missingForcePushPolicy: Record<string, unknown> = completeProtection();
+    delete missingForcePushPolicy.allow_force_pushes;
+    expect(validateGithubProtection(completeProtection())).toEqual({ status: "PASS" });
+    expect(validateGithubProtection(missingForcePushPolicy)).toEqual({ status: "FAIL", errorCode: "GITHUB_REQUIRED_POLICY_INCOMPLETE" });
+    expect(validateGithubProtection({ ...completeProtection(), allow_force_pushes: {} })).toEqual({ status: "FAIL", errorCode: "GITHUB_REQUIRED_POLICY_INCOMPLETE" });
+    expect(validateGithubProtection({ ...completeProtection(), allow_force_pushes: { enabled: true } })).toEqual({ status: "FAIL", errorCode: "GITHUB_REQUIRED_POLICY_INCOMPLETE" });
+  });
+
   it("rejects a successful seven-job run bound to a different candidate SHA", () => {
     expect(successfulCi("2".repeat(40))).toMatchObject({ status: "FAIL", errorCode: "CI_CANDIDATE_SHA_MISMATCH" });
   });
@@ -87,5 +97,25 @@ describe("M3-008 production release evidence", () => {
       githubProtection: validateGithubProtection(completeProtection()), exactHeadCi: successfulCi(), uatEvidence: generic, preflightEvidence: generic,
     }), "2026-08-29T00:00:00.000Z");
     expect(report).toMatchObject({ overall: "PASS", releaseReady: true });
+  });
+
+  it("fails closed when production evaluation runs with APP_ENV=TEST despite otherwise valid evidence", () => {
+    const generic = validateGenericEvidence(bound({ outcome: "verified" }), candidateSha);
+    const scanner = validateScannerEvidence(bound({ provider: "clamav", health: "READY", cleanAccepted: true, eicarRejected: true }), candidateSha);
+    const backup = validateBackupEvidence(bound({ provider: "tencent-cynosdb", health: "READY", backupStatus: "SUCCEEDED", region: "ap-shanghai", clusterId: "cluster-1", snapshotAt: "2026-08-28T12:00:00.000Z" }), candidateSha, { region: "ap-shanghai", clusterId: "cluster-1" }, new Date("2026-08-29T00:00:00.000Z"));
+    const report = buildReleaseReadiness(inputs({
+      appEnvironment: "TEST", scannerEvidence: scanner, backupEvidence: backup, maintenanceEvidence: generic, restoreEvidence: generic, migrationEvidence: generic,
+      githubProtection: validateGithubProtection(completeProtection()), exactHeadCi: successfulCi(), uatEvidence: generic, preflightEvidence: generic,
+    }), "2026-08-29T00:00:00.000Z");
+    expect(report.releaseReady).toBe(false);
+    expect(report.gates.find(({ code }) => code === "APP_ENV_VALID")).toMatchObject({ status: "FAIL", errorCode: "PRODUCTION_APP_ENV_REQUIRED" });
+    expect(readinessExitCode(report)).toBe(1);
+  });
+
+  it("keeps CI mode reachable with APP_ENV=TEST without declaring release readiness", () => {
+    const report = buildReleaseReadiness(inputs({ mode: "ci", appEnvironment: "TEST" }));
+    expect(report.releaseReady).toBe(false);
+    expect(report.gates.find(({ code }) => code === "APP_ENV_VALID")?.status).toBe("PASS");
+    expect(readinessExitCode(report)).toBe(0);
   });
 });
