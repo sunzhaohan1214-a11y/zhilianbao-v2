@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { reimbursementPageContext } from "@/lib/reimbursement/page-context";
+import { canViewMonthlyReport } from "@/modules/reporting/reporting-scope";
 
 export default async function MePage() {
   const { actor } = await reimbursementPageContext();
@@ -16,6 +17,7 @@ export default async function MePage() {
           <p className="font-medium">工作行程</p>
           <p className="mt-1 text-sm text-neutral-500">共享多节点行程、结果与企业走访</p>
         </Link>
+        {canViewMonthlyReport(actor) && <Link href="/reports/monthly" className="mt-3 block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5"><p className="font-medium">月度工作台账</p><p className="mt-1 text-sm text-neutral-500">查看结构化月报并生成固定五表 Excel</p></Link>}
       </div>
       <div className="mt-6">
         <p className="mb-2 text-xs font-medium uppercase tracking-wider text-neutral-500">个人事务</p>

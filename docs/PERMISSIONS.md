@@ -1804,6 +1804,13 @@ TEST_PLAN.md
 - 企业导出：管理员全县；`TOWNSHIP_STAFF` 当前本镇；`DEPARTMENT_STAFF` 当前有效负责镇区；普通成员拒绝。
 - 人才批量导出仅当前有效管理员。创建和下载响应均执行服务端权限判断。
 
+## 30. C-M3-004 月报权限落地
+
+- `ADMIN/SUPER_ADMIN/GROUP_LEADER/MINISTER` 为全县；存在任一县级报告角色即采用全县范围。
+- `TOWNSHIP_STAFF` 为当前本镇；`DEPARTMENT_STAFF` 为当前负责镇区 union；多角色范围合并。
+- `MEMBER_CURRENT` 与往届无批量月报。页面、Service、API、Worker 与 Attachment Authorizer 统一调用 Reporting scope resolver。
+- 创建时 scope snapshot 是上限；Worker 再查当前权限。失去下载能力或范围缩小时任务失败，不沿用旧大权限。输出首期仅创建人和 SUPER_ADMIN 可访问。
+
 ## 30. M3-006 Migration permission
 
 - `migration.execute` and `migration.view` are `SYSTEM`, `superAdminOnly` capabilities.

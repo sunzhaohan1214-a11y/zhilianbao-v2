@@ -17,6 +17,7 @@ import { registerHelpAttachmentAuthorizers } from "@/modules/help/attachment-aut
 import { registerReimbursementAttachmentAuthorizers } from "@/modules/reimbursement/attachment-authorizer";
 import { registerAnnouncementAttachmentAuthorizer } from "@/modules/announcement/attachment-authorizer";
 import { registerImportAttachmentAuthorizer } from "@/modules/import-export/attachment-authorizer";
+import { registerMonthlyReportAttachmentAuthorizer } from "@/modules/reporting/attachment-authorizer";
 
 type AttachmentRuntime = {
   storage: StorageAdapter;
@@ -59,6 +60,7 @@ function createRuntime(): AttachmentRuntime {
   registerReimbursementAttachmentAuthorizers(parentAuthorizers);
   registerAnnouncementAttachmentAuthorizer(parentAuthorizers);
   registerImportAttachmentAuthorizer(parentAuthorizers);
+  registerMonthlyReportAttachmentAuthorizer(parentAuthorizers);
   const scanner = isTest ? new FakeCleanScanner() : new UnavailableFileScanAdapter();
   return {
     storage,

@@ -512,6 +512,12 @@ P3 UI/文案/低频问题
 - Real MySQL：空库与重复 migrate deploy、双 Confirm、mapping/旧 preview 竞争、信用代码/有账号与无账号手机号 race、ARCHIVED 人员与 DISABLED 企业不变、晚行失败全回滚、快照和幂等。
 - Critical E2E：管理员企业/团员导入与重复上传、可辨识候选摘要、首层确认不写库/取消不写库/Modal 二次确认后才 Apply；镇区/部门企业导出限域；成员导出拒绝；管理员人才导出。
 
+## 23. C-M3-004 专项测试
+
+- Unit：上海月界/current asOf、scope resolver、Demand statusAt/batchAt/stale、Outcome due、公式转义、Decimal 显示与五个精确 Sheet 名。
+- Real MySQL：6月 IN_PROGRESS/7月 COMPLETED 历史时点；创建批次 A/责任批次 B/办结批次 C；APPROVED/RETURNED 与 trackingDate/trackingBatch；异步任务、唯一 Attachment、Job 重跑、Excel parser 重开。
+- Critical E2E：ADMIN preview/export/授权下载；GROUP_LEADER/MINISTER 无 admin shell 入口；TOWNSHIP/DEPARTMENT 限域与篡改拒绝；普通成员拒绝；页面无排名。
+
 ## 23. M3-006 automated coverage
 
 - Unit/sample: strict manifest/source contract, deterministic fingerprint, traversal guard, shared Person/Enterprise/Talent/Policy matchers, fixed Demand/reimbursement mapping, no historical account/high-privilege invention, presence/trip historical semantics, reconciliation formula, missing/hash-mismatch attachments, full-snapshot gate.

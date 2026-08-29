@@ -556,6 +556,13 @@ RESTRICT / NO ACTION
 - 无 Account 人员的手机号不对 `Person.contactPhone` 盲目加 UNIQUE；Apply 先锁定 `person_import_identity_locks(phone_hash)`，再以 locking current read 调用共享 Person Matcher 复核，跨批竞争 loser 整批回滚。
 - 人员 exact phone 必须覆盖 ACTIVE/ARCHIVED；ARCHIVED 以及 DISABLED/MERGED 企业不可通过 Import 创建替代档案、恢复或更新。
 
+## C-M3-004 约束
+
+- `MonthlyReportExportTask(created_by_person_id,idempotency_key_hash)` 唯一，`output_attachment_id` 唯一。
+- month 使用 `YYYY-MM` CHECK；任务状态与 started/finished/output/error 字段形状使用 CHECK。
+- batch、creator、output Attachment 均 `ON DELETE RESTRICT`；Worker 使用固定 object key 与 `monthly-report-export:{taskId}` Job 幂等键。
+- Migration `20260901130000_m3_monthly_reporting` 为 expand-only，不修改历史 migration。
+
 ## 26. M3-006 Actual Apply 约束
 
 - 每条 source aggregate 使用独立事务；业务 target、领域 Audit/Version/History 与 `LegacyMigrationMap` 同事务提交，不使用一个全量大事务。

@@ -541,6 +541,10 @@ M1-008 home
 
 ## M3.5 实现记录（2026-08-28）
 
-统一 Import Engine、Field Registry、EntityMatcher、企业/团员/人才 Adapter、逻辑快照、确认幂等，以及企业限域/人才管理员导出已进入本里程碑实现。M3.4 Reporting 未开始。M3.6 已实现 provider-driven dry-run 与 dedicated V2 Migration DB Actual Apply、业务 target + Map 原子写入、resolution 复用、changed-source fingerprint fail-safe、正式 Attachment file policy/scanner 复用、PDF 目标重读/Link 和真实 MySQL 幂等测试；非 PENDING Help、Presence/Trip/Visit/Role 保持 unsupported review。Full rehearsal 仍 pending controlled V1 source snapshot。
+统一 Import Engine、Field Registry、EntityMatcher、企业/团员/人才 Adapter、逻辑快照、确认幂等，以及企业限域/人才管理员导出已进入本里程碑实现。M3.6 已由独立里程碑实现 provider-driven dry-run 与 dedicated V2 Migration DB Actual Apply、业务 target + Map 原子写入、resolution 复用、changed-source fingerprint fail-safe、正式 Attachment file policy/scanner 复用、PDF 目标重读/Link 和真实 MySQL 幂等测试；非 PENDING Help、Presence/Trip/Visit/Role 保持 unsupported review。Full rehearsal 仍 pending controlled V1 source snapshot。
+
+## M3.4 实现记录（2026-08-28）
+
+固定五张结构化月度工作台账、历史 as-of Demand/批次/久未更新/待成效口径、范围解析、APPROVED Outcome Decimal 汇总、异步 Job、私有 Attachment、Excel 安全、响应式入口与专项测试进入本里程碑实现。不含报销、求助、排名、AI 叙述、M4 工作台或 V1 Migration 执行。
 
 **IMPLEMENTATION_PLAN.md v1.1 END**

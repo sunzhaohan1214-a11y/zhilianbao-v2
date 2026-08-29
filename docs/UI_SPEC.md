@@ -923,4 +923,10 @@ canceled/withdrawn
 
 首层“确认导入”只打开 Dialog；Dialog 必须展示创建/更新/关联/跳过数、总行数、Preview Version、整批回滚说明，并在管理员勾选已核对后才允许“确认执行导入”发起 POST。取消 Dialog 不产生业务写入；服务端 stale preview 仍返回 `IMPORT_PREVIEW_STALE`，前端关闭 Dialog 并刷新。
 
+## C-M3-004 月度工作台账 UI
+
+唯一入口 `/reports/monthly` 位于 admin shell 之外，AdminShell 可链接；“我的”仅有 report capability 时显示。顶部为月份、可选批次、授权范围；先结构化 Preview，再异步生成固定五表 Excel。当前月明确显示“截至当前”。
+
+电脑端显示轻量指标卡、五表行数、warning、任务状态与下载；手机可读/可发起并提示完整明细在 Excel。保持四项 bottom nav，不做大屏、排名、评分或 AI 月报文字。
+
 **UI_SPEC.md DESIGN v1.1 END**
