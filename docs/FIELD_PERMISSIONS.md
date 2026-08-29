@@ -272,4 +272,10 @@ AI建议不能直接W效力关系。
 - 企业匹配后只更新正式管理端允许编辑字段；团员重导不得更新账号密码或状态；人才不导入结构化本人电话/邮箱。
 - Export 使用显式字段白名单，不包含附件 URL、Resume、Session、Audit 全量 JSON 或 Import staging。
 
+## C-M3-004 月报字段边界
+
+- 五表不含联系人电话、Talent 本人电话/email、报销、求助、私人 AI 对话、附件永久 URL。
+- Demand 责任人、人才处理人仅输出内部安全姓名；区域 Trip 只输出 in-scope EnterpriseVisit/企业节点，结果摘要不拼接县外节点内容。
+- 所有字符串写 Excel 前转义 `= + - @`；金额统计保持 Prisma.Decimal，工作簿显示两位小数。
+
 **FIELD_PERMISSIONS.md v1.1 END**

@@ -18,6 +18,7 @@ import { isNotificationError } from "@/modules/notification/errors";
 import { isAnnouncementError } from "@/modules/announcement/errors";
 import { isImportExportError } from "@/modules/import-export/errors";
 import { isSystemError } from "@/modules/system/errors";
+import { isReportingError } from "@/modules/reporting/errors";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
@@ -25,6 +26,9 @@ export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status 
 
 export function apiError(error: unknown, requestId: string = randomUUID()) {
   if (isSystemError(error)) {
+    return NextResponse.json({ ok: false, error: { code: error.code, message: error.message, details: error.details ?? {} }, requestId }, { status: error.status });
+  }
+  if (isReportingError(error)) {
     return NextResponse.json({ ok: false, error: { code: error.code, message: error.message, details: error.details ?? {} }, requestId }, { status: error.status });
   }
   if (isImportExportError(error)) {

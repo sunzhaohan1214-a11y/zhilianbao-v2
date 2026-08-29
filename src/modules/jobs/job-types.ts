@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const JOB_TYPES = ["ATTACHMENT_SCAN", "ATTACHMENT_TEMP_CLEANUP", "DEMAND_RECOMMENDATION_RUN", "DEMAND_OUTCOME_DUE", "TRIP_RESULT_DUE", "REIMBURSEMENT_INVOICE_OCR", "REIMBURSEMENT_EXPORT"] as const;
+export const JOB_TYPES = ["ATTACHMENT_SCAN", "ATTACHMENT_TEMP_CLEANUP", "DEMAND_RECOMMENDATION_RUN", "DEMAND_OUTCOME_DUE", "TRIP_RESULT_DUE", "REIMBURSEMENT_INVOICE_OCR", "REIMBURSEMENT_EXPORT", "MONTHLY_REPORT_EXPORT"] as const;
 export type JobType = (typeof JOB_TYPES)[number];
 
 export const jobPayloadSchemas = {
@@ -15,6 +15,7 @@ export const jobPayloadSchemas = {
   }).strict(),
   REIMBURSEMENT_INVOICE_OCR: z.object({ invoiceId: z.uuid() }).strict(),
   REIMBURSEMENT_EXPORT: z.object({ exportTaskId: z.uuid() }).strict(),
+  MONTHLY_REPORT_EXPORT: z.object({ exportTaskId: z.uuid() }).strict(),
   TRIP_RESULT_DUE: z.object({
     tripId: z.uuid(),
     dueAt: z.iso.datetime(),

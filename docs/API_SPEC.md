@@ -718,4 +718,14 @@ Confirm 必须同时提供 `Idempotency-Key`、`confirm=true` 和 `expectedPrevi
 
 All `/api/v2/system/*` overview, settings, calendar, sensitive health, storage/provider, full audit, backup, and restore routes require their dedicated SUPER capabilities. Settings and calendar use `GET -> POST preview -> POST confirm`; confirm requires reason, current version, preview token, `confirm=true`, trusted mutation origin, and `Idempotency-Key`. Backup exposes catalog/create/sync metadata only. Restore exposes preview/create/detail/validate/complete orchestration; it never returns backup bytes. AI routes expose safe metadata and restrict draft/test/activate mutations to `ai.service.manage` with SYSTEM scope.
 
+## C-M3-004 月度工作台账 API
+
+```text
+GET  /api/v2/reports/monthly?month=YYYY-MM&batchId=&areaId=
+POST /api/v2/reports/monthly/exports            Idempotency-Key required
+GET  /api/v2/reports/monthly/exports/:id
+```
+
+Preview 只返回指标、五表行数、最多十行预览与数据质量 warning。POST 固化 query/scope snapshot 并返回 202；输出通过 `Attachment` 短时签名 URL 下载，不返回公开永久 URL。越权 task id 使用不可探测错误。
+
 **API_SPEC.md v1.2 END**

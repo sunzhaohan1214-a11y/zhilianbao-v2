@@ -62,6 +62,17 @@ export async function seedAuthFixtures() {
   await prisma.systemSettingVersion.deleteMany({ where: { changedByPersonId: { in: systemPersonIds } } });
   await prisma.systemSetting.deleteMany({ where: { updatedByPersonId: { in: systemPersonIds } } });
   await prisma.workCalendarOverride.deleteMany({ where: { updatedByPersonId: { in: systemPersonIds } } });
+  const monthlyReportTasks = await prisma.monthlyReportExportTask.findMany({
+    where: { createdByPersonId: { in: users.map(({ personId }) => personId) } },
+    select: { id: true, outputAttachmentId: true },
+  });
+  const monthlyReportTaskIds = monthlyReportTasks.map(({ id }) => id);
+  const monthlyReportAttachmentIds = monthlyReportTasks.flatMap(({ outputAttachmentId }) => outputAttachmentId ? [outputAttachmentId] : []);
+  await prisma.jobTask.deleteMany({ where: { jobType: "MONTHLY_REPORT_EXPORT" } });
+  await prisma.attachmentLink.deleteMany({ where: { entityType: "MONTHLY_REPORT_EXPORT_TASK", entityId: { in: monthlyReportTaskIds } } });
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: monthlyReportAttachmentIds } } });
+  await prisma.monthlyReportExportTask.deleteMany({ where: { id: { in: monthlyReportTaskIds } } });
+  await prisma.attachment.deleteMany({ where: { id: { in: monthlyReportAttachmentIds } } });
   const importBatches = await prisma.importBatch.findMany({
     where: { createdByPersonId: { in: users.map(({ personId }) => personId) } },
     select: { id: true, sourceAttachmentId: true },
