@@ -38,12 +38,12 @@
     "security:dependencies": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
     "security:secrets": "node scripts/security-secrets.mjs",
     "security:code": "node scripts/security-code.mjs",
-    "security:clamav": "node scripts/clamav-integration.mjs",
+    "security:clamav": "esbuild scripts/clamav-integration.mjs --bundle --platform=node --format=esm --target=node24 --outfile=script-dist/clamav-integration.mjs --packages=external && node script-dist/clamav-integration.mjs",
     "release:check": "node scripts/release-readiness.mjs",
     "restore:drill": "node scripts/restore-drill.mjs",
     "test:evidence": "node scripts/test-evidence.mjs",
-    "audit:data-consistency": "node scripts/data-consistency.ts",
-    "audit:data-consistency:test": "node scripts/seed-consistency-fixture.ts && node scripts/data-consistency.ts"
+    "audit:data-consistency": "esbuild scripts/data-consistency.ts --bundle --platform=node --format=esm --target=node24 --outfile=script-dist/data-consistency.mjs --packages=external && node script-dist/data-consistency.mjs",
+    "audit:data-consistency:test": "esbuild scripts/seed-consistency-fixture.ts --bundle --platform=node --format=esm --target=node24 --outfile=script-dist/seed-consistency-fixture.mjs --packages=external && node script-dist/seed-consistency-fixture.mjs && npm run audit:data-consistency"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "5.3.0",
