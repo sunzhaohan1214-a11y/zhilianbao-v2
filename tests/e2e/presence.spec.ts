@@ -60,6 +60,37 @@ test("MEMBER_CURRENT reports Presence, sees current list, and never requests GPS
   expect(await page.evaluate(() => window.__presenceGpsCalls)).toBe(0);
 });
 
+test("a network interruption keeps the Presence draft and permits an explicit retry", async ({ page }) => {
+  await login(page, e2eUsers.normal.phone, e2eUsers.normal.password);
+  await page.goto("/presence/new");
+  await expect(page.locator("form")).toHaveAttribute("aria-busy", "false");
+  const interval = futureShanghaiPresenceInterval(new Date(), 7);
+  const arrival = page.getByLabel("到宝时间");
+  const departure = page.getByLabel("预计离宝时间");
+  await arrival.fill(interval.arrivalAtLocal);
+  await departure.fill(interval.expectedDepartureAtLocal);
+
+  let attempts = 0;
+  await page.route("**/api/v2/presence", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    attempts += 1;
+    if (attempts === 1) return route.abort("internetdisconnected");
+    return route.continue();
+  });
+
+  const submit = page.getByRole("button", { name: "提交报备" });
+  await submit.click();
+  await expect(page.getByRole("alert")).toHaveText("网络异常，已保留当前内容，请检查连接后重试");
+  await expect(submit).toBeEnabled();
+  await expect(arrival).toHaveValue(interval.arrivalAtLocal);
+  await expect(departure).toHaveValue(interval.expectedDepartureAtLocal);
+
+  await submit.click();
+  await expect(page).toHaveURL(/\/presence$/);
+  await expect(page.getByText("未来安排")).toBeVisible();
+  expect(attempts).toBe(2);
+});
+
 test("platform alumni can report while ordinary users cannot browse other-person history", async ({ page }) => {
   await login(page, e2eUsers.alumni.phone, e2eUsers.alumni.password);
   const interval = futureShanghaiPresenceInterval(new Date(), 8);

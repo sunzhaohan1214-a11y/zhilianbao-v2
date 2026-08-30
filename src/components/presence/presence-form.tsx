@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 
 type FormValues = {
   arrivalAt: string;
@@ -10,6 +9,11 @@ type FormValues = {
   transportMode: string;
   trainFlightNo: string;
   note: string;
+};
+
+type FormNotice = {
+  tone: "error" | "success";
+  text: string;
 };
 
 const emptyValues: FormValues = {
@@ -32,10 +36,9 @@ export function PresenceForm({
   reportId?: string;
   initialValues?: FormValues;
 }) {
-  const router = useRouter();
   const draftKey = reportId ? `presence-edit-${reportId}` : "presence-new-draft";
   const [values, setValues] = useState(initialValues);
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<FormNotice | null>(null);
   const [pending, setPending] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
 
@@ -61,25 +64,30 @@ export function PresenceForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
-    setMessage("");
-    const response = await fetch(reportId ? `/api/v2/presence/${reportId}/update` : "/api/v2/presence", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ...values,
-        arrivalAt: toShanghaiIso(values.arrivalAt),
-        expectedDepartureAt: toShanghaiIso(values.expectedDepartureAt),
-      }),
-    });
-    const payload = await response.json() as { ok: boolean; error?: { message?: string } };
-    setPending(false);
-    if (!response.ok) {
-      setMessage(payload.error?.message ?? "保存失败，请稍后重试");
-      return;
+    setNotice(null);
+    try {
+      const response = await fetch(reportId ? `/api/v2/presence/${reportId}/update` : "/api/v2/presence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...values,
+          arrivalAt: toShanghaiIso(values.arrivalAt),
+          expectedDepartureAt: toShanghaiIso(values.expectedDepartureAt),
+        }),
+      });
+      const payload = await response.json() as { ok: boolean; error?: { message?: string } };
+      if (!response.ok) {
+        setNotice({ tone: "error", text: payload.error?.message ?? "保存失败，请稍后重试" });
+        return;
+      }
+      window.localStorage.removeItem(draftKey);
+      setNotice({ tone: "success", text: "保存成功，正在返回来离宝列表…" });
+      window.location.replace("/presence");
+    } catch {
+      setNotice({ tone: "error", text: "网络异常，已保留当前内容，请检查连接后重试" });
+    } finally {
+      setPending(false);
     }
-    window.localStorage.removeItem(draftKey);
-    router.push("/presence");
-    router.refresh();
   }
 
   const inputClass = "mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-3 outline-none focus:border-blue-500";
@@ -104,7 +112,7 @@ export function PresenceForm({
         <textarea disabled={!draftLoaded} value={values.note} maxLength={1000} rows={3} onChange={(e) => field("note", e.target.value)} className={inputClass} />
       </label>
       <p className="text-xs text-neutral-500">按北京时间填写。来离宝不是考勤，不采集位置或轨迹。</p>
-      {message && <p role="alert" className="text-sm text-red-600">{message}</p>}
+      {notice && <p role={notice.tone === "error" ? "alert" : "status"} className={`text-sm ${notice.tone === "error" ? "text-red-600" : "text-emerald-700"}`}>{notice.text}</p>}
       <button disabled={!draftLoaded || pending} className="w-full rounded-xl bg-blue-600 px-4 py-3 font-medium text-white disabled:opacity-50">
         {pending ? "保存中…" : reportId ? "保存修改" : "提交报备"}
       </button>
