@@ -80,7 +80,7 @@ test("a network interruption keeps the Presence draft and permits an explicit re
 
   const submit = page.getByRole("button", { name: "提交报备" });
   await submit.click();
-  await expect(page.getByRole("alert")).toHaveText("网络异常，已保留当前内容，请检查连接后重试");
+  await expect(page.locator("form").getByRole("alert")).toHaveText("网络异常，已保留当前内容，请检查连接后重试");
   await expect(submit).toBeEnabled();
   await expect(arrival).toHaveValue(interval.arrivalAtLocal);
   await expect(departure).toHaveValue(interval.expectedDepartureAtLocal);
