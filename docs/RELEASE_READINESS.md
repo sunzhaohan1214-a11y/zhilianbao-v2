@@ -49,7 +49,9 @@ Real CynosDB operations require deployment-injected approved identity values: `C
 
 Code automation covers security headers, dependency/secret/dangerous-code scans, real ClamAV CI integration, fixed-scale MySQL performance, Chromium/Firefox/WebKit compatibility, weak-network behavior, AI contract evaluation, CynosDB backup integration, guarded restore-to-new-cluster tooling, and read-only consistency audit.
 
-The following remain external and therefore keep `RELEASE_READY=NO`: protected `main`, UAT sign-off, V1 full rehearsal and reconciliation, production scanner configuration, real production backup evidence, real restore drill and cleanup evidence, production maintenance integration, and production cutover preflight.
+PR #29 is merged as `54d628c08d522154a1237f5d8b92da6ceb49f1c5`. `main` is protected and all seven required exact-head checks passed for that commit, so protected `main` is no longer a blocker.
+
+The following remain external and therefore keep `RELEASE_READY=NO`: TEST stability and cloud operational proof where applicable, UAT sign-off, V1 full rehearsal and reconciliation, production scanner configuration, real production backup evidence, real restore drill and cleanup evidence, production maintenance integration, and production cutover preflight.
 
 ## Operator commands
 

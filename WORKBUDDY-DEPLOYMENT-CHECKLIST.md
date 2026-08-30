@@ -1,7 +1,9 @@
-# WORKBUDDY_DEPLOYMENT_CHECKLIST.md
+# WORKBUDDY-DEPLOYMENT-CHECKLIST.md
 
-> 用于后续 TEST / PROD 部署执行。  
-> 当前先作为清单，不要在 M0-001 就部署 PROD。
+> **DEPRECATED FOR V2 CURRENT ROUTE**
+> `DEPLOY_ROUTE = DIRECT_TENCENT_CLOUD`
+> `WORKBUDDY_USED = NO`
+> 本文件仅保留历史 V1 / WorkBuddy 部署与排障经验，不是当前 V2 TEST / PROD 执行清单。当前路线以 [docs/OPERATIONS.md](docs/OPERATIONS.md) 及其引用的 release/UAT/runbook 文档为准。
 
 # TEST发布前
 
@@ -15,7 +17,9 @@
 - [ ] AI/OCR TEST配置确认
 - [ ] Docker build成功
 
-# WorkBuddy 构建
+# 历史 WorkBuddy 构建经验
+
+以下命令只用于理解或排查历史 WorkBuddy 环境问题；当前 V2 直接腾讯云部署不要求使用 WorkBuddy。
 
 如 safe-delete hook 干扰：
 
@@ -108,4 +112,4 @@ PROD Migration必须在：
 
 数据灾难才按 OPERATIONS 的 Restore Runbook。
 
-**WORKBUDDY_DEPLOYMENT_CHECKLIST.md END**
+**WORKBUDDY-DEPLOYMENT-CHECKLIST.md END**

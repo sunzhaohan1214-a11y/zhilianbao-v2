@@ -1,8 +1,17 @@
 # 智链宝 V2.0 — OPERATIONS.md
 
-> 版本：v1.0  
+> 版本：v1.1
 > 状态：部署与运维基线  
 > 继承 V1 已验证 CloudBase / Docker / VPC 经验，但 V2 环境必须独立。
+
+当前 V2 部署路线：
+
+```text
+DEPLOY_ROUTE = DIRECT_TENCENT_CLOUD
+WORKBUDDY_USED = NO
+```
+
+V2 TEST / PROD 由腾讯云直接部署流程执行。WorkBuddy 仅作为历史 V1 环境经验来源，不是当前 V2 的必选部署执行者。
 
 ## 1. 环境隔离
 
@@ -47,11 +56,11 @@ node server.js
 0.0.0.0:3000
 ```
 
-Node版本在 Dockerfile 显式固定兼容LTS，不依赖WorkBuddy宿主机。
+Node版本在 Dockerfile 显式固定兼容LTS，不依赖部署执行宿主机。
 
-## 3. WorkBuddy 已知环境坑
+## 3. 历史 V1 / WorkBuddy 环境经验
 
-V1已经验证：
+以下仅记录 V1 使用 WorkBuddy 时已验证的经验；当前 V2 直接腾讯云路线不依赖 WorkBuddy。
 
 ### NODE_OPTIONS safe-delete
 
@@ -133,10 +142,11 @@ migration user
 ChatGPT / 产品技术规格  → 定义
 Codex                   → 修改代码/测试
 GitHub                  → 唯一代码真源
-WorkBuddy               → TEST/PROD部署执行
+Direct Tencent Cloud    → 当前 V2 TEST/PROD部署执行
+WorkBuddy               → 仅保留历史 V1 经验，不参与当前 V2 路线
 ```
 
-WorkBuddy不得绕过GitHub永久修改线上源码。
+任何部署执行者都不得绕过GitHub永久修改线上源码。
 
 ## 7. Branch / Release
 
@@ -161,7 +171,7 @@ PRD/UI/TECH文档版本独立，不和应用版本混用。
 ```text
 merge main
 → CI通过
-→ WorkBuddy构建
+→ Direct Tencent Cloud构建
 → TEST migrate deploy
 → TEST deploy
 → /health
@@ -394,7 +404,7 @@ Worker积压
 - Docker；
 - standalone；
 - VPC内网；
-- WorkBuddy部署经验。
+- WorkBuddy历史部署经验（仅作排障参考，不作为当前 V2 执行路线）。
 
 明确废弃：
 
@@ -468,7 +478,6 @@ Restore is same-environment, same-provider, exact-schema only. Preview captures 
 
 Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. After Provider success, automatic validation performs `SELECT 1`, checks the required Prisma migration is finished/not rolled back/without failure logs, enforces exactly one current ACTIVE batch and at least one NORMAL account, probes up to three formal PASSED attachment objects through the configured storage adapter, and proves Job/Outbox queries execute. Any required failure keeps the restore active and maintenance enabled. Manual completion is reentrant, requires successful validation and explicit inspection, releases only the matching maintenance operation, and invalidates all sessions. Real provider integration and controlled restore drill remain M3-008.
 
-**OPERATIONS.md v1.1 END**
 # M3-008 release operations addendum
 
 The operational source of truth is `docs/RELEASE_READINESS.md`, with detailed checklists in `UAT_CHECKLIST.md`, `PROD_RELEASE_CHECKLIST.md`, `RESTORE_DRILL_RUNBOOK.md`, `MONITORING_RUNBOOK.md`, `GITHUB_RELEASE_GATES.md`, and `DB_PRIVILEGE_RUNBOOK.md`.
@@ -490,3 +499,5 @@ node worker-dist/attachment-scan-main.js
 The command recovers only stale `ATTACHMENT_SCAN` leases, claims at most one due scan JobTask with `FOR UPDATE SKIP LOCKED`, runs the existing handler, persists success or retry/backoff, and exits. It does not consume Outbox or unrelated jobs. An idle invocation exits successfully. Multiple invocations remain safe because JobTask enqueue and claim are idempotent/lease-protected.
 
 Deployment TEST and PROD Web/scan-job processes must both explicitly inject `ATTACHMENT_STORAGE_PROVIDER=cos` and the same COS bucket/region identity, plus `FILE_SCAN_PROVIDER=clamav`, `CLAMAV_HOST`, `CLAMAV_PORT` and `CLAMAV_TIMEOUT_MS`; `APP_ENV=test` is not a storage or scanner provider identity. Keep database, COS credentials and scanner endpoint configuration in deployment Secret/runtime configuration, never in the image. The scheduler, private network path, ClamAV endpoint or sidecar, retry cadence, alerts and minimum-instance setting remain cloud wiring; prefer minimum instances zero where cold-start latency is acceptable. Before enabling traffic, prove a Web-uploaded object is readable by a separate scan-job process, clean acceptance, EICAR rejection, retry after scanner outage, and zero business links/signed URLs for non-passed attachments in the real TEST environment.
+
+**OPERATIONS.md v1.1 END**

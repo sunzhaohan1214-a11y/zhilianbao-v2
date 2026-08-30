@@ -1,8 +1,17 @@
 # 智链宝 V2.0 — IMPLEMENTATION_PLAN.md
 
-> 版本：v1.1
+> 版本：v1.2
 > 状态：Codex实施顺序基线  
 > 原则：第一阶段最终一次性完整上线；M0–M3只是内部建设顺序。
+
+## CURRENT FIRST-STAGE STATUS
+
+- M0–M3 第一阶段功能代码已完成并合入受保护的 `main`；冻结基线 `54d628c08d522154a1237f5d8b92da6ceb49f1c5` 的 7 项 exact-head CI 全部通过。
+- V2 TEST 部署已存在，但 TEST 稳定性与云上运维证明尚未完成，因此当前不是 TEST READY。
+- 正式 UAT 尚未签署。
+- V1 full rehearsal/reconciliation 仍受阻于未提供受控 source snapshot；脱敏 sample rehearsal 不能替代 full proof。
+- PROD `RELEASE_READY=NO`。
+- M4 尚未开始。
 
 # 1. 开工前
 
@@ -213,7 +222,7 @@ AI失败不阻止业务。
 
 ## M1.6 Progress / Close
 
-状态：已在 PR #22 实现，等待合并。
+状态：已在 PR #22 实现并合入 `main`（merge commit `48bd701e728761e25ee396df8e093bfa82620bf7`）。
 
 - 进展；
 - stale派生；
@@ -228,7 +237,7 @@ AI失败不阻止业务。
 
 ## M1.7 Outcome
 
-状态：M1.7 Outcome implemented in PR #24，pending merge（保持开放，未合并）。
+状态：M1.7 Outcome 已在 PR #24 实现并合入 `main`（merge commit `65d3316a5bc067200b54498713ca8b0223a65e44`）。
 
 - 办结 APPROVE 原子创建 NONE/TRACKING Plan，历史 COMPLETED 可一次补建；
 - 多轮 DRAFT/RETURNED/PENDING_REVIEW/APPROVED、editVersion 与 activeKey 并发保护；
@@ -239,7 +248,7 @@ AI失败不阻止业务。
 
 ## M1.8 Home
 
-状态：A-M1-008 已实现，等待开放 PR 验证。
+状态：A-M1-008 Home 已在 PR #26 实现并合入 `main`（merge commit `f97e3ed163f13368b50aae88cfbd2358bddd492a`）。
 
 - `HomeService.overview()` 在服务端聚合消息、公告、全团需求、当前在宝、今日行程、待办和最新需求，页面不直接使用 Prisma；
 - 团长/部长复用 `team.overview.view`，其他角色不显示全团概览；
@@ -549,12 +558,12 @@ M1-008 home
 
 ## M3-007 status
 
-Status: implemented in PR #28 and pending merge. System settings/versioning, Asia/Shanghai work calendar, capability-driven AdminShell, high-risk overview, batch/import pre-backup, map activation preview, AI/OCR config lifecycle and evaluation gate, health/storage aggregation, full redacted audit, backup catalog/provider abstraction, restore/maintenance orchestration and UI/API are implemented. Pre-merge recovery hardening adds explicit fake-provider gating, normalized environment and exact-schema restore guards, rechecked Provider preview, real post-restore validation, reentrant crash recovery/finalization, Provider-only catalog ingest, evidence-based compliance, complete restore UI actions, read-only `NOT_WIRED` SLA settings, and expanded Batch/Map impact previews. Production providers remain fail-closed; no real provider is configured, no real restore was executed, no migration was added, and M3-008 is not started.
+Status: implemented in PR #28 and merged into `main` as `78d91c183933ed4224e5922ea7fe112d4332153a`. System settings/versioning, Asia/Shanghai work calendar, capability-driven AdminShell, high-risk overview, batch/import pre-backup, map activation preview, AI/OCR config lifecycle and evaluation gate, health/storage aggregation, full redacted audit, backup catalog/provider abstraction, restore/maintenance orchestration and UI/API are implemented. Pre-merge recovery hardening adds explicit fake-provider gating, normalized environment and exact-schema restore guards, rechecked Provider preview, real post-restore validation, reentrant crash recovery/finalization, Provider-only catalog ingest, evidence-based compliance, complete restore UI actions, read-only `NOT_WIRED` SLA settings, and expanded Batch/Map impact previews. Production providers remain fail-closed; no real provider is configured, no real restore was executed, and no migration was added. At the PR #28 implementation point M3-008 had not started; it was completed later in PR #29.
 
 ## B-M3-008 Final hardening
 
-Status: implemented in PR #29 and pending merge. The milestone adds release-readiness truth states; seven exact-head CI gates; security headers, dependency/secret/code scanning and real ClamAV CI; fixed-scale MySQL performance; Chromium/Firefox/WebKit and weak-network coverage; AI contract evaluation and permission-filtered structured Chat; official CynosDB backup integration; guarded restore-to-new-TEST-cluster tooling; read-only consistency audit; and release/UAT/operations runbooks. It adds no Prisma migration and starts no M4 scope.
+Status: implemented in PR #29 and merged into `main` as `54d628c08d522154a1237f5d8b92da6ceb49f1c5`. The milestone adds release-readiness truth states; seven exact-head CI gates; security headers, dependency/secret/code scanning and real ClamAV CI; fixed-scale MySQL performance; Chromium/Firefox/WebKit and weak-network coverage; AI contract evaluation and permission-filtered structured Chat; official CynosDB backup integration; guarded restore-to-new-TEST-cluster tooling; read-only consistency audit; and release/UAT/operations runbooks. It adds no Prisma migration and starts no M4 scope.
 
-This is code-complete wording only. Production release remains `RELEASE_READY=NO` until the PR is merged and exact-head CI, protected main, UAT, V1 full rehearsal/reconciliation, production scanner, real backup, real restore drill/cleanup, maintenance and production preflight evidence are all complete.
+This is code-complete wording only. PR #29 is merged, `main` is protected, and its exact-head CI is 7/7. Production release remains `RELEASE_READY=NO` until TEST stability/cloud operational proof as applicable, UAT, V1 full rehearsal/reconciliation, production scanner, real backup, real restore drill/cleanup, maintenance and production preflight evidence are all complete.
 
 **IMPLEMENTATION_PLAN.md v1.2 END**

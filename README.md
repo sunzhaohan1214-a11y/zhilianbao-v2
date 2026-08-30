@@ -1,6 +1,8 @@
 # 智链宝 V2.0
 
-智链宝 V2.0 的模块化单体工程。当前基线包含 M0 阶段的数据库、认证、组织权限、附件服务、MySQL Job Queue 与 Transactional Outbox 底座，不包含正式业务模块。
+智链宝 V2.0 的模块化单体工程。第一阶段 M0–M3 功能代码已完成并合入受保护的 `main`，当前冻结基线 `54d628c08d522154a1237f5d8b92da6ceb49f1c5` 的 7 项 exact-head CI 全部通过。
+
+V2 TEST 已部署，但仍需完成 TEST 稳定性与云上运维证明、正式 UAT、V1 受控全量演练与对账等门禁；因此当前不等于 TEST READY，更不代表生产发布完成。PROD `RELEASE_READY=NO`，M4 尚未开始。
 
 ## 技术栈
 
