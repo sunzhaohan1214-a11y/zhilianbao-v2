@@ -13,6 +13,7 @@ import {
   writeAudit,
 } from "./repository/auth-repository";
 import type { CurrentSession } from "./session-service";
+import { annotateSafeErrorStage } from "@/lib/logging/safe-error";
 
 function nextStep(account: { status: string; forcePasswordChange: boolean }) {
   if (account.status === "UNACTIVATED") return "ACTIVATE" as const;
@@ -21,6 +22,8 @@ function nextStep(account: { status: string; forcePasswordChange: boolean }) {
 }
 
 export async function login(input: { phone: string; password: string }, context: AuthRequestContext) {
+  let stage = "rate_limit_check";
+  try {
   const phone = normalizePhone(input.phone);
   const rate = await checkLoginRateLimit({ phone, ip: context.ip, deviceId: context.deviceId });
   if (rate.limited) {
@@ -34,8 +37,10 @@ export async function login(input: { phone: string; password: string }, context:
     throw new AuthError("AUTH_RATE_LIMITED", "请求过于频繁，请稍后再试", 429);
   }
 
+  stage = "account_lookup";
   const prisma = getPrismaClient();
   const account = await prisma.account.findUnique({ where: { phone }, include: { person: true } });
+  stage = "password_verify";
   const validPassword = account
     ? await verifyPassword(account.passwordHash, input.password)
     : (await verifyDummyPassword(input.password), false);
@@ -70,6 +75,7 @@ export async function login(input: { phone: string; password: string }, context:
     throw new AuthError("ACCOUNT_INCONSISTENT", "当前账号暂不可登录，请联系管理员", 403);
   }
 
+  stage = "session_issue";
   const issued = await issueSessionAtomically({
     accountId: account.id,
     deviceId: context.deviceId,
@@ -77,8 +83,11 @@ export async function login(input: { phone: string; password: string }, context:
     userAgent: context.userAgent,
     ip: context.ip,
   });
+  stage = "last_login_update";
   await prisma.account.update({ where: { id: account.id }, data: { lastLoginAt: new Date() } });
+  stage = "rate_limit_reset";
   await resetSuccessfulLoginRateLimits({ phone, deviceId: context.deviceId });
+  stage = "audit_write";
   await writeAudit({
     actionCode: "AUTH_LOGIN_SUCCESS",
     accountId: account.id,
@@ -89,7 +98,12 @@ export async function login(input: { phone: string; password: string }, context:
     device: context.deviceId,
     requestId: context.requestId,
   });
+  stage = "complete";
   return { ...issued, nextStep: nextStep(account) };
+  } catch (error) {
+    annotateSafeErrorStage(error, stage);
+    throw error;
+  }
 }
 
 export async function completeFirstActivation(input: {

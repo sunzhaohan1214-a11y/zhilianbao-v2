@@ -4,6 +4,7 @@ import { applicationSecurityHeaders } from "../../next.config";
 import { redactLogValue, writeLog } from "@/lib/logging/logger";
 import { ClamAvFileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
 import { isProductionCodeOrConfig, scanDangerousCodeText, scanSecretText } from "@/modules/hardening/security-scanners";
+import { safeErrorMetadata } from "@/lib/logging/safe-error";
 
 async function clamServer(response: string | null) {
   const sockets = new Set<Socket>();
@@ -57,6 +58,14 @@ describe("M3-008 security headers and logging", () => {
     writeLog("info", { module: "test", requestId: "request-1", result: "pass", secretKey: "do-not-log" });
     const payload = JSON.parse(String(output.mock.calls[0]?.[0]));
     expect(payload).toMatchObject({ level: "info", module: "test", requestId: "request-1", result: "pass", secretKey: "[REDACTED]" });
+  });
+
+  it("extracts only allowlisted codes from bounded cause chains", () => {
+    const secretMessage = "mysql://root:password@db/prod 13800138000 Bearer secret-token object/private.pdf";
+    expect(safeErrorMetadata(Object.assign(new Error(secretMessage), { cause: { code: "ER_CON_COUNT_ERROR", message: secretMessage } })))
+      .toEqual({ errorCode: "ER_CON_COUNT_ERROR", errorClass: "database" });
+    expect(JSON.stringify(safeErrorMetadata(new Error(secretMessage)))).not.toContain(secretMessage);
+    expect(safeErrorMetadata(new Error(secretMessage))).toEqual({ errorCode: "UNKNOWN_ERROR", errorClass: "unknown" });
   });
 
   it("redacts sensitive substrings inside ordinary keys, arrays, and nested objects", () => {

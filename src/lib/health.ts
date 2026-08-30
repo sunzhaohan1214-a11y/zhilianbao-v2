@@ -1,4 +1,6 @@
 import { getPrismaClient } from "@/lib/db/prisma";
+import { writeLog } from "@/lib/logging/logger";
+import { safeErrorMetadata } from "@/lib/logging/safe-error";
 
 export const applicationStatus = {
   service: "zhilianbao-v2",
@@ -23,6 +25,7 @@ function databaseReadinessRequired(environment: Record<string, string | undefine
 }
 
 export async function getReadiness(options: ReadinessOptions = {}) {
+  const startedAt = Date.now();
   const environment = options.environment ?? process.env;
 
   if (!databaseReadinessRequired(environment)) {
@@ -39,6 +42,7 @@ export async function getReadiness(options: ReadinessOptions = {}) {
   }
 
   if (!environment.DATABASE_URL?.trim()) {
+    writeLog("error", { module: "readiness", route: "/ready", result: "not_ready", stage: "configuration", durationMs: Date.now() - startedAt, errorCode: "READINESS_CONFIGURATION_MISSING" });
     return {
       service: applicationStatus.service,
       status: "not-ready" as const,
@@ -64,6 +68,8 @@ export async function getReadiness(options: ReadinessOptions = {}) {
     ]);
   } catch (error) {
     const timedOut = error === timeoutMarker;
+    const safe = timedOut ? { errorCode: "READINESS_DATABASE_TIMEOUT", errorClass: "database" } : safeErrorMetadata(error);
+    writeLog("error", { module: "readiness", route: "/ready", result: "not_ready", stage: "database_probe", durationMs: Date.now() - startedAt, errorCode: safe.errorCode, errorClass: safe.errorClass });
     return {
       service: applicationStatus.service,
       status: "not-ready" as const,
@@ -78,6 +84,9 @@ export async function getReadiness(options: ReadinessOptions = {}) {
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+
+  const durationMs = Date.now() - startedAt;
+  if (durationMs > 1_000) writeLog("warn", { module: "readiness", route: "/ready", result: "slow", stage: "database_probe", durationMs });
 
   return {
     service: applicationStatus.service,

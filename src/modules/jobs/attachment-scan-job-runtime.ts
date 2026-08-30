@@ -1,4 +1,4 @@
-import { getPrismaClient } from "@/lib/db/prisma";
+import { disconnectPrismaClient } from "@/lib/db/prisma";
 import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
@@ -57,6 +57,6 @@ export class AttachmentScanJobRuntime {
   }
 
   async disconnect(): Promise<void> {
-    await getPrismaClient().$disconnect();
+    await disconnectPrismaClient();
   }
 }

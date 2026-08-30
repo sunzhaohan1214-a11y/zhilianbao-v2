@@ -15,15 +15,16 @@ export class JobRunner {
 
   async run(job: JobTask, workerId: string): Promise<void> {
     const startedAt = Date.now();
+    const queueWaitMs = Math.max(0, startedAt - job.createdAt.getTime());
     let heartbeatBusy = false;
     const heartbeat = setInterval(async () => {
       if (heartbeatBusy) return;
       heartbeatBusy = true;
       try {
         const renewed = await this.repository.renewLease(job.id, workerId);
-        if (!renewed) this.logger({ worker_id: workerId, job_id: job.id, job_type: job.jobType, result: "lease_lost" });
+        if (!renewed) this.logger({ worker_id: workerId, job_id: job.id, job_type: job.jobType, attempt: job.retryCount + 1, queue_wait_ms: queueWaitMs, run_duration_ms: Date.now() - startedAt, result: "lease_lost", error_code: "JOB_LEASE_LOST" });
       } catch {
-        this.logger({ worker_id: workerId, job_id: job.id, job_type: job.jobType, result: "heartbeat_error" });
+        this.logger({ worker_id: workerId, job_id: job.id, job_type: job.jobType, attempt: job.retryCount + 1, queue_wait_ms: queueWaitMs, run_duration_ms: Date.now() - startedAt, result: "heartbeat_error", error_code: "JOB_HEARTBEAT_ERROR" });
       } finally {
         heartbeatBusy = false;
       }
@@ -38,8 +39,10 @@ export class JobRunner {
         job_id: job.id,
         job_type: job.jobType,
         attempt: job.retryCount + 1,
-        duration_ms: Date.now() - startedAt,
+        queue_wait_ms: queueWaitMs,
+        run_duration_ms: Date.now() - startedAt,
         result: completed ? "succeeded" : "lease_lost",
+        ...(completed ? {} : { error_code: "JOB_LEASE_LOST" }),
       });
     } catch (error) {
       const safe = safeJobError(error);
@@ -54,7 +57,8 @@ export class JobRunner {
         job_id: job.id,
         job_type: job.jobType,
         attempt: job.retryCount + 1,
-        duration_ms: Date.now() - startedAt,
+        queue_wait_ms: queueWaitMs,
+        run_duration_ms: Date.now() - startedAt,
         result: failed?.status === "WAITING" ? "retry_scheduled" : failed?.status === "FAILED" ? "failed" : "lease_lost",
         error_code: safe.code,
       });
