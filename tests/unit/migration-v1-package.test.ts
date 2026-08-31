@@ -48,6 +48,14 @@ async function createPackage(): Promise<{ root: string; output: string }> {
     categories: [{ key: "town", label: "镇区" }],
     contacts: [{ id: 1, category: "town", unit: "脱敏镇", name: "脱敏联系人", title: "联络员", phone: "13800000003" }],
   });
+  await writeJson(root, "data/authoritative/member-institution-locations.json", {
+    metadata: {
+      license: "GPL-3.0-or-later",
+      attribution: "作者全平台ID：宋夏天Dazzle；公众号：送你整个夏天",
+      purpose: "TEST ONLY 派出单位城市级地图标注",
+    },
+    locations: [{ name: "脱敏大学", aliases: ["脱敏高校"], province: "测试省", city: "测试市", lng: 119.1, lat: 33.2 }],
+  });
   await writeJson(root, "data/authoritative/enterprises.full.json", [{
     id: 1, name: "脱敏企业", town: "脱敏镇", address: "脱敏路1号", mainProducts: "脱敏产品",
     qualification: ["高新"], industries: ["制造"], tags: ["重点"], lng: "119.1", lat: "33.2", phone: "0514-88000000",
@@ -88,7 +96,7 @@ describe("V1 local reference package adapter", () => {
   it("verifies the package and emits a non-FULL, non-Git migration source bundle", async () => {
     const fixture = await createPackage();
     const result = await prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: fixture.output });
-    expect(result).toMatchObject({ sourceClassification: "REFERENCE_EXPORT_NOT_FINAL", attachmentCount: 1, mapCandidateCount: 1 });
+    expect(result).toMatchObject({ sourceClassification: "REFERENCE_EXPORT_NOT_FINAL", attachmentCount: 1, mapCandidateCount: 1, dispatchLocationCandidateCount: 1 });
     expect(result.entities).toMatchObject({ ORGANIZATION: 2, PERSON: 3, ENTERPRISE: 1 });
 
     const snapshot = JSON.parse(await readFile(path.join(fixture.output, "snapshot.json"), "utf8")) as Record<string, unknown>;
@@ -97,7 +105,10 @@ describe("V1 local reference package adapter", () => {
     expect(people.map((value) => value.memberKind)).toEqual(expect.arrayContaining(["CURRENT", "FUTURE_MEMBER_CANDIDATE", "INTERNAL_STAFF"]));
     expect(people.every((value) => value.accountEligible === false)).toBe(true);
     const mapCatalog = JSON.parse(await readFile(path.join(fixture.output, "governance/map-candidates.json"), "utf8")) as { candidates: Array<Record<string, unknown>> };
-    expect(mapCatalog.candidates[0]).toMatchObject({ disposition: "REVIEW_REQUIRED", coordinateRangeValid: true });
+    expect(mapCatalog.candidates[0]).toMatchObject({ disposition: "REVIEW_REQUIRED", coordinateRangeValid: true, featureNames: [] });
+    const locationCatalog = JSON.parse(await readFile(path.join(fixture.output, "governance/dispatch-organization-location-candidates.json"), "utf8")) as { policy: string; candidates: Array<Record<string, unknown>> };
+    expect(locationCatalog.policy).toContain("NEVER_INTERPRET_AS_MEMBER_LOCATION");
+    expect(locationCatalog.candidates).toEqual([expect.objectContaining({ name: "脱敏大学", province: "测试省", city: "测试市", disposition: "REVIEW_REQUIRED", memberMapPath: ["中国", "测试省", "测试市", "脱敏大学"] })]);
   });
 
   it("fails closed when a checksummed payload changes", async () => {

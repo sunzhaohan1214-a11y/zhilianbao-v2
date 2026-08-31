@@ -47,6 +47,22 @@ const contactsFileSchema = z.object({
   }).passthrough()),
 }).passthrough();
 
+const institutionLocationsFileSchema = z.object({
+  metadata: z.object({
+    license: z.string().trim().min(1),
+    attribution: z.string().trim().min(1),
+    purpose: z.string().trim().min(1),
+  }).strict(),
+  locations: z.array(z.object({
+    name: z.string().trim().min(1),
+    aliases: z.array(z.string().trim().min(1)).default([]),
+    province: z.string().trim().min(1),
+    city: z.string().trim().min(1),
+    lng: z.number().min(-180).max(180),
+    lat: z.number().min(-90).max(90),
+  }).strict()),
+}).strict();
+
 const qualityReportSchema = z.object({
   generatedAt: z.iso.datetime({ offset: true }),
   timezone: z.string().optional(),
@@ -81,6 +97,7 @@ export type PreparedV1PackageSummary = {
   attachmentCount: number;
   manualReviewCount: number;
   mapCandidateCount: number;
+  dispatchLocationCandidateCount: number;
 };
 
 function digest(value: Buffer | string): string {
@@ -247,11 +264,17 @@ async function buildMapCatalog(root: string, manifestHashes: ReadonlyMap<string,
       if (typeof geometry?.type === "string") geometryTypes.add(geometry.type);
       describeCoordinates(geometry?.coordinates, state);
     }
+    const featureNames = [...new Set(features.flatMap((feature) => {
+      const properties = feature.properties as JsonObject | undefined;
+      const name = text(properties?.name);
+      return name ? [name] : [];
+    }))].sort((left, right) => left.localeCompare(right));
     const operationalCandidate = /baoying_(?:county|towns)\.geojson\.json$/.test(relative);
     candidates.push({
       path: relative,
       sha256: manifestHashes.get(relative),
       featureCount: features.length,
+      featureNames,
       geometryTypes: [...geometryTypes].sort(),
       coordinateRangeValid: state.valid && Number.isFinite(state.minLng),
       bbox: Number.isFinite(state.minLng) ? [state.minLng, state.minLat, state.maxLng, state.maxLat] : null,
@@ -262,6 +285,41 @@ async function buildMapCatalog(root: string, manifestHashes: ReadonlyMap<string,
     });
   }
   return candidates;
+}
+
+function buildDispatchLocationCandidates(input: z.infer<typeof institutionLocationsFileSchema>) {
+  const seenNames = new Set<string>();
+  const seenLookupKeys = new Set<string>();
+  return input.locations.map((location) => {
+    const nameKey = location.name.trim().toLocaleLowerCase("zh-CN");
+    if (seenNames.has(nameKey)) throw new Error("V1_PACKAGE_DISPATCH_LOCATION_DUPLICATE_NAME");
+    seenNames.add(nameKey);
+    const aliases = [...new Set(location.aliases.map((alias) => alias.trim()).filter((alias) => alias && alias !== location.name))]
+      .sort((left, right) => left.localeCompare(right));
+    for (const lookup of [location.name, ...aliases]) {
+      const key = lookup.toLocaleLowerCase("zh-CN");
+      if (seenLookupKeys.has(key)) throw new Error("V1_PACKAGE_DISPATCH_LOCATION_AMBIGUOUS_ALIAS");
+      seenLookupKeys.add(key);
+    }
+    return {
+      sourceId: `DISPATCH-LOCATION-${digest(location.name).slice(0, 24).toUpperCase()}`,
+      name: location.name,
+      aliases,
+      province: location.province,
+      city: location.city,
+      latitude: location.lat,
+      longitude: location.lng,
+      intendedUse: "DISPATCH_ORGANIZATION_LOCATION",
+      memberMapPath: ["中国", location.province, location.city, location.name],
+      disposition: "REVIEW_REQUIRED",
+      reasons: [
+        "DISPATCH_ORGANIZATION_MATCH_REQUIRED",
+        "COORDINATE_SYSTEM_UNVERIFIED",
+        "ADMIN_CONFIRMATION_REQUIRED",
+        "NEVER_INTERPRET_AS_MEMBER_LOCATION",
+      ],
+    };
+  }).sort((left, right) => left.sourceId.localeCompare(right.sourceId));
 }
 
 export async function prepareV1DataPackage(input: { sourceRoot: string; outputRoot: string }): Promise<PreparedV1PackageSummary> {
@@ -275,6 +333,7 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
   const verified = await verifyPackage(sourceRoot);
   const members = membersFileSchema.parse(await readJson(path.join(sourceRoot, "data/authoritative/members.full.json")));
   const contacts = contactsFileSchema.parse(await readJson(path.join(sourceRoot, "data/authoritative/contacts.full.json")));
+  const institutionLocations = institutionLocationsFileSchema.parse(await readJson(path.join(sourceRoot, "data/authoritative/member-institution-locations.json")));
   const enterpriseRaw = z.array(z.record(z.string(), z.unknown())).parse(await readJson(path.join(sourceRoot, "data/authoritative/enterprises.full.json")));
   const quality = qualityReportSchema.parse(await readJson(path.join(sourceRoot, "reports/data-quality-report.json")));
   const manifestHashes = new Map(verified.manifest.files.map((value) => [value.path.replaceAll("\\", "/"), value.sha256]));
@@ -417,6 +476,10 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
   }
 
   const mapCandidates = await buildMapCatalog(sourceRoot, manifestHashes);
+  const dispatchLocationCandidates = buildDispatchLocationCandidates(institutionLocations);
+  for (const candidate of dispatchLocationCandidates) {
+    review.push({ sourceEntity: "ORGANIZATION", sourceId: candidate.sourceId, code: "DISPATCH_LOCATION_MATCH_REQUIRED", severity: "REVIEW", field: "name", message: "派出单位位置候选必须按正式 Organization 人工匹配，坐标只表示单位地域，不表示团员位置。" });
+  }
   const runtimeFiles = ["users", "enterprise_records", "workflow_records", "member_records", "policy_documents", "audit_logs"];
   const runtimeHistory = [];
   for (const name of runtimeFiles) {
@@ -455,6 +518,17 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     policy: "REVIEW_BEFORE_MAP_BOUNDARY_VERSION; NEVER_INFER_RESPONSIBLE_AREA_FROM_COORDINATES",
     candidates: mapCandidates,
     visualAssetsDisposition: "REFERENCE_ONLY",
+    productDesign: {
+      enterpriseMap: { scopePath: ["BAOYING_COUNTY", "RESPONSIBLE_AREA", "ENTERPRISE"], countAuthority: "ENTERPRISE_RESPONSIBLE_AREA_ID", coordinateUse: "DISPLAY_ONLY" },
+      memberMap: { scopePath: ["COUNTRY", "PROVINCE", "CITY", "DISPATCH_ORGANIZATION", "PERSON"], countAuthority: "DISTINCT_PERSON_VIA_BATCH_MEMBERSHIP", coordinateUse: "DISPATCH_ORGANIZATION_DISPLAY_ONLY" },
+    },
+  });
+  await writeJson(path.join(outputRoot, "governance", "dispatch-organization-location-candidates.json"), {
+    policy: "MATCH_TO_FORMAL_DISPATCH_ORGANIZATION_BEFORE_WRITE; NEVER_INTERPRET_AS_MEMBER_LOCATION",
+    sourceLicense: institutionLocations.metadata.license,
+    sourceAttribution: institutionLocations.metadata.attribution,
+    sourcePurpose: institutionLocations.metadata.purpose,
+    candidates: dispatchLocationCandidates,
   });
   await writeJson(path.join(outputRoot, "governance", "runtime-history.json"), { records: runtimeHistory });
   await writeJson(path.join(outputRoot, "governance", "retained-source-fields.json"), {
@@ -474,5 +548,6 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     attachmentCount: attachmentRows.length,
     manualReviewCount: review.length,
     mapCandidateCount: mapCandidates.length,
+    dispatchLocationCandidateCount: dispatchLocationCandidates.length,
   };
 }
