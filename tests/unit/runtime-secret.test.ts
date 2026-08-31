@@ -22,11 +22,12 @@ describe("runtime secret bootstrap", () => {
     expect(Object.fromEntries(RUNTIME_SECRET_KEYS.map((key) => [key, environment[key]]))).toEqual(values);
   });
 
-  it("uses the current SSM version without exposing the response", async () => {
+  it("uses the explicitly pinned SSM version without exposing the response", async () => {
     const environment: NodeJS.ProcessEnv = {
       NODE_ENV: "test",
       "ZLB_RUNTIME_SECRET_NAME": "zhilianbao-v2-test-runtime",
       "ZLB_RUNTIME_SECRET_REGION": "ap-shanghai",
+      "ZLB_RUNTIME_SECRET_VERSION": "v2",
     };
     const calls: unknown[] = [];
     await loadRuntimeSecret(environment, {
@@ -35,7 +36,20 @@ describe("runtime secret bootstrap", () => {
         return { SecretString: JSON.stringify(values) };
       },
     });
-    expect(calls).toEqual([{ SecretName: "zhilianbao-v2-test-runtime", VersionId: "SSM_Current" }]);
+    expect(calls).toEqual([{ SecretName: "zhilianbao-v2-test-runtime", VersionId: "v2" }]);
     expect(environment.DATABASE_URL).toBe(values.DATABASE_URL);
+  });
+
+  it("fails closed when the SSM version is missing or invalid", async () => {
+    const environment: NodeJS.ProcessEnv = {
+      NODE_ENV: "test",
+      "ZLB_RUNTIME_SECRET_NAME": "zhilianbao-v2-test-runtime",
+      "ZLB_RUNTIME_SECRET_REGION": "ap-shanghai",
+    };
+    await expect(loadRuntimeSecret(environment, { GetSecretValue: async () => ({}) }))
+      .rejects.toThrow("RUNTIME_SECRET_VERSION_REQUIRED");
+    environment.ZLB_RUNTIME_SECRET_VERSION = "../v2";
+    await expect(loadRuntimeSecret(environment, { GetSecretValue: async () => ({}) }))
+      .rejects.toThrow("RUNTIME_SECRET_VERSION_INVALID");
   });
 });

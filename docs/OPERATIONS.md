@@ -119,10 +119,11 @@ CloudBase 运行时只以普通环境变量提供非敏感定位信息：
 ```text
 ZLB_RUNTIME_SECRET_NAME
 ZLB_RUNTIME_SECRET_REGION
+ZLB_RUNTIME_SECRET_VERSION
 ZLB_PROCESS
 ```
 
-入口使用实例角色读取 `SSM_Current`，且只接受以下完整 JSON 白名单；缺项、空值、未知键
+入口使用实例角色读取显式固定的 SSM 版本（例如 TEST 的 `v2`），且只接受以下完整 JSON 白名单；缺项、空值、未知键
 或读取失败都必须在启动阶段 fail closed：
 
 ```text

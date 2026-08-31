@@ -54,15 +54,20 @@ export async function loadRuntimeSecret(
 ): Promise<void> {
   const secretName = environment.ZLB_RUNTIME_SECRET_NAME?.trim();
   const region = environment.ZLB_RUNTIME_SECRET_REGION?.trim();
+  const versionId = environment.ZLB_RUNTIME_SECRET_VERSION?.trim();
   if (!secretName) throw new Error("RUNTIME_SECRET_NAME_REQUIRED");
   if (!region) throw new Error("RUNTIME_SECRET_REGION_REQUIRED");
+  if (!versionId) throw new Error("RUNTIME_SECRET_VERSION_REQUIRED");
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(versionId)) {
+    throw new Error("RUNTIME_SECRET_VERSION_INVALID");
+  }
 
   const client = reader ?? new ssm.v20190923.Client({
     credential: new CvmRoleCredentialConstructor(),
     region,
     profile: { httpProfile: { reqMethod: "POST", reqTimeout: 10 } },
   });
-  const response = await client.GetSecretValue({ SecretName: secretName, VersionId: "SSM_Current" });
+  const response = await client.GetSecretValue({ SecretName: secretName, VersionId: versionId });
   if (!response.SecretString) throw new Error("RUNTIME_SECRET_VALUE_REQUIRED");
   applyRuntimeSecret(environment, parseRuntimeSecret(response.SecretString));
 }
