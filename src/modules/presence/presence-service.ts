@@ -11,6 +11,8 @@ import { PresenceRepository, type PresenceTransaction } from "./repository/prese
 import {
   derivePresenceStatus,
   canSelfMutatePresence,
+  isSemanticallySamePresenceSubmission,
+  normalizePresenceOptional,
   presenceCancelSchema,
   presenceCorrectionSchema,
   presenceCreateSchema,
@@ -21,7 +23,7 @@ import {
 type ServiceInput = { actor: PermissionActor; context?: PresenceMutationContext };
 
 function normalizeOptional(value: string | null | undefined): string | null | undefined {
-  return value === undefined ? undefined : value === null || value.trim() === "" ? null : value.trim();
+  return value === undefined ? undefined : normalizePresenceOptional(value);
 }
 
 function snapshot(report: Pick<PresenceReport,
@@ -55,10 +57,10 @@ export class PresenceService {
     tx: PresenceTransaction,
     input: { personId: string; arrivalAt: Date; expectedDepartureAt: Date; excludeId?: string },
   ) {
-    const overlap = await this.repository.findOverlap(tx, input);
-    if (overlap) {
+    const overlaps = await this.repository.findOverlaps(tx, input);
+    if (overlaps.length > 0) {
       throw new PresenceError("PRESENCE_INTERVAL_OVERLAP", "该时间段与已有未取消来离宝报备重叠", {
-        conflictingReportId: overlap.id,
+        conflictingReportId: overlaps[0].id,
       });
     }
   }
@@ -70,15 +72,23 @@ export class PresenceService {
     const body = presenceCreateSchema.parse(input.body);
     return this.repository.transaction(async (tx) => {
       await this.repository.lockPerson(tx, input.actor.personId);
-      await this.assertNoOverlap(tx, { personId: input.actor.personId, ...body });
+      const overlaps = await this.repository.findOverlaps(tx, { personId: input.actor.personId, ...body });
+      if (overlaps.length === 1 && isSemanticallySamePresenceSubmission(overlaps[0], body)) {
+        return overlaps[0];
+      }
+      if (overlaps.length > 0) {
+        throw new PresenceError("PRESENCE_INTERVAL_OVERLAP", "该时间段与已有未取消来离宝报备重叠", {
+          conflictingReportId: overlaps[0].id,
+        });
+      }
       const created = await tx.presenceReport.create({ data: {
         personId: input.actor.personId,
         arrivalAt: body.arrivalAt,
         expectedDepartureAt: body.expectedDepartureAt,
-        origin: normalizeOptional(body.origin),
-        transportMode: normalizeOptional(body.transportMode),
-        trainFlightNo: normalizeOptional(body.trainFlightNo),
-        note: normalizeOptional(body.note),
+        origin: normalizePresenceOptional(body.origin),
+        transportMode: normalizePresenceOptional(body.transportMode),
+        trainFlightNo: normalizePresenceOptional(body.trainFlightNo),
+        note: normalizePresenceOptional(body.note),
       } });
       await writePresenceAudit(tx, {
         ...input,

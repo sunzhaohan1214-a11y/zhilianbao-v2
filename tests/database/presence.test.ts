@@ -95,6 +95,46 @@ describe("M2-003 real MySQL Presence concurrency", () => {
     expect(await prisma.presenceReport.count({ where: { personId: member.personId, arrivalAt: new Date("2026-09-01T01:00:00Z") } })).toBe(1);
   });
 
+  it("returns the existing report for a normalized response-lost replay without duplicating its audit", async () => {
+    const interval = {
+      arrivalAt: "2026-09-04T09:00:00+08:00",
+      expectedDepartureAt: "2026-09-04T12:00:00+08:00",
+    };
+    const created = await service.create({ actor: member, body: {
+      ...interval,
+      origin: " 南京 ",
+      transportMode: "高铁",
+      trainFlightNo: " ",
+      note: " 弱网响应丢失 ",
+    } });
+    const replayed = await service.create({ actor: member, body: {
+      ...interval,
+      origin: "南京",
+      transportMode: " 高铁 ",
+      note: "弱网响应丢失",
+    } });
+
+    expect(replayed.id).toBe(created.id);
+    expect(await prisma.presenceReport.count({ where: {
+      personId: member.personId,
+      arrivalAt: new Date("2026-09-04T01:00:00Z"),
+      expectedDepartureAt: new Date("2026-09-04T04:00:00Z"),
+    } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: {
+      entityId: created.id,
+      actionCode: "PRESENCE_CREATED",
+    } })).toBe(1);
+
+    await expect(service.create({ actor: member, body: {
+      ...interval,
+      origin: "南京",
+      transportMode: "高铁",
+      note: "内容已改变",
+    } })).rejects.toMatchObject({ code: "PRESENCE_INTERVAL_OVERLAP" });
+    expect(await prisma.presenceReport.count({ where: { personId: member.personId, arrivalAt: created.arrivalAt } })).toBe(1);
+    expect(await prisma.auditLog.count({ where: { entityId: created.id, actionCode: "PRESENCE_CREATED" } })).toBe(1);
+  });
+
   it("allows adjacent intervals, rejects overlapping updates, and ignores canceled intervals", async () => {
     const first = await service.create({ actor: member, body: body("2026-09-02T09:00:00+08:00", "2026-09-02T12:00:00+08:00") });
     const second = await service.create({ actor: member, body: body("2026-09-02T12:00:00+08:00", "2026-09-02T15:00:00+08:00") });

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { e2eUsers } from "./auth-fixtures";
+import { e2eUsers, seedAuthFixtures } from "./auth-fixtures";
+import { futureShanghaiPresenceInterval } from "./presence-time";
 
 async function login(page: Page) {
   const response = await page.request.post("/api/v2/auth/login", {
@@ -8,6 +9,18 @@ async function login(page: Page) {
   });
   expect(response.ok()).toBe(true);
 }
+
+async function fillPresence(page: Page, daysAhead: number, note: string) {
+  const interval = futureShanghaiPresenceInterval(new Date(), daysAhead);
+  await page.goto("/presence/new");
+  await expect(page.locator("form")).toHaveAttribute("aria-busy", "false");
+  await page.getByLabel("到宝时间").fill(interval.arrivalAtLocal);
+  await page.getByLabel("预计离宝时间").fill(interval.expectedDepartureAtLocal);
+  await page.getByLabel("备注（选填）").fill(note);
+  return interval;
+}
+
+test.beforeEach(async () => { await seedAuthFixtures(); });
 
 test("@weak-network AI query exposes loading, prevents duplicate submission, and supports explicit retry", async ({ page }) => {
   await login(page);
@@ -27,5 +40,61 @@ test("@weak-network AI query exposes loading, prevents duplicate submission, and
   expect(calls).toBe(1);
   await page.getByRole("button", { name: "重试" }).click();
   await expect(page.getByText("已安全重试")).toBeVisible();
+  expect(calls).toBe(2);
+});
+
+test("@weak-network Presence preserves its draft after a failed request and supports explicit retry", async ({ page }) => {
+  await login(page);
+  let calls = 0;
+  await page.route("**/api/v2/presence", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    calls += 1;
+    if (calls === 1) await route.abort("failed");
+    else await route.continue();
+  });
+  const note = "E2E Presence 请求前断网";
+  await fillPresence(page, 31, note);
+
+  await page.getByRole("button", { name: "提交报备" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "报备内容已保留" })).toContainText("报备内容已保留");
+  await expect(page.getByLabel("备注（选填）")).toHaveValue(note);
+  await expect(page.getByRole("button", { name: "重新提交" })).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("presence-new-draft"))).toContain(note);
+
+  await page.getByRole("button", { name: "重新提交" }).click();
+  await expect(page).toHaveURL(/\/presence$/);
+  await expect(page.getByText(note, { exact: true })).toHaveCount(1);
+  expect(calls).toBe(2);
+});
+
+test("@weak-network Presence response-lost retry returns the committed record exactly once", async ({ page }) => {
+  await login(page);
+  let calls = 0;
+  await page.route("**/api/v2/presence", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    calls += 1;
+    if (calls === 1) {
+      const committed = await route.fetch();
+      expect(committed.status()).toBe(201);
+      await route.abort("failed");
+    } else {
+      await route.continue();
+    }
+  });
+  const note = "E2E Presence 响应丢失幂等";
+  const interval = await fillPresence(page, 32, note);
+
+  await page.getByRole("button", { name: "提交报备" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "报备内容已保留" })).toContainText("报备内容已保留");
+  await expect(page.getByLabel("备注（选填）")).toHaveValue(note);
+  await page.getByRole("button", { name: "重新提交" }).click();
+  await expect(page).toHaveURL(/\/presence$/);
+  await expect(page.getByText(note, { exact: true })).toHaveCount(1);
+
+  const response = await page.request.get("/api/v2/presence/me");
+  expect(response.ok()).toBe(true);
+  const payload = await response.json() as { data: Array<{ arrivalAt: string; note: string | null }> };
+  const arrivalAt = new Date(interval.arrivalAtIso).toISOString();
+  expect(payload.data.filter((item) => item.arrivalAt === arrivalAt && item.note === note)).toHaveLength(1);
   expect(calls).toBe(2);
 });
