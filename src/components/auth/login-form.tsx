@@ -51,7 +51,7 @@ export function LoginForm({ adminContactPhone }: { adminContactPhone: string }) 
         登录
       </Button>
       <p className="text-center text-sm leading-6 text-muted">
-        忘记密码？请联系管理员 <a className="font-medium text-brand hover:underline" href={`tel:${adminContactPhone}`}>{adminContactPhone}</a>
+        忘记密码？请联系管理员 <a className="inline-flex min-h-11 items-center font-medium text-brand hover:underline" href={`tel:${adminContactPhone}`}>{adminContactPhone}</a>
       </p>
     </form>
   );
