@@ -5,11 +5,13 @@ import { usePathname } from "next/navigation";
 import { DemandIcon, HomeIcon, ProfileIcon, ResourceIcon } from "./mobile-icons";
 
 export const mobileNavigation = [
-  { href: "/", label: "首页", icon: HomeIcon },
-  { href: "/demands", label: "需求", icon: DemandIcon },
-  { href: "/resources", label: "资源", icon: ResourceIcon },
-  { href: "/me", label: "我的", icon: ProfileIcon },
+  { href: "/", label: "首页" },
+  { href: "/demands", label: "需求" },
+  { href: "/resources", label: "资源" },
+  { href: "/me", label: "我的" },
 ] as const;
+
+const navigationIcons = { "/": HomeIcon, "/demands": DemandIcon, "/resources": ResourceIcon, "/me": ProfileIcon } as const;
 
 const visibleResourceLists = new Set([
   "/resources/contacts",
@@ -38,7 +40,7 @@ export function MobileTabBar() {
     >
       {mobileNavigation.map((item) => {
         const isActive = activeTab === item.href;
-        const Icon = item.icon;
+        const Icon = navigationIcons[item.href];
         return (
           <Link
             aria-current={isActive ? "page" : undefined}
