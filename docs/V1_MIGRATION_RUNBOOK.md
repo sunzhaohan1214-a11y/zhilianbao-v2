@@ -12,6 +12,8 @@
 
 ## 2. Build and sample rehearsal
 
+For a checksum-manifested local reference package, first follow `V1_REFERENCE_PACKAGE_ADAPTER.md`. The adapter output is sensitive, must remain outside Git, and remains SAMPLE evidence even when every checksum passes.
+
 ```bash
 npm ci
 npm run db:validate

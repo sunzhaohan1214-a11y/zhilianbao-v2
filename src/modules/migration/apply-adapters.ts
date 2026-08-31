@@ -243,6 +243,8 @@ export class MigrationAdapterRegistry {
     const { tx, actor } = context;
     const phone = record.payload.phone ? normalizeImportPhone(String(record.payload.phone)) : "";
     if (!phone) return { action: "REVIEW", targetEntity: "PERSON", issues: [issue(record, "PERSON_PHONE_MISSING", "REVIEW", "手机号缺失，不能安全自动判定人员身份")] };
+    if (record.payload.memberKind === "FUTURE_MEMBER_CANDIDATE") return { action: "REVIEW", targetEntity: "PERSON", issues: [issue(record, "FUTURE_BATCH_NOT_ACTIVE", "REVIEW", "未来批次候选人员不自动创建批次关系或账号")] };
+    if (record.payload.memberKind === "CURRENT" && record.payload.currentEmploymentConfirmed !== true) return { action: "REVIEW", targetEntity: "PERSON", issues: [issue(record, "CURRENT_EMPLOYMENT_CONFIRMATION_REQUIRED", "REVIEW", "当前批次候选人员未证明在岗，不自动创建批次关系或账号")] };
     await tx.$executeRaw`INSERT INTO person_import_identity_locks (phone_hash) VALUES (${phoneIdentityHash(phone)}) ON DUPLICATE KEY UPDATE phone_hash = ${phoneIdentityHash(phone)}`;
     await tx.$queryRaw`SELECT phone_hash FROM person_import_identity_locks WHERE phone_hash = ${phoneIdentityHash(phone)} FOR UPDATE`;
     const people = await tx.person.findMany({ include: { account: true } });
@@ -270,13 +272,15 @@ export class MigrationAdapterRegistry {
     if (match.kind === "INVALID" || match.kind === "REVIEW") return { action: "REVIEW", targetEntity: "ENTERPRISE", issues: match.issues.map((value) => issue(record, value.code, value.severity === "ERROR" ? "BLOCKER" : value.severity, value.message, value.field, value.candidateIds)) };
     if (match.kind === "EXACT") return { action: "LINK", targetEntity: "ENTERPRISE", targetId: match.matchedEntityId, issues: [] };
     if (!record.payload.creditCode && resolution?.action !== "CREATE") return { action: "REVIEW", targetEntity: "ENTERPRISE", issues: [issue(record, "ENTERPRISE_NO_CODE_REQUIRES_REVIEW", "REVIEW", "无信用代码企业必须由明确 CREATE resolution 才能建档")] };
-    const created = await this.enterprise.createFromImportInTransaction(tx, { actor, enterprise: { name: String(record.payload.name), responsibleAreaId: areas[0].id, address: String(record.payload.address), creditCode: record.payload.creditCode ? String(record.payload.creditCode) : undefined, legalRepresentative: record.payload.legalRepresentative ? String(record.payload.legalRepresentative) : undefined, introduction: record.payload.introduction ? String(record.payload.introduction) : undefined, mainProducts: String(record.payload.mainProducts), tagIds: [] }, reason: "V1 migration" });
+    const created = await this.enterprise.createFromImportInTransaction(tx, { actor, enterprise: { name: String(record.payload.name), responsibleAreaId: areas[0].id, address: String(record.payload.address), creditCode: record.payload.creditCode ? String(record.payload.creditCode) : undefined, legalRepresentative: record.payload.legalRepresentative ? String(record.payload.legalRepresentative) : undefined, introduction: record.payload.introduction ? String(record.payload.introduction) : undefined, mainProducts: String(record.payload.mainProducts), qualificationsHonors: record.payload.qualificationsHonors ? String(record.payload.qualificationsHonors) : undefined, tagIds: [] }, reason: "V1 migration" });
     const issues: MigrationPreviewIssue[] = resolution ? [resolutionApplied(record, resolution)] : [];
     if (record.payload.primaryContactConfirmed === true && record.payload.contactName && record.payload.contactPhone) {
       await this.enterprise.createContactFromImportInTransaction(tx, { actor, enterpriseId: created.id, contact: { name: String(record.payload.contactName), phone: String(record.payload.contactPhone), setPrimary: true } });
     } else if (record.payload.contactName || record.payload.contactPhone) {
       issues.push(issue(record, "ENTERPRISE_PRIMARY_CONTACT_UNCONFIRMED", "REVIEW", "未确认联系人不写入 primary contact"));
     }
+    if (record.payload.latitude !== undefined || record.payload.longitude !== undefined) issues.push(issue(record, "ENTERPRISE_COORDINATE_SEPARATE_GOVERNANCE", "WARNING", "V1 坐标只作展示候选，不用于修改正式属地"));
+    if (Array.isArray(record.payload.legacyTagNames) && record.payload.legacyTagNames.length > 0) issues.push(issue(record, "ENTERPRISE_TAG_MAPPING_REQUIRED", "WARNING", "V1 标签需映射到受治理的 V2 标签后才能生效"));
     return { action: "CREATE", targetEntity: "ENTERPRISE", targetId: created.id, issues };
   }
 

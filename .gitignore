@@ -8,6 +8,7 @@
 /worker-dist
 /migration-dist
 /.migration-output
+/.migration-work
 /legacy-snapshot
 /*full-snapshot*/
 

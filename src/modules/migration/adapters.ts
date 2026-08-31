@@ -34,6 +34,13 @@ export function analyzeLegacyRecord(record: LegacyRecord, context: MigrationMatc
     case "PERSON": {
       const match = matchPerson({ name: String(value.name), phone: value.phone ? String(value.phone) : undefined }, context.people ?? []);
       const outcome = matchOutcome(record, "PERSON", match);
+      if (value.memberKind === "FUTURE_MEMBER_CANDIDATE") {
+        outcome.classification = "REVIEW";
+        outcome.issues.push(issue(record, "FUTURE_BATCH_NOT_ACTIVE", "REVIEW", "未来批次候选人员不自动创建批次关系或账号", "memberKind"));
+      } else if (value.memberKind === "CURRENT" && value.currentEmploymentConfirmed !== true) {
+        outcome.classification = "REVIEW";
+        outcome.issues.push(issue(record, "CURRENT_EMPLOYMENT_CONFIRMATION_REQUIRED", "REVIEW", "当前批次候选人员未证明在岗，不自动创建批次关系或账号", "currentEmploymentConfirmed"));
+      }
       if (outcome.classification === "SUCCESS" && value.accountEligible === true && (value.memberKind === "ALUMNI_HISTORICAL" || value.currentEmploymentConfirmed !== true)) {
         outcome.classification = "REVIEW";
         outcome.issues.push(issue(record, "PERSON_ACCOUNT_ELIGIBILITY_UNCONFIRMED", "REVIEW", "历史往届或未确认当前在岗人员不得自动开户", "accountEligible"));
@@ -49,6 +56,8 @@ export function analyzeLegacyRecord(record: LegacyRecord, context: MigrationMatc
         outcome.issues.push(issue(record, "ENTERPRISE_NO_CODE_REQUIRES_REVIEW", "REVIEW", "无信用代码企业只能作为人工候选，不能自动创建或合并", "creditCode"));
       }
       if ((value.contactName || value.contactPhone) && value.primaryContactConfirmed !== true) outcome.issues.push(issue(record, "ENTERPRISE_PRIMARY_CONTACT_UNCONFIRMED", "REVIEW", "V1 未确认主要联系人，不自动设置 primary", "primaryContactConfirmed"));
+      if (value.latitude !== undefined || value.longitude !== undefined) outcome.issues.push(issue(record, "ENTERPRISE_COORDINATE_SEPARATE_GOVERNANCE", "WARNING", "V1 坐标只作展示候选，不用于修改正式属地", "latitude"));
+      if (Array.isArray(value.legacyTagNames) && value.legacyTagNames.length > 0) outcome.issues.push(issue(record, "ENTERPRISE_TAG_MAPPING_REQUIRED", "WARNING", "V1 标签需映射到受治理的 V2 标签后才能生效", "legacyTagNames"));
       return outcome;
     }
     case "TALENT": {
