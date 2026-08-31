@@ -4,7 +4,6 @@ import type { Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
-import { snapshotManifestSchema, type SnapshotManifest } from "@/modules/migration/source-contract";
 
 export const READINESS_STATUSES = [
   "PASS", "FAIL", "BLOCKED_BY_EXTERNAL_ENV", "BLOCKED_BY_SOURCE_DATA", "BLOCKED_BY_UAT", "NOT_APPLICABLE",
@@ -39,6 +38,7 @@ export type EvidenceValidation = { status: ReadinessStatus; errorCode?: string; 
 export type ExternalEvidenceCategory = "scanner" | "backup" | "maintenance" | "restore" | "migration" | "uat" | "preflight" | "ai";
 type EvidencePointer = { reference?: unknown; sourcePath?: unknown };
 type BoundEvidence = { category?: unknown; candidateSha?: unknown; environment?: unknown; status?: unknown; verifiedAt?: unknown; details?: unknown };
+type SnapshotManifest = { sourceSystem: "ZHILIANBAO_V1"; snapshotId: string; snapshotKind: "SAMPLE" | "FULL"; files: Record<string, { count: number; sha256: string }>; entities: Record<string, number> };
 const MAX_EVIDENCE_BYTES = 1_048_576;
 const EVIDENCE_READ_CHUNK_BYTES = 65_536;
 const EVIDENCE_DNS_TIMEOUT_MS = 2_000;
@@ -505,6 +505,29 @@ function objectValue(value: unknown): Record<string, unknown> | null { return va
 function nonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
 function sha256Digest(value: unknown): value is string { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value); }
 
+function parseSnapshotManifest(bytes: Uint8Array): SnapshotManifest | null {
+  let manifest: Record<string, unknown> | null = null;
+  try { manifest = objectValue(JSON.parse(new TextDecoder().decode(bytes)) as unknown); } catch { return null; }
+  const manifestKeys = ["sourceSystem", "schemaVersion", "snapshotId", "snapshotAt", "exportedAt", "isSanitized", "snapshotKind", "mappingVersion", "files", "entities"];
+  const validDateTime = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    && !Number.isNaN(new Date(value).getTime());
+  if (!manifest || !exactStringSet(Object.keys(manifest), manifestKeys) || manifest.sourceSystem !== "ZHILIANBAO_V1"
+    || !nonEmpty(manifest.schemaVersion) || manifest.schemaVersion.length > 100 || !nonEmpty(manifest.snapshotId) || manifest.snapshotId.length > 191
+    || !validDateTime(manifest.snapshotAt) || !validDateTime(manifest.exportedAt) || typeof manifest.isSanitized !== "boolean"
+    || (manifest.snapshotKind !== "SAMPLE" && manifest.snapshotKind !== "FULL")
+    || !nonEmpty(manifest.mappingVersion) || manifest.mappingVersion.length > 100) return null;
+  const files = objectValue(manifest.files);
+  const entities = objectValue(manifest.entities);
+  if (!files || !entities) return null;
+  for (const [path, value] of Object.entries(files)) {
+    const file = objectValue(value);
+    if (!nonEmpty(path) || !file || !exactStringSet(Object.keys(file), ["count", "sha256"])
+      || !nonNegativeInteger(file.count) || !sha256Digest(file.sha256)) return null;
+  }
+  for (const count of Object.values(entities)) if (!nonNegativeInteger(count)) return null;
+  return manifest as SnapshotManifest;
+}
+
 export const MIGRATION_EVIDENCE_MODULES = [
   "ORGANIZATION", "PERSON", "ENTERPRISE", "TALENT", "POLICY", "DEMAND", "PRESENCE", "TRIP", "VISIT",
   "REIMBURSEMENT", "HELP", "ANNOUNCEMENT", "ROLE", "ATTACHMENT",
@@ -554,6 +577,12 @@ function completeMigrationDetails(details: Record<string, unknown>, manifest: Sn
   for (const file of manifestFiles as Record<string, unknown>[]) {
     const manifestFile = manifest.files[file.path as string];
     if (!manifestFile || manifestFile.count !== file.count || manifestFile.sha256 !== file.sha256) return false;
+  }
+  const entityModules = MIGRATION_EVIDENCE_MODULES.filter((module) => module !== "ATTACHMENT");
+  if (!exactStringSet(Object.keys(manifest.entities), entityModules)) return false;
+  for (const moduleName of entityModules) {
+    const path = MIGRATION_EVIDENCE_MANIFEST_PATHS[MIGRATION_EVIDENCE_MODULES.indexOf(moduleName)];
+    if (manifest.entities[moduleName] !== manifest.files[path].count) return false;
   }
 
   const inventory = objectValue(details.attachmentInventory);
@@ -637,13 +666,7 @@ export async function validateMigrationEvidence(raw: string | undefined, candida
   const parsed = await parseBoundEvidence(raw, candidateSha, "migration", "TEST", "BLOCKED_BY_SOURCE_DATA"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
   const manifestPointer = objectValue(details.snapshotManifest);
   const loadedManifest = manifestPointer ? await loadImmutablePointer(manifestPointer) : {};
-  let manifest: SnapshotManifest | undefined;
-  if (loadedManifest.bytes) {
-    try {
-      const result = snapshotManifestSchema.safeParse(JSON.parse(new TextDecoder().decode(loadedManifest.bytes)) as unknown);
-      if (result.success) manifest = result.data;
-    } catch { /* handled as incomplete migration evidence below */ }
-  }
+  const manifest = loadedManifest.bytes ? parseSnapshotManifest(loadedManifest.bytes) : null;
   return manifest && loadedManifest.digest && completeMigrationDetails(details, manifest, loadedManifest.digest)
     ? parsed.validation
     : { status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };

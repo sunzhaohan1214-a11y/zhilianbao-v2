@@ -57,7 +57,7 @@ function inputs(overrides: Partial<ReleaseGateInputs> = {}): ReleaseGateInputs {
 }
 
 type MutableMigrationDetails = Record<string, unknown> & {
-  snapshotManifest: { reference: string; sourcePath: string };
+  snapshotManifest?: { reference: string; sourcePath: string };
   manifestFiles: Array<{ path: string; count: number; sha256: string }>;
   attachmentInventory: { manifestPath: string; manifestSha256: string; sourceCount: number; copiedCount: number; hashVerifiedCount: number; issueCount: number; validationPassed: boolean };
   migrationRunId: string;
@@ -497,7 +497,7 @@ describe("M3-008 production release evidence", () => {
   it.each([
     { name: "SAMPLE relabelled as full", mutate: (details: MutableMigrationDetails) => { details.snapshotKind = "SAMPLE"; } },
     { name: "missing immutable snapshot manifest pointer", mutate: (details: MutableMigrationDetails) => { delete details.snapshotManifest; } },
-    { name: "snapshot manifest pointer digest mismatch", mutate: (details: MutableMigrationDetails) => { details.snapshotManifest.reference = `urn:sha256:${"0".repeat(64)}`; } },
+    { name: "snapshot manifest pointer digest mismatch", mutate: (details: MutableMigrationDetails) => { details.snapshotManifest!.reference = `urn:sha256:${"0".repeat(64)}`; } },
     { name: "snapshot identity mismatch", mutate: (details: MutableMigrationDetails) => { details.sourceSnapshotIdentity = "different-snapshot"; } },
     { name: "missing manifest digest", mutate: (details: MutableMigrationDetails) => { delete details.manifestSha256; } },
     { name: "invalid manifest digest", mutate: (details: MutableMigrationDetails) => { details.manifestSha256 = "not-a-digest"; } },
