@@ -29,7 +29,12 @@ jobs:
       - run: npm run test:integration
       - run: npm run build
 
-  critical-e2e:
+  critical-e2e-shard:
+    name: critical-e2e-shard-${{ matrix.shard }}-of-3
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -72,14 +77,27 @@ jobs:
       - run: npm ci
       - run: npm run db:migrate:deploy
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e:critical
+      - run: npm run test:e2e:critical -- --shard=${{ matrix.shard }}/3
       - name: Upload critical E2E failure evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: critical-e2e-test-results-${{ github.run_attempt }}
+          name: critical-e2e-test-results-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: ignore
+
+  critical-e2e:
+    name: critical-e2e
+    needs: critical-e2e-shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all critical E2E shards
+        env:
+          SHARD_RESULT: ${{ needs.critical-e2e-shard.result }}
+        run: |
+          echo "critical-e2e-shard result: $SHARD_RESULT"
+          test "$SHARD_RESULT" = "success"
 
   database:
     runs-on: ubuntu-latest
