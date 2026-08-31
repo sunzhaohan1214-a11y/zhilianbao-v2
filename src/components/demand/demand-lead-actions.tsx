@@ -14,6 +14,15 @@ type LeadOption = {
   enterprise: { name: string } | null;
 };
 
+const leadStatusLabel: Record<string, string> = {
+  PENDING_TOWNSHIP_VERIFY: "待镇区核验",
+  PENDING_ENTERPRISE_LINK: "待关联企业",
+  NEED_MORE_INFO: "待补充",
+  MERGED: "已合并",
+  CLOSED: "已关闭",
+  CONVERTED: "已转正式需求",
+};
+
 async function command(path: string, body: Record<string, unknown>) {
   const response = await fetch(path, {
     method: "POST",
@@ -232,7 +241,7 @@ export function DemandLeadActions({
             className={inputClass}
             onChange={(event) => void searchLeads(event.target.value).catch((error) => setMessage(error instanceof Error ? error.message : "线索搜索失败"))}
           />
-          {leadOptions.length > 0 && <ul aria-label="线索搜索结果" className="divide-y rounded-xl border border-slate-200">{leadOptions.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left text-sm hover:bg-slate-50" onClick={() => { setSelectedLead(option); setLeadOptions([]); }}><span className="font-medium">{option.businessNo} · {option.rawTitle}</span><span className="mt-1 block text-xs text-slate-500">{option.enterprise?.name ?? "未关联企业"} · {option.responsibleArea.name} · {option.status}</span></button></li>)}</ul>}
+          {leadOptions.length > 0 && <ul aria-label="线索搜索结果" className="divide-y rounded-xl border border-slate-200">{leadOptions.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left text-sm hover:bg-slate-50" onClick={() => { setSelectedLead(option); setLeadOptions([]); }}><span className="font-medium">{option.businessNo} · {option.rawTitle}</span><span className="mt-1 block text-xs text-slate-500">{option.enterprise?.name ?? "未关联企业"} · {option.responsibleArea.name} · {leadStatusLabel[option.status] ?? "状态待确认"}</span></button></li>)}</ul>}
           {selectedLead && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">已选择：{selectedLead.businessNo} · {selectedLead.rawTitle}</p>}
           <textarea name="reason" required maxLength={500} placeholder="合并原因" className={inputClass} />
           <button disabled={pending || !selectedLead} className={buttonClass}>预览并确认合并</button>
