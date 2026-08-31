@@ -16,8 +16,10 @@ describe("attachment abort observability", () => {
     expect(response.status).toBe(500);
     const entries = output.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
     expect(entries).toHaveLength(1);
-    expect(entries).toContainEqual(expect.objectContaining({ result: "abort_failed", stage: "origin_validation", errorCode: "ORIGIN_REJECTED" }));
-    expect(JSON.stringify(entries)).not.toContain("private-name.pdf");
-    expect(JSON.stringify(entries)).not.toContain("object/private-key");
+    expect(entries).toContainEqual(expect.objectContaining({ result: "abort_failed", stage: "origin_validation", errorCode: "UNKNOWN_ERROR", errorClass: "unknown" }));
+    const serialized = JSON.stringify(entries);
+    expect(serialized).not.toContain("ORIGIN_REJECTED");
+    expect(serialized).not.toContain("private-name.pdf");
+    expect(serialized).not.toContain("object/private-key");
   });
 });

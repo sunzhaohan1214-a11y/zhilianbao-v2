@@ -60,12 +60,49 @@ describe("M3-008 security headers and logging", () => {
     expect(payload).toMatchObject({ level: "info", module: "test", requestId: "request-1", result: "pass", secretKey: "[REDACTED]" });
   });
 
-  it("extracts only allowlisted codes from bounded cause chains", () => {
-    const secretMessage = "mysql://root:password@db/prod 13800138000 Bearer secret-token object/private.pdf";
-    expect(safeErrorMetadata(Object.assign(new Error(secretMessage), { cause: { code: "ER_CON_COUNT_ERROR", message: secretMessage } })))
+  it("accepts only explicitly allowlisted application, database, and Prisma codes", () => {
+    expect(safeErrorMetadata({ code: "ATTACHMENT_SCANNER_UNAVAILABLE" }))
+      .toEqual({ errorCode: "ATTACHMENT_SCANNER_UNAVAILABLE", errorClass: "application" });
+    expect(safeErrorMetadata({ code: "ER_CON_COUNT_ERROR" }))
       .toEqual({ errorCode: "ER_CON_COUNT_ERROR", errorClass: "database" });
-    expect(JSON.stringify(safeErrorMetadata(new Error(secretMessage)))).not.toContain(secretMessage);
-    expect(safeErrorMetadata(new Error(secretMessage))).toEqual({ errorCode: "UNKNOWN_ERROR", errorClass: "unknown" });
+    expect(safeErrorMetadata({ code: "P2024" }))
+      .toEqual({ errorCode: "P2024", errorClass: "prisma" });
+  });
+
+  it.each([
+    "ARBITRARY_CUSTOM_CODE",
+    "PASSWORD_SECRET_SHOULD_NOT_LOG",
+    "TOKEN_ATTACKER_CONTROLLED",
+    "DATABASE_URL_LEAK",
+  ])("rejects unknown uppercase error code %s", (code) => {
+    expect(safeErrorMetadata({ code })).toEqual({ errorCode: "UNKNOWN_ERROR", errorClass: "unknown" });
+  });
+
+  it("skips an unknown outer code and finds an allowlisted inner cause", () => {
+    expect(safeErrorMetadata({ code: "ATTACKER_CONTROLLED_CODE", cause: { code: "ER_CON_COUNT_ERROR" } }))
+      .toEqual({ errorCode: "ER_CON_COUNT_ERROR", errorClass: "database" });
+  });
+
+  it("returns unknown for an all-unknown cause chain and terminates on cycles", () => {
+    const outer: { code: string; cause?: unknown } = { code: "OUTER_UNKNOWN_CODE" };
+    const inner: { code: string; cause?: unknown } = { code: "INNER_UNKNOWN_CODE", cause: outer };
+    outer.cause = inner;
+    expect(safeErrorMetadata(outer)).toEqual({ errorCode: "UNKNOWN_ERROR", errorClass: "unknown" });
+  });
+
+  it("logs UNKNOWN_ERROR without an unknown code or secret-bearing message", () => {
+    const output = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fakeMessage = "mysql://fake-user:fake-password@db.invalid/fake 13900000000 Bearer fake-token-123456 password=fake-password";
+    const safe = safeErrorMetadata(Object.assign(new Error(fakeMessage), { code: "PASSWORD_SECRET_SHOULD_NOT_LOG" }));
+    writeLog("error", { module: "api", result: "unhandled_error", errorCode: safe.errorCode, errorClass: safe.errorClass });
+    const serialized = String(output.mock.calls[0]?.[0]);
+    expect(safe).toEqual({ errorCode: "UNKNOWN_ERROR", errorClass: "unknown" });
+    expect(serialized).toContain("UNKNOWN_ERROR");
+    expect(serialized).not.toContain("PASSWORD_SECRET_SHOULD_NOT_LOG");
+    expect(serialized).not.toContain(fakeMessage);
+    expect(serialized).not.toContain("fake-password");
+    expect(serialized).not.toContain("fake-token-123456");
+    expect(serialized).not.toContain("13900000000");
   });
 
   it("redacts sensitive substrings inside ordinary keys, arrays, and nested objects", () => {

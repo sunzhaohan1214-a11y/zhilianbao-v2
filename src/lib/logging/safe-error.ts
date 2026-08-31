@@ -3,6 +3,11 @@ const SAFE_SYSTEM_CODES = new Set([
   "ER_LOCK_WAIT_TIMEOUT", "ER_LOCK_DEADLOCK", "ER_CON_COUNT_ERROR",
 ]);
 
+const SAFE_APPLICATION_CODES = new Set<string>([
+  "ATTACHMENT_SCANNER_UNAVAILABLE",
+  "ATTACHMENT_STORAGE_UNAVAILABLE",
+]);
+
 export type SafeErrorMetadata = {
   errorCode: string;
   errorClass: "prisma" | "database" | "application" | "unknown";
@@ -31,7 +36,7 @@ function classifyCode(code: unknown): SafeErrorMetadata | undefined {
   if (typeof code !== "string") return undefined;
   if (/^P\d{4}$/.test(code)) return { errorCode: code, errorClass: "prisma" };
   if (SAFE_SYSTEM_CODES.has(code)) return { errorCode: code, errorClass: "database" };
-  if (/^[A-Z][A-Z0-9_]{2,63}$/.test(code)) return { errorCode: code, errorClass: "application" };
+  if (SAFE_APPLICATION_CODES.has(code)) return { errorCode: code, errorClass: "application" };
   return undefined;
 }
 
