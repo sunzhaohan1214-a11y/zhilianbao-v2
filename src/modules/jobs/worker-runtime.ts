@@ -1,5 +1,4 @@
 import { disconnectPrismaClient } from "@/lib/db/prisma";
-import { AttachmentRecoveryService } from "@/modules/attachment/attachment-recovery-service";
 import { getAttachmentRuntime } from "@/modules/attachment/runtime";
 import { AttachmentUploadedOutboxHandler } from "@/modules/outbox/handlers/attachment-uploaded-handler";
 import { AnnouncementNotificationHandler } from "@/modules/outbox/handlers/announcement-notification-handler";
@@ -12,7 +11,6 @@ import { ReimbursementNotificationHandler, type ReimbursementEventType } from "@
 import { OutboxConsumer } from "@/modules/outbox/outbox-consumer";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { AttachmentCleanupJobHandler } from "./handlers/attachment-cleanup-handler";
-import { AttachmentScanJobHandler } from "./handlers/attachment-scan-handler";
 import { DemandRecommendationJobHandler } from "./handlers/demand-recommendation-handler";
 import { DemandOutcomeDueJobHandler } from "./handlers/demand-outcome-due-handler";
 import { ReimbursementOcrJobHandler } from "./handlers/reimbursement-ocr-handler";
@@ -22,13 +20,15 @@ import { TripResultDueJobHandler } from "./handlers/trip-result-due-handler";
 import { JobHandlerRegistry } from "./handler-registry";
 import { JobRepository } from "./job-repository";
 import { JobRunner, type WorkerLogger } from "./job-runner";
-import { jobPayloadSchemas } from "./job-types";
+import { JOB_TYPES } from "./job-types";
 import type { WorkerConfig } from "./worker-config";
 import { createWorkerId, jsonWorkerLogger } from "./worker-identity";
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+const GENERAL_JOB_TYPES = JOB_TYPES.filter((jobType) => jobType !== "ATTACHMENT_SCAN");
 
 export class WorkerRuntime {
   private stopping = false;
@@ -37,7 +37,6 @@ export class WorkerRuntime {
   private readonly jobs: JobRepository;
   private readonly runner: JobRunner;
   private readonly outbox: OutboxConsumer;
-  private readonly attachmentRecovery = new AttachmentRecoveryService();
 
   constructor(
     private readonly config: WorkerConfig,
@@ -59,7 +58,6 @@ export class WorkerRuntime {
 
     const attachment = getAttachmentRuntime();
     const jobHandlers = new JobHandlerRegistry();
-    jobHandlers.register("ATTACHMENT_SCAN", new AttachmentScanJobHandler(attachment.scanService));
     jobHandlers.register("ATTACHMENT_TEMP_CLEANUP", new AttachmentCleanupJobHandler(attachment.cleanupService));
     jobHandlers.register("DEMAND_RECOMMENDATION_RUN", new DemandRecommendationJobHandler());
     jobHandlers.register("DEMAND_OUTCOME_DUE", new DemandOutcomeDueJobHandler());
@@ -107,12 +105,7 @@ export class WorkerRuntime {
     return this.jobs.recoverStale({
       staleBefore: new Date(now.getTime() - this.config.jobLockTimeoutMs),
       now,
-      onRecover: async (tx, job) => {
-        if (job.jobType !== "ATTACHMENT_SCAN") return;
-        const parsed = jobPayloadSchemas.ATTACHMENT_SCAN.safeParse(job.payloadJson);
-        if (!parsed.success) return; // The runner permanently fails invalid payloads after recovery.
-        await this.attachmentRecovery.recoverStaleScan(tx, parsed.data.attachmentId);
-      },
+      jobTypes: GENERAL_JOB_TYPES,
     });
   }
 
@@ -136,7 +129,7 @@ export class WorkerRuntime {
   private async fillCapacity(): Promise<number> {
     let claimed = 0;
     while (!this.stopping && this.active.size < this.config.concurrency) {
-      const job = await this.jobs.claimNext(this.workerId);
+      const job = await this.jobs.claimNextByTypes(this.workerId, GENERAL_JOB_TYPES);
       if (!job) break;
       this.start(job);
       claimed += 1;

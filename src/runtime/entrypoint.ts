@@ -40,44 +40,12 @@ function superviseLongRunning(script: string, withProbe: boolean): void {
   });
 }
 
-function serveAttachmentScan(): void {
-  let active: ChildProcess | null = null;
-  const server = http.createServer((request, response) => {
-    if (request.url === "/health" || request.url === "/ready") {
-      response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end('{"status":"ok"}');
-      return;
-    }
-    if (request.method === "POST" && request.url === "/run") {
-      if (active?.exitCode === null) {
-        response.writeHead(409, { "content-type": "application/json" });
-        response.end('{"status":"busy"}');
-        return;
-      }
-      active = startChild("worker-dist/attachment-scan-main.js");
-      active.once("exit", () => { active = null; });
-      response.writeHead(202, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end('{"status":"accepted"}');
-      return;
-    }
-    response.writeHead(404, { "content-type": "application/json" });
-    response.end('{"status":"not_found"}');
-  });
-  const stop = () => {
-    active?.kill("SIGTERM");
-    server.close();
-  };
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
-  server.listen(Number(process.env.PORT ?? "3000"), "0.0.0.0");
-}
-
 async function main(): Promise<void> {
   await loadRuntimeSecret();
   const selected = runtimeProcess();
   if (selected === "web") superviseLongRunning("server.js", false);
   else if (selected === "worker") superviseLongRunning("worker-dist/main.js", true);
-  else serveAttachmentScan();
+  else superviseLongRunning("worker-dist/attachment-scan-daemon.js", true);
 }
 
 void main().catch(() => {
