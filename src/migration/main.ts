@@ -2,7 +2,7 @@ import path from "node:path";
 import { disconnectPrismaClient, getPrismaClient } from "@/lib/db/prisma";
 import { resolveCapabilities } from "@/modules/permissions/role-capabilities";
 import type { PermissionActor } from "@/modules/permissions/types";
-import { loadMigrationResolutions, MigrationService, SnapshotDirectoryLegacySourceProvider, runMigrationPreview, writeMigrationReports } from "@/modules/migration";
+import { assertMigrationEnvironmentAllowed, loadMigrationResolutions, MigrationService, SnapshotDirectoryLegacySourceProvider, runMigrationPreview, writeMigrationReports } from "@/modules/migration";
 
 type Options = { source?: string; mode?: "sample" | "full"; dryRun: boolean; apply: boolean; confirm?: string; operator?: string; output?: string; resolutions?: string };
 
@@ -40,7 +40,7 @@ async function loadOperator(personId: string): Promise<PermissionActor> {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  if (process.env.APP_ENV === "production") throw new Error("MIGRATION_PRODUCTION_REFUSED");
+  assertMigrationEnvironmentAllowed(process.env.APP_ENV, options.apply ? "APPLY" : "DRY_RUN");
   const provider = new SnapshotDirectoryLegacySourceProvider(path.resolve(options.source!));
   const mode = options.mode === "sample" ? "SAMPLE_REHEARSAL" : "FULL_REHEARSAL";
   const preview = await runMigrationPreview(provider, { mode, fullSnapshotAvailable: options.mode === "full" });

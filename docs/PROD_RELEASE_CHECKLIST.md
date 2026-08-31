@@ -5,7 +5,7 @@
 - Exact-head seven CI jobs green: `quality`, `database`, `critical-e2e`, `docker-build`, `security`, `performance`, `browser-compat`.
 - `main` protected with required reviews and required exact-head checks.
 - UAT signed; P0/P1 count is zero.
-- V1 full rehearsal, reconciliation, timing, and rollback decision complete.
+- V1 full rehearsal evidence is immutable and passes the complete manifest-file counts/SHA-256, attachment inventory/re-read, distinct batch/run identity, zero unresolved BLOCKER/REVIEW, per-module equations, timing, idempotent rerun, and rollback-decision gates. A SAMPLE or summary boolean is not acceptable.
 - Production ClamAV health and clean/malware probes pass.
 - CynosDB `backupReady=true`; latest successful backup is no older than 24 hours.
 - Restore-to-new-cluster drill completed, data validation passed, RTO/RPO recorded, and temporary cluster cleanup confirmed.

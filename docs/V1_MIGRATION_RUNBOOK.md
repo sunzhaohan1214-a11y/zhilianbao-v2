@@ -8,6 +8,7 @@
 - Confirm the snapshot classification (`SAMPLE` or controlled `FULL`), checksum manifest, attachment inventory, schema/mapping version, and operator authorization.
 - For apply, use an active `SUPER_ADMIN` operator with `migration.execute`; do not use a shared account.
 - Take a V2 Migration DB restore point before every apply rehearsal.
+- Set `APP_ENV` explicitly before apply. Normalized LOCAL aliases are `local/development/dev`; normalized TEST aliases are `test/testing/uat/staging`. `prod/PROD/production/PRODUCTION` are refused in every mode, while a missing or unknown apply environment is refused with `MIGRATION_APPLY_ENVIRONMENT_REQUIRED`.
 
 ## 2. Build and sample rehearsal
 
@@ -87,6 +88,20 @@ attachments = attachment success + attachment issues
 ```
 
 Also sample: Demand→Enterprise, Demand→Contact, Person→Account, Person→Appointment/Membership, Reimbursement→Invoice, Policy→Primary file. Explain count reductions with merge/link counts and map evidence. Person count is not expected to equal Account count; report eligible accounts, created accounts, and historical no-account records separately. Presence reconciliation is historical only.
+
+### Release-evidence handoff draft
+
+The migration evidence document remains `status=PASS` only after a controlled FULL dry-run, apply and idempotent rerun have completed. Its `details` must include all of the following; an omitted or self-reported shortcut is rejected by `validateMigrationEvidence()`:
+
+- `sourceSnapshotIdentity`, `snapshotKind=FULL`, `rehearsalMode=FULL_REHEARSAL`, `fullRehearsalStatus=COMPLETED` and the 64-hex `manifestSha256`;
+- one `manifestFiles` row with non-negative line count and SHA-256 for every contract NDJSON path, including `attachments/manifest.ndjson`;
+- `attachmentInventory` bound to that manifest row, with source/copied/hash-verified counts equal, zero issues, and `validationPassed=true`;
+- distinct `dryRunId`, apply `migrationBatchId/migrationRunId`, and rerun `rerunBatchId/rerunRunId`, plus the dedicated `targetMigrationDatabase` identity;
+- `unresolvedBlockerCount=0` and `unresolvedReviewCount=0`;
+- exactly one reconciliation row for every source module and `ATTACHMENT`, with `source = success + failed + skipped + merged + review`, `attachments = attachment success + attachment issues`, and zero failed/review/attachment-issue counts;
+- `dryRunPassed`, `applyPassed`, `rerunPassed`, and `reconciliationPassed` all true.
+
+This is a handoff contract, not proof that a FULL snapshot exists. Until real immutable evidence satisfies it, release status remains `BLOCKED_BY_SOURCE_DATA` and `RELEASE_READY=NO`.
 
 ## 7. Security and privacy checks
 

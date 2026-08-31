@@ -4,6 +4,7 @@ export * from "./apply-runner";
 export * from "./attachment-reconciliation";
 export * from "./fingerprint";
 export * from "./errors";
+export * from "./environment-guard";
 export * from "./migration-service";
 export * from "./repository";
 export * from "./resolutions";

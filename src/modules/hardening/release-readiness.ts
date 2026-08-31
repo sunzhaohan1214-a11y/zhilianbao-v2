@@ -474,6 +474,89 @@ async function parseBoundEvidence(raw: string | undefined, candidateSha: string,
 
 function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 function finiteAtMost(value: unknown, maximum: number): boolean { return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum; }
+function objectValue(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
+function nonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
+function sha256Digest(value: unknown): value is string { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value); }
+
+export const MIGRATION_EVIDENCE_MODULES = [
+  "ORGANIZATION", "PERSON", "ENTERPRISE", "TALENT", "POLICY", "DEMAND", "PRESENCE", "TRIP", "VISIT",
+  "REIMBURSEMENT", "HELP", "ANNOUNCEMENT", "ROLE", "ATTACHMENT",
+] as const;
+
+export const MIGRATION_EVIDENCE_MANIFEST_PATHS = [
+  "entities/organizations.ndjson", "entities/persons.ndjson", "entities/enterprises.ndjson", "entities/talents.ndjson",
+  "entities/policies.ndjson", "entities/demands.ndjson", "entities/presence.ndjson", "entities/trips.ndjson",
+  "entities/visits.ndjson", "entities/reimbursements.ndjson", "entities/helps.ndjson", "entities/announcements.ndjson",
+  "entities/roles.ndjson", "attachments/manifest.ndjson",
+] as const;
+
+const MIGRATION_EVIDENCE_FILE_MODULE = new Map<string, string>([
+  ["entities/organizations.ndjson", "ORGANIZATION"], ["entities/persons.ndjson", "PERSON"], ["entities/enterprises.ndjson", "ENTERPRISE"],
+  ["entities/talents.ndjson", "TALENT"], ["entities/policies.ndjson", "POLICY"], ["entities/demands.ndjson", "DEMAND"],
+  ["entities/presence.ndjson", "PRESENCE"], ["entities/trips.ndjson", "TRIP"], ["entities/visits.ndjson", "VISIT"],
+  ["entities/reimbursements.ndjson", "REIMBURSEMENT"], ["entities/helps.ndjson", "HELP"], ["entities/announcements.ndjson", "ANNOUNCEMENT"],
+  ["entities/roles.ndjson", "ROLE"], ["attachments/manifest.ndjson", "ATTACHMENT"],
+]);
+
+function exactStringSet(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && new Set(actual).size === expected.length && expected.every((value) => actual.includes(value));
+}
+
+function completeMigrationDetails(details: Record<string, unknown>): boolean {
+  if (!nonEmpty(details.sourceSnapshotIdentity) || details.snapshotKind !== "FULL" || details.rehearsalMode !== "FULL_REHEARSAL"
+    || details.fullRehearsalStatus !== "COMPLETED" || !sha256Digest(details.manifestSha256)
+    || !nonEmpty(details.targetMigrationDatabase) || details.dryRunPassed !== true || details.applyPassed !== true
+    || details.rerunPassed !== true || details.reconciliationPassed !== true) return false;
+
+  const identityFields = ["dryRunId", "migrationBatchId", "migrationRunId", "rerunBatchId", "rerunRunId"] as const;
+  const identities = identityFields.map((field) => details[field]);
+  if (!identities.every(nonEmpty) || new Set(identities).size !== identities.length) return false;
+  if (details.unresolvedBlockerCount !== 0 || details.unresolvedReviewCount !== 0) return false;
+
+  if (!Array.isArray(details.manifestFiles)) return false;
+  const manifestFiles = details.manifestFiles.map(objectValue);
+  if (manifestFiles.some((file) => !file)) return false;
+  const paths: string[] = [];
+  for (const file of manifestFiles as Record<string, unknown>[]) {
+    if (!nonEmpty(file.path) || !nonNegativeInteger(file.count) || !sha256Digest(file.sha256)) return false;
+    paths.push(file.path);
+  }
+  if (!exactStringSet(paths, MIGRATION_EVIDENCE_MANIFEST_PATHS)) return false;
+
+  const inventory = objectValue(details.attachmentInventory);
+  if (!inventory || inventory.manifestPath !== "attachments/manifest.ndjson" || !sha256Digest(inventory.manifestSha256)
+    || !nonNegativeInteger(inventory.sourceCount) || !nonNegativeInteger(inventory.copiedCount)
+    || !nonNegativeInteger(inventory.hashVerifiedCount) || inventory.issueCount !== 0 || inventory.validationPassed !== true) return false;
+  const attachmentManifest = (manifestFiles as Record<string, unknown>[]).find((file) => file.path === inventory.manifestPath)!;
+  if (attachmentManifest.sha256 !== inventory.manifestSha256 || attachmentManifest.count !== inventory.sourceCount
+    || inventory.sourceCount !== inventory.copiedCount || inventory.sourceCount !== inventory.hashVerifiedCount) return false;
+
+  if (!Array.isArray(details.modules)) return false;
+  const modules = details.modules.map(objectValue);
+  if (modules.some((module) => !module)) return false;
+  const moduleNames: string[] = [];
+  let attachmentCount = 0;
+  for (const moduleEntry of modules as Record<string, unknown>[]) {
+    if (!nonEmpty(moduleEntry.module)) return false;
+    moduleNames.push(moduleEntry.module);
+    const countFields = ["sourceCount", "successCount", "failedCount", "skippedCount", "mergedCount", "reviewCount", "attachmentCount", "attachmentSuccessCount", "attachmentIssueCount"] as const;
+    if (!countFields.every((field) => nonNegativeInteger(moduleEntry[field]))) return false;
+    const sourceEquation = moduleEntry.sourceCount === (moduleEntry.successCount as number) + (moduleEntry.failedCount as number) + (moduleEntry.skippedCount as number) + (moduleEntry.mergedCount as number) + (moduleEntry.reviewCount as number);
+    const attachmentEquation = moduleEntry.attachmentCount === (moduleEntry.attachmentSuccessCount as number) + (moduleEntry.attachmentIssueCount as number);
+    if (!sourceEquation || !attachmentEquation || moduleEntry.failedCount !== 0 || moduleEntry.reviewCount !== 0 || moduleEntry.attachmentIssueCount !== 0) return false;
+    attachmentCount += moduleEntry.attachmentCount as number;
+  }
+  if (!exactStringSet(moduleNames, MIGRATION_EVIDENCE_MODULES)) return false;
+  for (const file of manifestFiles as Record<string, unknown>[]) {
+    const expectedModule = MIGRATION_EVIDENCE_FILE_MODULE.get(file.path as string)!;
+    const moduleEntry = (modules as Record<string, unknown>[]).find((candidate) => candidate.module === expectedModule)!;
+    if (file.count !== moduleEntry.sourceCount) return false;
+  }
+  const attachmentModule = (modules as Record<string, unknown>[]).find((moduleEntry) => moduleEntry.module === "ATTACHMENT")!;
+  return attachmentCount === inventory.sourceCount && attachmentModule.sourceCount === inventory.sourceCount
+    && attachmentModule.successCount === inventory.copiedCount && attachmentModule.attachmentCount === inventory.sourceCount
+    && attachmentModule.attachmentSuccessCount === inventory.hashVerifiedCount;
+}
 
 export async function validateGenericEvidence(raw: string | undefined, candidateSha: string, category: ExternalEvidenceCategory, environment: "TEST" | "PROD", missingStatus: ReadinessStatus = "BLOCKED_BY_EXTERNAL_ENV"): Promise<EvidenceValidation> {
   return (await parseBoundEvidence(raw, candidateSha, category, environment, missingStatus)).validation;
@@ -519,9 +602,7 @@ export async function validateRestoreEvidence(raw: string | undefined, candidate
 
 export async function validateMigrationEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
   const parsed = await parseBoundEvidence(raw, candidateSha, "migration", "TEST", "BLOCKED_BY_SOURCE_DATA"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
-  const complete = nonEmpty(details.sourceSnapshotIdentity) && nonEmpty(details.targetMigrationDatabase) && details.dryRunPassed === true
-    && details.applyPassed === true && details.rerunPassed === true && details.reconciliationPassed === true;
-  return complete ? parsed.validation : { status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+  return completeMigrationDetails(details) ? parsed.validation : { status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
 }
 
 export async function validateUatEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {

@@ -12,6 +12,7 @@ import type { FileScanAdapter } from "@/modules/attachment/scan/file-scan-adapte
 import { MigrationApplyRunner } from "./apply-runner";
 import type { LegacySourceProvider } from "./snapshot-provider";
 import type { LoadedMigrationResolutions } from "./resolutions";
+import { assertMigrationEnvironmentAllowed } from "./environment-guard";
 
 type PersistInput = {
   actor: PermissionActor;
@@ -47,15 +48,15 @@ export class MigrationService {
     mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL";
     resolutions: LoadedMigrationResolutions;
   }) {
+    assertMigrationEnvironmentAllowed(process.env.APP_ENV, "APPLY");
     await this.authorize(input.actor, "migration.execute");
-    if (process.env.APP_ENV === "production") throw new MigrationError("MIGRATION_PRODUCTION_REFUSED", "本版本拒绝在 production 执行迁移");
     if (input.mode === "FULL_REHEARSAL" && input.manifest.snapshotKind !== "FULL") throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
     return new MigrationApplyRunner(this.repository, this.storage, this.scanner).run(input);
   }
 
   async persistRehearsal(input: PersistInput) {
+    assertMigrationEnvironmentAllowed(process.env.APP_ENV, "APPLY");
     await this.authorize(input.actor, "migration.execute");
-    if (process.env.APP_ENV === "production") throw new MigrationError("MIGRATION_PRODUCTION_REFUSED", "本版本拒绝在 production 执行迁移");
     if (input.mode === "FULL_REHEARSAL" && input.manifest.snapshotKind !== "FULL") throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
     let batchId: string;
     try {

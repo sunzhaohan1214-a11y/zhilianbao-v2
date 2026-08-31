@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  IANA_IPV6_ALLOCATED_GLOBAL_UNICAST_PREFIXES, IANA_IPV6_SPECIAL_PURPOSE_PREFIXES, REQUIRED_CI_JOBS, buildReleaseReadiness, ipv6PrefixMatches, isPinnedSafeRemoteAddress, isSafePublicIpAddress, readinessExitCode, validateAiEvidence, validateBackupEvidence,
+  IANA_IPV6_ALLOCATED_GLOBAL_UNICAST_PREFIXES, IANA_IPV6_SPECIAL_PURPOSE_PREFIXES, MIGRATION_EVIDENCE_MANIFEST_PATHS, MIGRATION_EVIDENCE_MODULES, REQUIRED_CI_JOBS, buildReleaseReadiness, ipv6PrefixMatches, isPinnedSafeRemoteAddress, isSafePublicIpAddress, readinessExitCode, validateAiEvidence, validateBackupEvidence,
   validateExactHeadCi, validateGenericEvidence as validateGenericEvidenceWithoutDependencies, validateGenericEvidenceWithDependencies, validateGithubProtection, validateMaintenanceEvidence,
   validateMigrationEvidence, validatePreflightEvidence, validateRestoreEvidence, validateScannerEvidence,
   validateUatEvidence, type EvidenceLoadingDependencies, type EvidenceValidation, type ExternalEvidenceCategory, type ReleaseGateInputs,
@@ -56,6 +56,43 @@ function inputs(overrides: Partial<ReleaseGateInputs> = {}): ReleaseGateInputs {
   return { mode: "prod", appEnvironment: "PROD", appVersion: candidateSha, fakeProvidersEnabled: false, scannerConfigured: true, backupConfigured: true, scannerEvidence: blocked(), backupEvidence: blocked(), maintenanceEvidence: blocked(), restoreEvidence: blocked(), migrationEvidence: blocked(), githubProtection: blocked(), exactHeadCi: blocked(), uatEvidence: blocked(), preflightEvidence: blocked(), ...overrides };
 }
 
+type MutableMigrationDetails = Record<string, unknown> & {
+  manifestFiles: Array<{ path: string; count: number; sha256: string }>;
+  attachmentInventory: { manifestPath: string; manifestSha256: string; sourceCount: number; copiedCount: number; hashVerifiedCount: number; issueCount: number; validationPassed: boolean };
+  migrationRunId: string;
+  rerunRunId: string;
+  modules: Array<{ module: string; sourceCount: number; successCount: number; failedCount: number; skippedCount: number; mergedCount: number; reviewCount: number; attachmentCount: number; attachmentSuccessCount: number; attachmentIssueCount: number }>;
+};
+
+function completeMigrationDetails(): MutableMigrationDetails {
+  const digest = "a".repeat(64);
+  return {
+    sourceSnapshotIdentity: "v1-full-snapshot-2026-08-29T00:00:00Z",
+    snapshotKind: "FULL",
+    rehearsalMode: "FULL_REHEARSAL",
+    fullRehearsalStatus: "COMPLETED",
+    manifestSha256: "b".repeat(64),
+    manifestFiles: MIGRATION_EVIDENCE_MANIFEST_PATHS.map((path) => ({ path, count: path === "attachments/manifest.ndjson" ? 3 : 1, sha256: path === "attachments/manifest.ndjson" ? digest : "c".repeat(64) })),
+    attachmentInventory: { manifestPath: "attachments/manifest.ndjson", manifestSha256: digest, sourceCount: 3, copiedCount: 3, hashVerifiedCount: 3, issueCount: 0, validationPassed: true },
+    targetMigrationDatabase: "v2-migration-rehearsal-20260829",
+    dryRunId: "dry-run-full-20260829",
+    migrationBatchId: "apply-batch-full-20260829",
+    migrationRunId: "apply-run-full-20260829",
+    rerunBatchId: "rerun-batch-full-20260829",
+    rerunRunId: "rerun-run-full-20260829",
+    unresolvedBlockerCount: 0,
+    unresolvedReviewCount: 0,
+    modules: MIGRATION_EVIDENCE_MODULES.map((module) => {
+      const sourceCount = module === "ATTACHMENT" ? 3 : 1;
+      return { module, sourceCount, successCount: sourceCount, failedCount: 0, skippedCount: 0, mergedCount: 0, reviewCount: 0, attachmentCount: module === "ATTACHMENT" ? 3 : 0, attachmentSuccessCount: module === "ATTACHMENT" ? 3 : 0, attachmentIssueCount: 0 };
+    }),
+    dryRunPassed: true,
+    applyPassed: true,
+    rerunPassed: true,
+    reconciliationPassed: true,
+  };
+}
+
 function ipv6BigInt(value: string): bigint {
   const halves = value.toLowerCase().split("::");
   const head = halves[0] ? halves[0].split(":") : [];
@@ -86,7 +123,7 @@ async function completeExternalEvidence() {
     backupEvidence: await validateBackupEvidence(await evidence("backup", "PROD", { provider: "tencent-cynosdb", health: "READY", backupStatus: "SUCCEEDED", sourceEnvironment: "PROD", region: "ap-shanghai", clusterId: "cluster-1", vpcId: "vpc-1", subnetId: "subnet-1", snapshotAt: "2026-08-28T12:00:00.000Z" }), candidateSha, { region: "ap-shanghai", clusterId: "cluster-1", vpcId: "vpc-1", subnetId: "subnet-1" }, new Date(verifiedAt)),
     maintenanceEvidence: await validateMaintenanceEvidence(await evidence("maintenance", "PROD", { provider: "maintenance-api", health: "READY", enterPassed: true, exitPassed: true }), candidateSha),
     restoreEvidence: await validateRestoreEvidence(await evidence("restore", "TEST", { sourceBackupId: "123", sourceClusterId: "test-source", sourceEnvironment: "TEST", targetClusterId: "test-target", targetEnvironment: "TEST", validationPassed: true, rtoHours: 2, rpoHours: 1, cleanupCompleted: true }), candidateSha),
-    migrationEvidence: await validateMigrationEvidence(await evidence("migration", "TEST", { sourceSnapshotIdentity: "snapshot-1", targetMigrationDatabase: "migration-test", dryRunPassed: true, applyPassed: true, rerunPassed: true, reconciliationPassed: true }), candidateSha),
+    migrationEvidence: await validateMigrationEvidence(await evidence("migration", "TEST", completeMigrationDetails()), candidateSha),
     uatEvidence: await validateUatEvidence(await evidence("uat", "TEST", { p0Open: 0, p1Open: 0, businessSignoff: true, operationsSignoff: true }), candidateSha),
     preflightEvidence: await validatePreflightEvidence(await evidence("preflight", "PROD", { checksPassed: true, rollbackReady: true, changeWindowApproved: true }), candidateSha),
     realAiEvidence: await validateAiEvidence(await evidence("ai", "PROD", { provider: "real-provider", model: "approved-model", evaluationPassed: true }), candidateSha),
@@ -419,6 +456,43 @@ describe("M3-008 production release evidence", () => {
   it("requires full migration and restore drill evidence", async () => {
     await expect(validateMigrationEvidence(await evidence("migration", "TEST", { sourceSnapshotIdentity: "snapshot", targetMigrationDatabase: "db", dryRunPassed: true, applyPassed: true, rerunPassed: true }), candidateSha)).resolves.toMatchObject({ errorCode: "MIGRATION_EVIDENCE_INCOMPLETE" });
     await expect(validateRestoreEvidence(await evidence("restore", "TEST", { sourceBackupId: "1", sourceClusterId: "source", sourceEnvironment: "TEST", targetClusterId: "target", targetEnvironment: "TEST", validationPassed: true, rtoHours: 2, rpoHours: 1 }), candidateSha)).resolves.toMatchObject({ errorCode: "RESTORE_EVIDENCE_INCOMPLETE" });
+  });
+
+  it("accepts only a fully bound FULL migration rehearsal with file, attachment, identity, issue, and reconciliation proof", async () => {
+    await expect(validateMigrationEvidence(await evidence("migration", "TEST", completeMigrationDetails()), candidateSha)).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it.each([
+    { name: "SAMPLE relabelled as full", mutate: (details: MutableMigrationDetails) => { details.snapshotKind = "SAMPLE"; } },
+    { name: "missing manifest digest", mutate: (details: MutableMigrationDetails) => { delete details.manifestSha256; } },
+    { name: "invalid manifest digest", mutate: (details: MutableMigrationDetails) => { details.manifestSha256 = "not-a-digest"; } },
+    { name: "omitted manifest file", mutate: (details: MutableMigrationDetails) => { details.manifestFiles.pop(); } },
+    { name: "duplicate manifest path", mutate: (details: MutableMigrationDetails) => { details.manifestFiles[0].path = details.manifestFiles[1].path; } },
+    { name: "invalid per-file count", mutate: (details: MutableMigrationDetails) => { details.manifestFiles[0].count = -1; } },
+    { name: "per-file count not reconciled to its module", mutate: (details: MutableMigrationDetails) => { details.manifestFiles[0].count += 1; } },
+    { name: "invalid per-file digest", mutate: (details: MutableMigrationDetails) => { details.manifestFiles[0].sha256 = "0"; } },
+    { name: "attachment inventory digest mismatch", mutate: (details: MutableMigrationDetails) => { details.attachmentInventory.manifestSha256 = "d".repeat(64); } },
+    { name: "attachment inventory count mismatch", mutate: (details: MutableMigrationDetails) => { details.attachmentInventory.sourceCount = 4; } },
+    { name: "attachment validation bypass", mutate: (details: MutableMigrationDetails) => { details.attachmentInventory.validationPassed = false; } },
+    { name: "attachment issue hidden behind copied count", mutate: (details: MutableMigrationDetails) => { details.attachmentInventory.issueCount = 1; } },
+    { name: "missing migration batch identity", mutate: (details: MutableMigrationDetails) => { delete details.migrationBatchId; } },
+    { name: "reused migration and rerun identity", mutate: (details: MutableMigrationDetails) => { details.rerunRunId = details.migrationRunId; } },
+    { name: "unresolved blocker", mutate: (details: MutableMigrationDetails) => { details.unresolvedBlockerCount = 1; } },
+    { name: "unresolved review", mutate: (details: MutableMigrationDetails) => { details.unresolvedReviewCount = 1; } },
+    { name: "omitted reconciliation module", mutate: (details: MutableMigrationDetails) => { details.modules.pop(); } },
+    { name: "duplicate reconciliation module", mutate: (details: MutableMigrationDetails) => { details.modules[0].module = details.modules[1].module; } },
+    { name: "broken module source equation", mutate: (details: MutableMigrationDetails) => { details.modules[0].sourceCount += 1; } },
+    { name: "failed module row", mutate: (details: MutableMigrationDetails) => { details.modules[0].successCount -= 1; details.modules[0].failedCount = 1; } },
+    { name: "review module row", mutate: (details: MutableMigrationDetails) => { details.modules[0].successCount -= 1; details.modules[0].reviewCount = 1; } },
+    { name: "broken attachment equation", mutate: (details: MutableMigrationDetails) => { const attachmentEntry = details.modules.find((entry) => entry.module === "ATTACHMENT")!; attachmentEntry.attachmentSuccessCount -= 1; } },
+    { name: "false dry-run result", mutate: (details: MutableMigrationDetails) => { details.dryRunPassed = false; } },
+    { name: "false apply result", mutate: (details: MutableMigrationDetails) => { details.applyPassed = false; } },
+    { name: "false idempotent rerun result", mutate: (details: MutableMigrationDetails) => { details.rerunPassed = false; } },
+    { name: "false reconciliation result", mutate: (details: MutableMigrationDetails) => { details.reconciliationPassed = false; } },
+  ])("fails closed for migration evidence bypass: $name", async ({ mutate }) => {
+    const details = structuredClone(completeMigrationDetails());
+    mutate(details);
+    await expect(validateMigrationEvidence(await evidence("migration", "TEST", details), candidateSha)).resolves.toMatchObject({ status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE" });
   });
 
   it("rejects protected=true metadata when required branch policy details are absent", () => expect(validateGithubProtection({ protected: true })).toEqual({ status: "FAIL", errorCode: "GITHUB_REQUIRED_POLICY_INCOMPLETE" }));
