@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 
 type FormValues = {
   arrivalAt: string;
@@ -32,7 +31,6 @@ export function PresenceForm({
   reportId?: string;
   initialValues?: FormValues;
 }) {
-  const router = useRouter();
   const draftKey = reportId ? `presence-edit-${reportId}` : "presence-new-draft";
   const [values, setValues] = useState(initialValues);
   const [message, setMessage] = useState("");
@@ -78,8 +76,8 @@ export function PresenceForm({
       return;
     }
     window.localStorage.removeItem(draftKey);
-    router.push("/presence");
-    router.refresh();
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Full navigation avoids the post-submit RSC race.
+    window.location.assign("/presence");
   }
 
   const inputClass = "mt-2 w-full rounded-xl border border-black/10 bg-white px-3 py-3 outline-none focus:border-blue-500";

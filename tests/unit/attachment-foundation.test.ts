@@ -150,6 +150,30 @@ describe("M0-005 scan transitions", () => {
     }));
   });
 
+  it("emits one phase summary without filename, content, object key, or hash", async () => {
+    const repository = scanRepository();
+    const storage = new InMemoryStorageAdapter();
+    const content = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\nprivate-content");
+    storage.putObjectForTest("attachments/2026/08/a/file", content);
+    repository.findById.mockResolvedValue({
+      ...await repository.findById(), actualSizeBytes: BigInt(content.byteLength),
+      originalFilename: "private-name.pdf", objectKey: "attachments/2026/08/a/file",
+    });
+    const summaries: Record<string, unknown>[] = [];
+    const service = new AttachmentScanService(
+      repository as unknown as AttachmentRepository, storage, new FakeCleanScanner(),
+      (entry) => summaries.push(entry),
+    );
+    await service.processAttachmentScan(attachmentId);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({ result: "passed", attachmentId, repository_lookup_ms: expect.any(Number), clamav_scan_ms: expect.any(Number), total_ms: expect.any(Number) });
+    const serialized = JSON.stringify(summaries);
+    expect(serialized).not.toContain("private-name.pdf");
+    expect(serialized).not.toContain("private-content");
+    expect(serialized).not.toContain("attachments/2026/08/a/file");
+    expect(serialized).not.toContain(sha256(content));
+  });
+
   it("keeps access fail-closed by recording FAILED when the scanner is unavailable", async () => {
     const repository = scanRepository();
     const storage = new InMemoryStorageAdapter();

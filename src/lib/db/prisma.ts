@@ -17,11 +17,12 @@ function createPrismaClient(): PrismaClient {
 }
 
 export function getPrismaClient(): PrismaClient {
-  const client = globalForPrisma.prisma ?? createPrismaClient();
+  globalForPrisma.prisma ??= createPrismaClient();
+  return globalForPrisma.prisma;
+}
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
-  }
-
-  return client;
+export async function disconnectPrismaClient(): Promise<void> {
+  const client = globalForPrisma.prisma;
+  globalForPrisma.prisma = undefined;
+  if (client) await client.$disconnect();
 }

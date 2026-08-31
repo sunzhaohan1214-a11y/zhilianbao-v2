@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getPrismaClient } from "@/lib/db/prisma";
+import { disconnectPrismaClient, getPrismaClient } from "@/lib/db/prisma";
 import { resolveCapabilities } from "@/modules/permissions/role-capabilities";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { loadMigrationResolutions, MigrationService, SnapshotDirectoryLegacySourceProvider, runMigrationPreview, writeMigrationReports } from "@/modules/migration";
@@ -63,4 +63,6 @@ async function main() {
     issueCounts: { total: issues.length, blocker: issues.filter(({ severity }) => severity === "BLOCKER").length, review: issues.filter(({ severity }) => severity === "REVIEW").length }, reportPaths }));
 }
 
-main().catch((error) => { console.error(JSON.stringify({ errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : error instanceof Error ? error.message.split(":")[0] : "MIGRATION_FAILED" })); process.exitCode = 1; });
+main()
+  .catch((error) => { console.error(JSON.stringify({ errorCode: error && typeof error === "object" && "code" in error ? String(error.code) : error instanceof Error ? error.message.split(":")[0] : "MIGRATION_FAILED" })); process.exitCode = 1; })
+  .finally(disconnectPrismaClient);

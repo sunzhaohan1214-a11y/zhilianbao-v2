@@ -20,6 +20,7 @@ import { isImportExportError } from "@/modules/import-export/errors";
 import { isSystemError } from "@/modules/system/errors";
 import { isReportingError } from "@/modules/reporting/errors";
 import { writeLog } from "@/lib/logging/logger";
+import { safeErrorMetadata, safeErrorWasLogged } from "@/lib/logging/safe-error";
 
 export function apiSuccess<T>(data: T, requestId: string = randomUUID(), status = 200) {
   return NextResponse.json({ ok: true, data, requestId }, { status });
@@ -110,12 +111,16 @@ export function apiError(error: unknown, requestId: string = randomUUID()) {
       requestId,
     }, { status: 400 });
   }
-  writeLog("error", {
-    requestId,
-    module: "api",
-    result: "unhandled_error",
-    errorCode: error instanceof Error ? error.name : "UNKNOWN_ERROR",
-  });
+  const safe = safeErrorMetadata(error);
+  if (!safeErrorWasLogged(error)) {
+    writeLog("error", {
+      requestId,
+      module: "api",
+      result: "unhandled_error",
+      errorCode: safe.errorCode,
+      errorClass: safe.errorClass,
+    });
+  }
   return NextResponse.json({
     ok: false,
     error: { code: "INTERNAL_ERROR", message: "服务暂时不可用", details: {} },

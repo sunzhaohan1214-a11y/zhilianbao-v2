@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { getPrismaClient } from "../src/lib/db/prisma.ts";
+import { disconnectPrismaClient, getPrismaClient } from "../src/lib/db/prisma.ts";
 
 type Row = { id: string };
 type Check = { code: string; status: "PASS" | "FAIL"; count: number; sampleIds: string[] };
@@ -65,5 +65,5 @@ try {
   console.log(JSON.stringify(report));
   if (report.status !== "PASS") process.exitCode = 1;
 } finally {
-  await prisma.$disconnect();
+  await disconnectPrismaClient();
 }
