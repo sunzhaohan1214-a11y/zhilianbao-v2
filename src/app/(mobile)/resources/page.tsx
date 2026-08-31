@@ -13,7 +13,7 @@ const resources = [
 export default function ResourcesPage() {
   return (
     <section>
-      <PageHeader description="按业务模块浏览正式资源。" title="资源" />
+      <PageHeader description="汇聚产业协同所需的企业、团员、政策与人才正式资源。" eyebrow="产业资源" title="资源" />
       <nav aria-label="资源分类" className="mt-6 divide-y divide-separator overflow-hidden rounded-2xl border border-separator bg-surface shadow-sm">
         {resources.map(({ label, href, description, icon: Icon }) => (
           <Link key={label} href={href} className="flex min-h-[76px] items-center gap-4 px-4 py-3 transition-colors hover:bg-surface-secondary">

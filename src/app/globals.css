@@ -15,6 +15,10 @@
   --brand: #1769ff;
   --brand-hover: #0b57e3;
   --brand-soft: #eaf1ff;
+  --water: #426d7a;
+  --water-soft: #edf5f6;
+  --lotus: #5f7d65;
+  --lotus-soft: #f1f6f1;
   --success: #079455;
   --success-soft: #ecfdf3;
   --warning: #dc6803;
@@ -59,6 +63,10 @@
   --color-separator: var(--separator);
   --color-brand: var(--brand);
   --color-brand-soft: var(--brand-soft);
+  --color-water: var(--water);
+  --color-water-soft: var(--water-soft);
+  --color-lotus: var(--lotus);
+  --color-lotus-soft: var(--lotus-soft);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -123,6 +131,14 @@ summary {
 dialog::backdrop {
   background: rgba(16, 24, 40, 0.38);
   backdrop-filter: blur(2px);
+}
+
+/* A restrained Baoying water-and-lotus atmosphere, reserved for product shells. */
+.baoying-atmosphere {
+  background-color: var(--bg-primary);
+  background-image:
+    radial-gradient(circle at 8% 10%, rgba(95, 125, 101, 0.09), transparent 22rem),
+    radial-gradient(ellipse at 92% 88%, rgba(82, 127, 141, 0.11), transparent 28rem);
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -32,7 +32,7 @@ export function HomeView({ data }: { data: HomeOverview }) {
       <header className="flex min-h-11 items-center justify-between gap-3" aria-label="首页顶部栏">
         <div className="flex min-w-0 items-center gap-2.5">
           <BrandLogo />
-          <h1 aria-label="首页" className="truncate text-xl font-semibold tracking-tight">智链宝</h1>
+          <div className="min-w-0"><h1 aria-label="首页" className="truncate text-xl font-semibold tracking-tight">智链宝</h1><p className="truncate text-[11px] font-medium tracking-wide text-water">电力装备产业协同</p></div>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/messages" aria-label={data.header.unreadMessageCount > 0 ? `消息，${data.header.unreadMessageCount} 条未读` : "消息"} className="relative grid size-11 place-items-center rounded-full bg-surface shadow-sm ring-1 ring-separator">

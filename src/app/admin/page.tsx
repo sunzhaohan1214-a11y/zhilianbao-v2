@@ -19,7 +19,7 @@ export default async function AdminPage() {
 
   return (
     <section>
-      <PageHeader description="这里不虚报数量；进入对应模块后查看当前记录与状态。" eyebrow="管理工作台" title="业务处理入口" />
+      <PageHeader description="科技镇长团内部业务处理入口；不虚报数量，进入对应模块后查看当前记录与状态。" eyebrow="产业协同管理" title="业务处理入口" />
       {visibleQueues.length > 0 ? (
         <div className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {visibleQueues.map((item) => (

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BrandLogo } from "@/components/mobile/brand-logo";
 
 type CapabilityRequirement = string | readonly string[];
 type NavItem = readonly [label: string, href: string, capability: CapabilityRequirement];
@@ -32,12 +33,12 @@ export function AdminShell({ children, capabilities }: Readonly<{ children: Reac
   const groups = adminNavigation.map((group) => ({ ...group, items: group.items.filter(([, , requirement]) => typeof requirement === "string" ? allowed.has(requirement) : requirement.some((capability) => allowed.has(capability))) })).filter((group) => group.items.length > 0);
 
   return (
-    <div className="min-h-dvh bg-background lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
+    <div className="baoying-atmosphere min-h-dvh lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
       <aside className="border-b border-separator bg-surface lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto lg:border-b-0 lg:border-r">
         <div className="border-b border-separator px-5 py-5">
           <Link className="flex items-center gap-3" href="/admin">
-            <span className="grid size-10 place-items-center rounded-xl bg-brand text-sm font-semibold text-white shadow-sm">智</span>
-            <span><strong className="block text-[17px] tracking-tight">智链宝</strong><span className="block text-xs text-muted">管理工作台</span></span>
+            <BrandLogo />
+            <span><strong className="block text-[17px] tracking-tight">智链宝</strong><span className="block text-xs text-muted">产业协同工作台</span></span>
           </Link>
         </div>
         <nav aria-label="管理后台导航" className="flex gap-2 overflow-x-auto px-4 py-3 lg:block lg:space-y-5 lg:overflow-visible lg:py-5">

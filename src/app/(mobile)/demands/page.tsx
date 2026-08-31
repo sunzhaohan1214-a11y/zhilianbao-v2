@@ -35,7 +35,7 @@ export default async function DemandsPage({ searchParams }: { searchParams: Prom
     <section>
       <PageHeader
         actions={canCreate ? <Link className={buttonStyles({ size: "sm" })} href="/demands/new">新建草稿</Link> : undefined}
-        description="集中查看、对接和跟进企业正式需求。"
+        description="支撑科技镇长团内部对接、协同和闭环跟进。"
         eyebrow="需求中心"
         title="正式需求"
       />
