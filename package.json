@@ -12,12 +12,13 @@
     "dev": "next dev",
     "build": "npm run build:web && npm run build:worker",
     "build:web": "next build",
-    "build:worker": "esbuild src/worker/main.ts src/worker/attachment-scan-main.ts --bundle --platform=node --format=esm --target=node24 --outdir=worker-dist --packages=external",
+    "build:worker": "esbuild src/worker/main.ts src/worker/attachment-scan-main.ts --bundle --platform=node --format=esm --target=node24 --outdir=worker-dist --packages=external && esbuild src/runtime/entrypoint.ts --bundle --platform=node --format=esm --target=node24 --outfile=worker-dist/runtime-entrypoint.js --packages=external",
     "build:migration": "esbuild src/migration/main.ts --bundle --platform=node --format=esm --target=node24 --outfile=migration-dist/main.js --packages=external",
     "start": "next start",
     "start:web": "node server.js",
     "start:worker": "node worker-dist/main.js",
     "start:attachment-scan-job": "node worker-dist/attachment-scan-main.js",
+    "start:runtime": "node worker-dist/runtime-entrypoint.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run tests/unit",
@@ -64,6 +65,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "tencentcloud-sdk-nodejs-cynosdb": "4.1.302",
+    "tencentcloud-sdk-nodejs-ssm": "4.1.298",
     "zod": "4.4.3"
   },
   "devDependencies": {

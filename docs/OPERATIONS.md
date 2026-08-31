@@ -43,9 +43,13 @@ deps
 最终：
 
 ```text
-node server.js
+node worker-dist/runtime-entrypoint.js
 0.0.0.0:3000
 ```
+
+统一入口先使用实例角色读取 SSM 运行凭据，再按 `ZLB_PROCESS=web|worker|attachment-scan`
+启动 `server.js`、常驻 Worker 或单次附件扫描入口。Web 继续由 Next.js 监听端口；Worker
+由入口提供 `/health` 与 `/ready`；附件扫描入口提供探针与 `POST /run`，并拒绝并发运行。
 
 Node版本在 Dockerfile 显式固定兼容LTS，不依赖WorkBuddy宿主机。
 
@@ -109,6 +113,33 @@ migration user
 ## 5. Secret
 
 生产环境变量由CloudBase/安全配置管理。
+
+CloudBase 运行时只以普通环境变量提供非敏感定位信息：
+
+```text
+ZLB_RUNTIME_SECRET_NAME
+ZLB_RUNTIME_SECRET_REGION
+ZLB_RUNTIME_SECRET_VERSION
+ZLB_PROCESS
+```
+
+入口使用实例角色读取显式固定的 SSM 版本（例如 TEST 的 `v2`），且只接受以下完整 JSON 白名单；缺项、空值、未知键
+或读取失败都必须在启动阶段 fail closed：
+
+```text
+DATABASE_URL
+AUTH_RATE_LIMIT_SECRET
+COS_SECRET_ID
+COS_SECRET_KEY
+```
+
+不得把上述四项回填为 CloudBase 明文环境变量。实例角色只授予指定凭据的
+`ssm:GetSecretValue`，不得使用账户级通配资源。
+
+CloudBase 部署使用仓库内的 `Dockerfile.cloudbase`。它只在
+`ZLB_PROCESS=attachment-scan` 时启动绑定 `127.0.0.1:3310` 的 ClamAV，并要求显式配置
+`FILE_SCAN_PROVIDER=clamav`、`CLAMAV_HOST=127.0.0.1`、`CLAMAV_PORT=3310`；病毒库在镜像构建阶段由
+`freshclam` 下载并校验，运行时不依赖临时下载。Web 和 Worker 不启动 ClamAV。
 
 仓库：
 
