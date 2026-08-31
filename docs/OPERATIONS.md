@@ -136,6 +136,11 @@ COS_SECRET_KEY
 不得把上述四项回填为 CloudBase 明文环境变量。实例角色只授予指定凭据的
 `ssm:GetSecretValue`，不得使用账户级通配资源。
 
+CloudBase 部署使用仓库内的 `Dockerfile.cloudbase`。它只在
+`ZLB_PROCESS=attachment-scan` 时启动绑定 `127.0.0.1:3310` 的 ClamAV，并要求显式配置
+`FILE_SCAN_PROVIDER=clamav`、`CLAMAV_HOST=127.0.0.1`、`CLAMAV_PORT=3310`；病毒库在镜像构建阶段由
+`freshclam` 下载并校验，运行时不依赖临时下载。Web 和 Worker 不启动 ClamAV。
+
 仓库：
 
 ```text

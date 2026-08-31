@@ -156,6 +156,21 @@ jobs:
         run: '! docker image inspect zhilianbao-v2:m3-008 --format "{{json .Config.Env}}" | grep -E "DATABASE_URL|SECRET_(ID|KEY)|GITHUB_TOKEN"'
       - run: docker run --rm zhilianbao-v2:m3-008 node worker-dist/main.js --help
       - run: docker run --rm zhilianbao-v2:m3-008 node worker-dist/attachment-scan-main.js --help
+      - name: Build CloudBase runtime image with private ClamAV
+        run: docker build --file Dockerfile.cloudbase --tag zhilianbao-v2:cloudbase .
+      - name: Verify CloudBase image security and ClamAV database
+        run: |
+          docker run --rm --entrypoint sh zhilianbao-v2:cloudbase -c '
+            test ! -e /app/.env &&
+            test ! -d /app/tests &&
+            test ! -d /app/artifacts &&
+            test ! -d /app/src &&
+            test -x /usr/local/bin/zhilianbao-runtime-entrypoint &&
+            grep -Fx "TCPAddr 127.0.0.1" /etc/clamav/clamd.conf &&
+            test -n "$(find /var/lib/clamav -maxdepth 1 -type f \( -name "*.cvd" -o -name "*.cld" \) -print -quit)" &&
+            clamd --version
+          '
+          ! docker image inspect zhilianbao-v2:cloudbase --format '{{json .Config.Env}}' | grep -E 'DATABASE_URL|SECRET_(ID|KEY)|GITHUB_TOKEN'
 
   security:
     runs-on: ubuntu-latest
