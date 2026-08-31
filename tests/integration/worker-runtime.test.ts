@@ -27,7 +27,7 @@ describe("M0-006 bounded Worker runtime", () => {
     } as const;
     const enqueue = vi.fn().mockResolvedValue(job);
     const recoverStale = vi.fn().mockResolvedValue(1);
-    const claimNext = vi.fn().mockResolvedValueOnce(job).mockResolvedValue(null);
+    const claimNextByTypes = vi.fn().mockResolvedValueOnce(job).mockResolvedValue(null);
     const run = vi.fn().mockResolvedValue(undefined);
     const consumeBatch = vi.fn().mockResolvedValue(2);
     const runtime = new WorkerRuntime({
@@ -41,14 +41,17 @@ describe("M0-006 bounded Worker runtime", () => {
       outboxMaxAttempts: 3,
     }, () => undefined, {
       workerId: "test-worker",
-      jobs: { enqueue, recoverStale, claimNext } as unknown as JobRepository,
+      jobs: { enqueue, recoverStale, claimNextByTypes } as unknown as JobRepository,
       runner: { run } as unknown as JobRunner,
       outbox: { consumeBatch } as unknown as OutboxConsumer,
     });
 
     await expect(runtime.run()).resolves.toEqual({ graceful: true });
     expect(enqueue).toHaveBeenCalledTimes(1);
-    expect(recoverStale).toHaveBeenCalledTimes(1);
+    expect(recoverStale).toHaveBeenCalledWith(expect.objectContaining({
+      jobTypes: expect.not.arrayContaining(["ATTACHMENT_SCAN"]),
+    }));
+    expect(claimNextByTypes).toHaveBeenCalledWith("test-worker", expect.not.arrayContaining(["ATTACHMENT_SCAN"]));
     expect(consumeBatch).toHaveBeenCalledWith(20);
     expect(run).toHaveBeenCalledWith(job, "test-worker");
   });
@@ -74,7 +77,7 @@ describe("M0-006 bounded Worker runtime", () => {
     let finish!: () => void;
     const active = new Promise<void>((resolve) => { finish = resolve; });
     const run = vi.fn().mockReturnValue(active);
-    const claimNext = vi.fn().mockResolvedValueOnce(job).mockResolvedValue(null);
+    const claimNextByTypes = vi.fn().mockResolvedValueOnce(job).mockResolvedValue(null);
     const runtime = new WorkerRuntime({
       concurrency: 1,
       pollIntervalMs: 1,
@@ -89,7 +92,7 @@ describe("M0-006 bounded Worker runtime", () => {
       jobs: {
         enqueue: vi.fn().mockResolvedValue(job),
         recoverStale: vi.fn().mockResolvedValue(0),
-        claimNext,
+        claimNextByTypes,
       } as unknown as JobRepository,
       runner: { run } as unknown as JobRunner,
       outbox: { consumeBatch: vi.fn().mockResolvedValue(0) } as unknown as OutboxConsumer,
@@ -100,7 +103,7 @@ describe("M0-006 bounded Worker runtime", () => {
     runtime.requestStop();
     finish();
     await expect(running).resolves.toEqual({ graceful: true });
-    expect(claimNext).toHaveBeenCalledTimes(1);
+    expect(claimNextByTypes).toHaveBeenCalledTimes(1);
   });
 });
 
