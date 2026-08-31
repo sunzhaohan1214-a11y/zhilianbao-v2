@@ -4,11 +4,14 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-type NavItem = readonly [label: string, href: string, capability: string];
+type CapabilityRequirement = string | readonly string[];
+type NavItem = readonly [label: string, href: string, capability: CapabilityRequirement];
+
+export const formalDemandNavigationCapabilities = ["demand.review", "demand.close.review", "demand.owner.exit_review", "demand.owner.transfer", "demand.outcome.review", "demand.formal.create"] as const;
 
 export const adminNavigation: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = [
   { label: "工作台", items: [["工作台", "/admin", "admin.shell.access"]] },
-  { label: "需求与成效", items: [["正式需求", "/admin/demands", "demand.review"], ["需求线索", "/admin/demand-leads", "demand.lead.view"]] },
+  { label: "需求与成效", items: [["正式需求", "/admin/demands", formalDemandNavigationCapabilities], ["需求线索", "/admin/demand-leads", "demand.lead.view"]] },
   { label: "资源管理", items: [["企业管理", "/admin/enterprises", "enterprise.edit_formal"], ["企业申请审核", "/admin/enterprise-change-requests", "enterprise.edit_formal"], ["人才管理", "/admin/talents", "talent.review"], ["人才申请审核", "/admin/talent-change-requests", "talent.review"], ["政策治理", "/admin/policies", "policy.create"], ["地图治理", "/admin/maps", "enterprise.map.manage"]] },
   { label: "工作动态", items: [["来离宝管理", "/admin/presence", "presence.history.admin_view"], ["行程与走访", "/admin/trips", "trip.correct.admin"]] },
   { label: "事务管理", items: [["办事求助", "/admin/help-requests", "help.assign"], ["公告治理", "/admin/announcements", "announcement.create"]] },
@@ -26,7 +29,7 @@ function isCurrent(pathname: string, href: string) {
 export function AdminShell({ children, capabilities }: Readonly<{ children: ReactNode; capabilities: readonly string[] }>) {
   const pathname = usePathname();
   const allowed = new Set(capabilities);
-  const groups = adminNavigation.map((group) => ({ ...group, items: group.items.filter(([, , capability]) => allowed.has(capability)) })).filter((group) => group.items.length > 0);
+  const groups = adminNavigation.map((group) => ({ ...group, items: group.items.filter(([, , requirement]) => typeof requirement === "string" ? allowed.has(requirement) : requirement.some((capability) => allowed.has(capability))) })).filter((group) => group.items.length > 0);
 
   return (
     <div className="min-h-dvh bg-background lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
@@ -44,7 +47,7 @@ export function AdminShell({ children, capabilities }: Readonly<{ children: Reac
               <div className="flex gap-1 lg:mt-1 lg:block lg:space-y-0.5">
                 {group.items.map(([label, href]) => {
                   const current = isCurrent(pathname, href);
-                  return <Link aria-current={current ? "page" : undefined} key={href} className={`block min-h-10 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${current ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-secondary hover:text-foreground"}`} href={href}>{label}</Link>;
+                  return <Link aria-current={current ? "page" : undefined} key={href} className={`block min-h-11 content-center whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${current ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-secondary hover:text-foreground"}`} href={href}>{label}</Link>;
                 })}
               </div>
             </section>

@@ -84,7 +84,7 @@ export function FormalDemandCreateForm({ areas, sourceType }: { areas: Area[]; s
       {options.length > 0 && <ul className="divide-y rounded-xl border">{options.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left hover:bg-slate-50" onClick={() => void choose(option).catch((error) => setMessage(error instanceof Error ? error.message : "企业详情加载失败"))}>{option.name} · {option.responsibleArea.name}</button></li>)}</ul>}
       {enterprise && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">已选择：{enterprise.name}</p>}
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="text-sm font-medium">本次选定联系人<select name="selectedContactId" required disabled={!enterprise} className={field}><option value="">请选择 ACTIVE 联系人</option>{activeContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name} · {contact.phone}</option>)}</select></label>
+        <label className="text-sm font-medium">本次选定联系人<select name="selectedContactId" required disabled={!enterprise} className={field}><option value="">请选择有效联系人</option>{activeContacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name} · {contact.phone}</option>)}</select></label>
         <label className="text-sm font-medium">负责区域<select name="responsibleAreaId" required defaultValue={enterprise?.responsibleArea.id ?? ""} key={enterprise?.id ?? "none"} className={field}><option value="">请选择</option>{areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select></label>
       </div>
       <label className="block text-sm font-medium">标题<input name="title" required maxLength={200} className={field} /></label>

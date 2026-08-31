@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { adminNavigation } from "@/components/admin/admin-shell";
-import { businessLabel, demandLeadStatusLabel, recordStatusLabel } from "@/components/admin/business-labels";
+import { adminNavigation, formalDemandNavigationCapabilities } from "@/components/admin/admin-shell";
+import { visibleAdminWorkbenchEntries } from "@/components/admin/admin-workbench-model";
+import { businessLabel, demandLeadNextStepLabel, demandLeadStatusLabel, recordStatusLabel } from "@/components/admin/business-labels";
 
 describe("admin UI contract", () => {
   it("keeps the approved nine navigation groups", () => {
@@ -9,9 +10,25 @@ describe("admin UI contract", () => {
     ]);
   });
 
+  it("keeps formal-demand navigation for every legitimate lifecycle capability", () => {
+    expect(formalDemandNavigationCapabilities).toEqual(expect.arrayContaining(["demand.review", "demand.close.review", "demand.owner.exit_review", "demand.owner.transfer", "demand.outcome.review"]));
+  });
+
+  it("describes only the business entries granted by the current capability", () => {
+    const entries = visibleAdminWorkbenchEntries(new Set(["demand.close.review"]));
+    expect(entries.map(({ title }) => title)).toEqual(["需求办结审核"]);
+    expect(entries[0].description).not.toContain("主责变更");
+  });
+
   it("maps technical states to business labels and fails closed", () => {
     expect(businessLabel(demandLeadStatusLabel, "PENDING_TOWNSHIP_VERIFY")).toBe("待镇区核验");
     expect(businessLabel(recordStatusLabel, "DISABLED")).toBe("已停用");
     expect(businessLabel(recordStatusLabel, "FUTURE_STATE")).toBe("状态待确认");
+  });
+
+  it("keeps township verification separate from enterprise linking", () => {
+    expect(demandLeadNextStepLabel.PENDING_TOWNSHIP_VERIFY).toContain("转正式草稿");
+    expect(demandLeadNextStepLabel.PENDING_TOWNSHIP_VERIFY).not.toContain("关联");
+    expect(demandLeadNextStepLabel.PENDING_ENTERPRISE_LINK).toContain("关联已有企业");
   });
 });

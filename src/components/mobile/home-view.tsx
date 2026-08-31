@@ -20,6 +20,8 @@ function formatDate(value: Date) {
   return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric" }).format(value);
 }
 
+const todoModuleLabel: Record<string, string> = { ANNOUNCEMENT: "公告", DEMAND: "需求", HELP: "办事求助", TRIP: "行程", REIMBURSEMENT: "报销" };
+
 function SectionTitle({ id, title, href, linkLabel = "查看全部" }: { id: string; title: string; href?: string; linkLabel?: string }) {
   return <div className="flex items-center justify-between gap-4"><h2 id={id} className="text-[17px] font-semibold tracking-tight text-foreground">{title}</h2>{href && <Link href={href} className="min-h-11 content-center text-sm font-medium text-brand">{linkLabel}</Link>}</div>;
 }
@@ -81,7 +83,7 @@ export function HomeView({ data }: { data: HomeOverview }) {
 
       {data.todos.length > 0 && <section aria-labelledby="todos-title">
         <SectionTitle id="todos-title" title="我的待办" href="/todos" />
-        <div className="mt-3 divide-y divide-separator rounded-2xl border border-separator bg-surface px-4 shadow-sm">{data.todos.map((todo) => <Link key={todo.id} href={todo.actionUrl} className="flex min-h-16 items-center justify-between gap-4 py-3"><div className="min-w-0"><p className="truncate font-medium">{todo.label}</p><p className="mt-1 text-xs text-muted">{todo.priority === 'HIGH' ? '紧急' : todo.module}{todo.dueAt ? ` · ${formatDate(todo.dueAt)}截止` : ''}</p></div><span aria-hidden="true" className="text-tertiary">›</span></Link>)}</div>
+        <div className="mt-3 divide-y divide-separator rounded-2xl border border-separator bg-surface px-4 shadow-sm">{data.todos.map((todo) => <Link key={todo.id} href={todo.actionUrl} className="flex min-h-16 items-center justify-between gap-4 py-3"><div className="min-w-0"><p className="truncate font-medium">{todo.label}</p><p className="mt-1 text-xs text-muted">{todo.priority === 'HIGH' ? '紧急' : todoModuleLabel[todo.module] ?? '业务事项'}{todo.dueAt ? ` · ${formatDate(todo.dueAt)}截止` : ''}</p></div><span aria-hidden="true" className="text-tertiary">›</span></Link>)}</div>
       </section>}
 
       <section aria-labelledby="demands-title">

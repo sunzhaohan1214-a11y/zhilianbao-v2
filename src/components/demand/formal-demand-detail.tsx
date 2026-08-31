@@ -5,6 +5,7 @@ import { DemandRecommendations } from "./demand-recommendations";
 import { DemandLifecyclePanel } from "./demand-lifecycle-panel";
 import type { DemandLifecycleService } from "@/modules/demand";
 import { DemandOutcomePanel } from "./demand-outcome-panel";
+import { detailNextStep } from "./demand-next-step";
 
 type Detail = Awaited<ReturnType<FormalDemandService["detail"]>>;
 type Timeline = Awaited<ReturnType<FormalDemandService["timeline"]>>;
@@ -98,6 +99,7 @@ export function FormalDemandDetail({
   canAcceptInvitation: boolean;
   canLeaveCollaboration: boolean;
 }) {
+  const nextStep = detailNextStep({ status: demand.status, canEdit, canSubmit, canReview, canDirectPublish, canClaim, lifecycle, outcomes });
   return (
     <section className="space-y-6">
       <header>
@@ -105,6 +107,12 @@ export function FormalDemandDetail({
         <h1 className="mt-1 text-[28px] font-semibold tracking-tight text-foreground">{demand.title}</h1>
         <div className="mt-3 flex flex-wrap gap-2 text-sm"><span className="rounded-full bg-brand-soft px-3 py-1 text-brand">{knownLabel(statusLabel, demand.status, "状态待确认")}</span><span className="rounded-full bg-surface-secondary px-3 py-1">{knownLabel(typeLabel, demand.demandType, "其他需求")}</span><span className="rounded-full bg-surface-secondary px-3 py-1">{demand.urgency === "URGENT" ? "紧急" : "普通"}</span></div>
       </header>
+
+      <article aria-labelledby="current-next-step" className="rounded-2xl border border-brand/20 bg-brand-soft p-5">
+        <p className="text-xs font-semibold text-brand">当前下一步</p>
+        <h2 className="sr-only" id="current-next-step">当前下一步</h2>
+        <p className="mt-2 text-sm font-medium leading-6 text-foreground">{nextStep}</p>
+      </article>
 
       {(demand.firstPublishedAt || canClaim) && <FormalDemandParticipation demand={demand} canClaim={canClaim} canApplyCollaboration={canApplyCollaboration} canManageCollaboration={canManageCollaboration} canAcceptInvitation={canAcceptInvitation} canLeaveCollaboration={canLeaveCollaboration} />}
 
