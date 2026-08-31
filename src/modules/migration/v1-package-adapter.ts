@@ -98,6 +98,7 @@ export type PreparedV1PackageSummary = {
   manualReviewCount: number;
   mapCandidateCount: number;
   dispatchLocationCandidateCount: number;
+  dispatchLocationMatchPreviewCount: number;
 };
 
 function digest(value: Buffer | string): string {
@@ -322,6 +323,45 @@ function buildDispatchLocationCandidates(input: z.infer<typeof institutionLocati
   }).sort((left, right) => left.sourceId.localeCompare(right.sourceId));
 }
 
+function normalizedOrganizationLookup(value: string): string {
+  return value.trim().toLocaleLowerCase("zh-CN").replace(/[\s（）()·・]/g, "");
+}
+
+function buildDispatchLocationMatchPreview(organizations: readonly JsonObject[], locations: ReturnType<typeof buildDispatchLocationCandidates>) {
+  return organizations.filter((organization) => organization.organizationType === "DISPATCH_UNIT").map((organization) => {
+    const organizationName = String(organization.name);
+    const organizationKey = normalizedOrganizationLookup(organizationName);
+    const candidates = locations.flatMap((location) => {
+      const lookupNames = [location.name, ...location.aliases];
+      const exact = lookupNames.find((value) => normalizedOrganizationLookup(value) === organizationKey);
+      const contained = exact ? undefined : lookupNames.find((value) => {
+        const key = normalizedOrganizationLookup(value);
+        return key.length >= 4 && (organizationKey.includes(key) || key.includes(organizationKey));
+      });
+      const matchedBy = exact ?? contained;
+      return matchedBy ? [{
+        locationSourceId: location.sourceId,
+        locationName: location.name,
+        province: location.province,
+        city: location.city,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        matchBasis: exact ? "EXACT_NAME_OR_ALIAS" : "UNIQUE_NAME_CONTAINMENT_CANDIDATE",
+        matchedBy,
+      }] : [];
+    });
+    return {
+      organizationSourceId: String(organization.sourceId),
+      organizationName,
+      candidateCount: candidates.length,
+      suggestedLocationSourceId: candidates.length === 1 ? candidates[0].locationSourceId : null,
+      disposition: "REVIEW_REQUIRED",
+      reviewCode: candidates.length === 0 ? "DISPATCH_LOCATION_CANDIDATE_MISSING" : candidates.length === 1 ? "DISPATCH_LOCATION_MATCH_CONFIRMATION_REQUIRED" : "DISPATCH_LOCATION_MATCH_AMBIGUOUS",
+      candidates,
+    };
+  }).sort((left, right) => left.organizationSourceId.localeCompare(right.organizationSourceId));
+}
+
 export async function prepareV1DataPackage(input: { sourceRoot: string; outputRoot: string }): Promise<PreparedV1PackageSummary> {
   const sourceRoot = await realpath(input.sourceRoot);
   const outputRoot = path.resolve(input.outputRoot);
@@ -477,8 +517,20 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
 
   const mapCandidates = await buildMapCatalog(sourceRoot, manifestHashes);
   const dispatchLocationCandidates = buildDispatchLocationCandidates(institutionLocations);
-  for (const candidate of dispatchLocationCandidates) {
-    review.push({ sourceEntity: "ORGANIZATION", sourceId: candidate.sourceId, code: "DISPATCH_LOCATION_MATCH_REQUIRED", severity: "REVIEW", field: "name", message: "派出单位位置候选必须按正式 Organization 人工匹配，坐标只表示单位地域，不表示团员位置。" });
+  const dispatchLocationMatchPreview = buildDispatchLocationMatchPreview(organizations, dispatchLocationCandidates);
+  for (const match of dispatchLocationMatchPreview) {
+    review.push({
+      sourceEntity: "ORGANIZATION",
+      sourceId: match.organizationSourceId,
+      code: match.reviewCode,
+      severity: "REVIEW",
+      field: "name",
+      message: match.candidateCount === 0
+        ? "派出单位没有位置候选，必须保留列表并进入地图信息待完善。"
+        : match.candidateCount === 1
+          ? "派出单位存在唯一名称候选，但仍须管理员确认后才能写入省、市和坐标。"
+          : "派出单位命中多个位置候选，必须由管理员选择，禁止自动写入。",
+    });
   }
   const runtimeFiles = ["users", "enterprise_records", "workflow_records", "member_records", "policy_documents", "audit_logs"];
   const runtimeHistory = [];
@@ -530,6 +582,16 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     sourcePurpose: institutionLocations.metadata.purpose,
     candidates: dispatchLocationCandidates,
   });
+  await writeJson(path.join(outputRoot, "governance", "dispatch-organization-location-match-preview.json"), {
+    policy: "REVIEW_EVERY_ORGANIZATION_MATCH; UNIQUE_NAME_CANDIDATE_IS_NOT_WRITE_AUTHORIZATION",
+    matches: dispatchLocationMatchPreview,
+    summary: {
+      organizationCount: dispatchLocationMatchPreview.length,
+      uniqueCandidateCount: dispatchLocationMatchPreview.filter((value) => value.candidateCount === 1).length,
+      unmatchedCount: dispatchLocationMatchPreview.filter((value) => value.candidateCount === 0).length,
+      ambiguousCount: dispatchLocationMatchPreview.filter((value) => value.candidateCount > 1).length,
+    },
+  });
   await writeJson(path.join(outputRoot, "governance", "runtime-history.json"), { records: runtimeHistory });
   await writeJson(path.join(outputRoot, "governance", "retained-source-fields.json"), {
     policy: "VALUES_REMAIN_IN_CHECKSUM_VERIFIED_SOURCE_PACKAGE; THIS_FILE_STORES_REFERENCES_ONLY",
@@ -549,5 +611,6 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     manualReviewCount: review.length,
     mapCandidateCount: mapCandidates.length,
     dispatchLocationCandidateCount: dispatchLocationCandidates.length,
+    dispatchLocationMatchPreviewCount: dispatchLocationMatchPreview.length,
   };
 }

@@ -36,11 +36,14 @@ V1 地图资料拆成两条互不混用的产品链路：
 ```text
 governance/map-candidates.json
 governance/dispatch-organization-location-candidates.json
+governance/dispatch-organization-location-match-preview.json
 ```
 
 `map-candidates.json` 保存 GeoJSON 哈希、要素名称、几何类型、范围、bbox、处置状态和两张地图的产品层级。
 
 `dispatch-organization-location-candidates.json` 保存来源许可与署名、机构名称/别名、省、市、坐标、下钻路径和人工确认原因。
+
+`dispatch-organization-location-match-preview.json` 以每个 `DISPATCH_UNIT` 候选为主行，给出名称/别名精确或包含关系的零个、唯一或多个位置候选。唯一候选只减少人工查找成本，不代表系统可以自动写入；零候选继续保留在列表并进入地图信息待完善。
 
 两份文件都属于敏感迁移目录，不进入 Git，不直接写正式表。
 

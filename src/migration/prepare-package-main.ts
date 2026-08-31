@@ -29,6 +29,7 @@ async function main() {
     manualReviewCount: result.manualReviewCount,
     mapCandidateCount: result.mapCandidateCount,
     dispatchLocationCandidateCount: result.dispatchLocationCandidateCount,
+    dispatchLocationMatchPreviewCount: result.dispatchLocationMatchPreviewCount,
     outputRoot: result.outputRoot,
   }));
 }

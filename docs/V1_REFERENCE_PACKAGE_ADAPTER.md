@@ -50,6 +50,7 @@ npm run migration:v1 -- \
 - `member-institution-locations.json` 转换为独立的派出单位位置候选，保留名称、别名、省、市和坐标，用于“全国 → 省 → 市 → 派出单位 → 团员”设计。
 - 派出单位位置候选必须人工匹配正式 `DISPATCH_UNIT`；坐标只代表单位地域，永远不得解释为团员当前位置。
 - 输出中的 `productDesign` 固化两张地图的层级和统计权威，避免后续把点位坐标误作业务归属或人员位置。
+- `dispatch-organization-location-match-preview.json` 按正式组织候选逐条给出零个、唯一或多个位置候选；即使唯一匹配也只是审核建议，不构成写入授权。
 
 ## 5. 安全
 

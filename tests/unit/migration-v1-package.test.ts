@@ -96,7 +96,7 @@ describe("V1 local reference package adapter", () => {
   it("verifies the package and emits a non-FULL, non-Git migration source bundle", async () => {
     const fixture = await createPackage();
     const result = await prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: fixture.output });
-    expect(result).toMatchObject({ sourceClassification: "REFERENCE_EXPORT_NOT_FINAL", attachmentCount: 1, mapCandidateCount: 1, dispatchLocationCandidateCount: 1 });
+    expect(result).toMatchObject({ sourceClassification: "REFERENCE_EXPORT_NOT_FINAL", attachmentCount: 1, mapCandidateCount: 1, dispatchLocationCandidateCount: 1, dispatchLocationMatchPreviewCount: 1 });
     expect(result.entities).toMatchObject({ ORGANIZATION: 2, PERSON: 3, ENTERPRISE: 1 });
 
     const snapshot = JSON.parse(await readFile(path.join(fixture.output, "snapshot.json"), "utf8")) as Record<string, unknown>;
@@ -109,6 +109,9 @@ describe("V1 local reference package adapter", () => {
     const locationCatalog = JSON.parse(await readFile(path.join(fixture.output, "governance/dispatch-organization-location-candidates.json"), "utf8")) as { policy: string; candidates: Array<Record<string, unknown>> };
     expect(locationCatalog.policy).toContain("NEVER_INTERPRET_AS_MEMBER_LOCATION");
     expect(locationCatalog.candidates).toEqual([expect.objectContaining({ name: "脱敏大学", province: "测试省", city: "测试市", disposition: "REVIEW_REQUIRED", memberMapPath: ["中国", "测试省", "测试市", "脱敏大学"] })]);
+    const matchPreview = JSON.parse(await readFile(path.join(fixture.output, "governance/dispatch-organization-location-match-preview.json"), "utf8")) as { summary: Record<string, number>; matches: Array<Record<string, unknown>> };
+    expect(matchPreview.summary).toEqual({ organizationCount: 1, uniqueCandidateCount: 1, unmatchedCount: 0, ambiguousCount: 0 });
+    expect(matchPreview.matches[0]).toMatchObject({ candidateCount: 1, disposition: "REVIEW_REQUIRED", reviewCode: "DISPATCH_LOCATION_MATCH_CONFIRMATION_REQUIRED" });
   });
 
   it("fails closed when a checksummed payload changes", async () => {
