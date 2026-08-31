@@ -4,6 +4,7 @@ import type { Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
+import { snapshotManifestSchema, type SnapshotManifest } from "@/modules/migration/source-contract";
 
 export const READINESS_STATUSES = [
   "PASS", "FAIL", "BLOCKED_BY_EXTERNAL_ENV", "BLOCKED_BY_SOURCE_DATA", "BLOCKED_BY_UAT", "NOT_APPLICABLE",
@@ -472,6 +473,32 @@ async function parseBoundEvidence(raw: string | undefined, candidateSha: string,
   return { validation: { status: "PASS", evidenceRef }, details: evidence.details as Record<string, unknown> };
 }
 
+async function loadImmutablePointer(pointer: Record<string, unknown>, dependencies: EvidenceLoadingDependencies = {}): Promise<{ bytes?: Uint8Array; digest?: string }> {
+  const reference = typeof pointer.reference === "string" ? pointer.reference.trim() : "";
+  const sourcePath = typeof pointer.sourcePath === "string" ? pointer.sourcePath.trim() : "";
+  let isHttpsReference = false;
+  if (reference && !reference.startsWith("urn:sha256:")) {
+    let protocol: string;
+    try { protocol = new URL(reference).protocol; } catch { protocol = ""; }
+    if (protocol !== "https:") return {};
+    isHttpsReference = true;
+  }
+  const digest = immutableDigest(pointer.reference);
+  if (!digest || (!sourcePath && !isHttpsReference)) return {};
+  let sourceBytes: Uint8Array | undefined;
+  if (sourcePath) {
+    try { sourceBytes = await readSourceBytes(sourcePath, dependencies); } catch { return {}; }
+    if (createHash("sha256").update(sourceBytes).digest("hex") !== digest) return {};
+  }
+  let referenceBytes: Uint8Array | undefined;
+  if (isHttpsReference) {
+    try { referenceBytes = await readReferenceBytes(reference, dependencies); } catch { return {}; }
+    if (createHash("sha256").update(referenceBytes).digest("hex") !== digest) return {};
+  }
+  if (sourceBytes && referenceBytes && !sameBytes(sourceBytes, referenceBytes)) return {};
+  return { bytes: sourceBytes ?? referenceBytes, digest };
+}
+
 function nonEmpty(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0; }
 function finiteAtMost(value: unknown, maximum: number): boolean { return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= maximum; }
 function objectValue(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
@@ -502,7 +529,7 @@ function exactStringSet(actual: readonly string[], expected: readonly string[]):
   return actual.length === expected.length && new Set(actual).size === expected.length && expected.every((value) => actual.includes(value));
 }
 
-function completeMigrationDetails(details: Record<string, unknown>): boolean {
+function completeMigrationDetails(details: Record<string, unknown>, manifest: SnapshotManifest, manifestDigest: string): boolean {
   if (!nonEmpty(details.sourceSnapshotIdentity) || details.snapshotKind !== "FULL" || details.rehearsalMode !== "FULL_REHEARSAL"
     || details.fullRehearsalStatus !== "COMPLETED" || !sha256Digest(details.manifestSha256)
     || !nonEmpty(details.targetMigrationDatabase) || details.dryRunPassed !== true || details.applyPassed !== true
@@ -522,6 +549,12 @@ function completeMigrationDetails(details: Record<string, unknown>): boolean {
     paths.push(file.path);
   }
   if (!exactStringSet(paths, MIGRATION_EVIDENCE_MANIFEST_PATHS)) return false;
+  if (manifest.snapshotKind !== "FULL" || manifest.snapshotId !== details.sourceSnapshotIdentity
+    || manifestDigest !== details.manifestSha256 || !exactStringSet(Object.keys(manifest.files), MIGRATION_EVIDENCE_MANIFEST_PATHS)) return false;
+  for (const file of manifestFiles as Record<string, unknown>[]) {
+    const manifestFile = manifest.files[file.path as string];
+    if (!manifestFile || manifestFile.count !== file.count || manifestFile.sha256 !== file.sha256) return false;
+  }
 
   const inventory = objectValue(details.attachmentInventory);
   if (!inventory || inventory.manifestPath !== "attachments/manifest.ndjson" || !sha256Digest(inventory.manifestSha256)
@@ -602,7 +635,18 @@ export async function validateRestoreEvidence(raw: string | undefined, candidate
 
 export async function validateMigrationEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {
   const parsed = await parseBoundEvidence(raw, candidateSha, "migration", "TEST", "BLOCKED_BY_SOURCE_DATA"); if (parsed.validation.status !== "PASS") return parsed.validation; const details = parsed.details!;
-  return completeMigrationDetails(details) ? parsed.validation : { status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
+  const manifestPointer = objectValue(details.snapshotManifest);
+  const loadedManifest = manifestPointer ? await loadImmutablePointer(manifestPointer) : {};
+  let manifest: SnapshotManifest | undefined;
+  if (loadedManifest.bytes) {
+    try {
+      const result = snapshotManifestSchema.safeParse(JSON.parse(new TextDecoder().decode(loadedManifest.bytes)) as unknown);
+      if (result.success) manifest = result.data;
+    } catch { /* handled as incomplete migration evidence below */ }
+  }
+  return manifest && loadedManifest.digest && completeMigrationDetails(details, manifest, loadedManifest.digest)
+    ? parsed.validation
+    : { status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE", evidenceRef: parsed.validation.evidenceRef };
 }
 
 export async function validateUatEvidence(raw: string | undefined, candidateSha: string): Promise<EvidenceValidation> {

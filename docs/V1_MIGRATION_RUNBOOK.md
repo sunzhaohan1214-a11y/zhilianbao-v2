@@ -93,7 +93,8 @@ Also sample: Demand→Enterprise, Demand→Contact, Person→Account, Person→A
 
 The migration evidence document remains `status=PASS` only after a controlled FULL dry-run, apply and idempotent rerun have completed. Its `details` must include all of the following; an omitted or self-reported shortcut is rejected by `validateMigrationEvidence()`:
 
-- `sourceSnapshotIdentity`, `snapshotKind=FULL`, `rehearsalMode=FULL_REHEARSAL`, `fullRehearsalStatus=COMPLETED` and the 64-hex `manifestSha256`;
+- `snapshotManifest`, an immutable evidence pointer to the real `snapshot.json`; the gate reads, hashes and parses it, requires the manifest itself to say `snapshotKind=FULL`, and binds its `snapshotId` to `sourceSnapshotIdentity`;
+- `snapshotKind=FULL`, `rehearsalMode=FULL_REHEARSAL`, `fullRehearsalStatus=COMPLETED` and a `manifestSha256` equal to the bytes addressed by `snapshotManifest`;
 - one `manifestFiles` row with non-negative line count and SHA-256 for every contract NDJSON path, including `attachments/manifest.ndjson`;
 - `attachmentInventory` bound to that manifest row, with source/copied/hash-verified counts equal, zero issues, and `validationPassed=true`;
 - distinct `dryRunId`, apply `migrationBatchId/migrationRunId`, and rerun `rerunBatchId/rerunRunId`, plus the dedicated `targetMigrationDatabase` identity;

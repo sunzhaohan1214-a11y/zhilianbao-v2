@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +57,7 @@ function inputs(overrides: Partial<ReleaseGateInputs> = {}): ReleaseGateInputs {
 }
 
 type MutableMigrationDetails = Record<string, unknown> & {
+  snapshotManifest: { reference: string; sourcePath: string };
   manifestFiles: Array<{ path: string; count: number; sha256: string }>;
   attachmentInventory: { manifestPath: string; manifestSha256: string; sourceCount: number; copiedCount: number; hashVerifiedCount: number; issueCount: number; validationPassed: boolean };
   migrationRunId: string;
@@ -64,15 +65,29 @@ type MutableMigrationDetails = Record<string, unknown> & {
   modules: Array<{ module: string; sourceCount: number; successCount: number; failedCount: number; skippedCount: number; mergedCount: number; reviewCount: number; attachmentCount: number; attachmentSuccessCount: number; attachmentIssueCount: number }>;
 };
 
-function completeMigrationDetails(): MutableMigrationDetails {
+async function completeMigrationDetails(): Promise<MutableMigrationDetails> {
   const digest = "a".repeat(64);
+  const sourceSnapshotIdentity = "v1-full-snapshot-2026-08-29T00:00:00Z";
+  const manifestFiles = MIGRATION_EVIDENCE_MANIFEST_PATHS.map((path) => ({ path, count: path === "attachments/manifest.ndjson" ? 3 : 1, sha256: path === "attachments/manifest.ndjson" ? digest : "c".repeat(64) }));
+  const manifestContent = JSON.stringify({
+    sourceSystem: "ZHILIANBAO_V1", schemaVersion: "v1-full-1", snapshotId: sourceSnapshotIdentity,
+    snapshotAt: "2026-08-29T00:00:00.000Z", exportedAt: "2026-08-29T00:10:00.000Z", isSanitized: false,
+    snapshotKind: "FULL", mappingVersion: "m3-006-v1",
+    files: Object.fromEntries(manifestFiles.map(({ path, count, sha256 }) => [path, { count, sha256 }])),
+    entities: Object.fromEntries(MIGRATION_EVIDENCE_MODULES.filter((module) => module !== "ATTACHMENT").map((module) => [module, 1])),
+  });
+  const directory = await mkdtemp(join(tmpdir(), "zlb-migration-manifest-")); temporaryDirectories.push(directory);
+  const sourcePath = join(directory, "snapshot.json");
+  await writeFile(sourcePath, manifestContent);
+  const manifestSha256 = createHash("sha256").update(manifestContent).digest("hex");
   return {
-    sourceSnapshotIdentity: "v1-full-snapshot-2026-08-29T00:00:00Z",
+    sourceSnapshotIdentity,
     snapshotKind: "FULL",
     rehearsalMode: "FULL_REHEARSAL",
     fullRehearsalStatus: "COMPLETED",
-    manifestSha256: "b".repeat(64),
-    manifestFiles: MIGRATION_EVIDENCE_MANIFEST_PATHS.map((path) => ({ path, count: path === "attachments/manifest.ndjson" ? 3 : 1, sha256: path === "attachments/manifest.ndjson" ? digest : "c".repeat(64) })),
+    snapshotManifest: { reference: `urn:sha256:${manifestSha256}`, sourcePath },
+    manifestSha256,
+    manifestFiles,
     attachmentInventory: { manifestPath: "attachments/manifest.ndjson", manifestSha256: digest, sourceCount: 3, copiedCount: 3, hashVerifiedCount: 3, issueCount: 0, validationPassed: true },
     targetMigrationDatabase: "v2-migration-rehearsal-20260829",
     dryRunId: "dry-run-full-20260829",
@@ -123,7 +138,7 @@ async function completeExternalEvidence() {
     backupEvidence: await validateBackupEvidence(await evidence("backup", "PROD", { provider: "tencent-cynosdb", health: "READY", backupStatus: "SUCCEEDED", sourceEnvironment: "PROD", region: "ap-shanghai", clusterId: "cluster-1", vpcId: "vpc-1", subnetId: "subnet-1", snapshotAt: "2026-08-28T12:00:00.000Z" }), candidateSha, { region: "ap-shanghai", clusterId: "cluster-1", vpcId: "vpc-1", subnetId: "subnet-1" }, new Date(verifiedAt)),
     maintenanceEvidence: await validateMaintenanceEvidence(await evidence("maintenance", "PROD", { provider: "maintenance-api", health: "READY", enterPassed: true, exitPassed: true }), candidateSha),
     restoreEvidence: await validateRestoreEvidence(await evidence("restore", "TEST", { sourceBackupId: "123", sourceClusterId: "test-source", sourceEnvironment: "TEST", targetClusterId: "test-target", targetEnvironment: "TEST", validationPassed: true, rtoHours: 2, rpoHours: 1, cleanupCompleted: true }), candidateSha),
-    migrationEvidence: await validateMigrationEvidence(await evidence("migration", "TEST", completeMigrationDetails()), candidateSha),
+    migrationEvidence: await validateMigrationEvidence(await evidence("migration", "TEST", await completeMigrationDetails()), candidateSha),
     uatEvidence: await validateUatEvidence(await evidence("uat", "TEST", { p0Open: 0, p1Open: 0, businessSignoff: true, operationsSignoff: true }), candidateSha),
     preflightEvidence: await validatePreflightEvidence(await evidence("preflight", "PROD", { checksPassed: true, rollbackReady: true, changeWindowApproved: true }), candidateSha),
     realAiEvidence: await validateAiEvidence(await evidence("ai", "PROD", { provider: "real-provider", model: "approved-model", evaluationPassed: true }), candidateSha),
@@ -459,11 +474,31 @@ describe("M3-008 production release evidence", () => {
   });
 
   it("accepts only a fully bound FULL migration rehearsal with file, attachment, identity, issue, and reconciliation proof", async () => {
-    await expect(validateMigrationEvidence(await evidence("migration", "TEST", completeMigrationDetails()), candidateSha)).resolves.toMatchObject({ status: "PASS" });
+    await expect(validateMigrationEvidence(await evidence("migration", "TEST", await completeMigrationDetails()), candidateSha)).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it("rejects the real SAMPLE snapshot manifest when outer evidence relabels it FULL", async () => {
+    const sourcePath = join(process.cwd(), "tests", "fixtures", "v1-migration", "sample-v1", "snapshot.json");
+    const manifestContent = await readFile(sourcePath, "utf8");
+    const manifest = JSON.parse(manifestContent) as { snapshotId: string; files: Record<string, { count: number; sha256: string }> };
+    const details = await completeMigrationDetails();
+    details.sourceSnapshotIdentity = manifest.snapshotId;
+    details.manifestSha256 = createHash("sha256").update(manifestContent).digest("hex");
+    details.snapshotManifest = { reference: `urn:sha256:${details.manifestSha256}`, sourcePath };
+    details.manifestFiles = Object.entries(manifest.files).map(([path, value]) => ({ path, ...value }));
+    details.attachmentInventory = { manifestPath: "attachments/manifest.ndjson", manifestSha256: manifest.files["attachments/manifest.ndjson"].sha256, sourceCount: manifest.files["attachments/manifest.ndjson"].count, copiedCount: manifest.files["attachments/manifest.ndjson"].count, hashVerifiedCount: manifest.files["attachments/manifest.ndjson"].count, issueCount: 0, validationPassed: true };
+    details.modules = MIGRATION_EVIDENCE_MODULES.map((module, index) => {
+      const sourceCount = manifest.files[MIGRATION_EVIDENCE_MANIFEST_PATHS[index]].count;
+      return { module, sourceCount, successCount: sourceCount, failedCount: 0, skippedCount: 0, mergedCount: 0, reviewCount: 0, attachmentCount: module === "ATTACHMENT" ? sourceCount : 0, attachmentSuccessCount: module === "ATTACHMENT" ? sourceCount : 0, attachmentIssueCount: 0 };
+    });
+    await expect(validateMigrationEvidence(await evidence("migration", "TEST", details), candidateSha)).resolves.toMatchObject({ status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE" });
   });
 
   it.each([
     { name: "SAMPLE relabelled as full", mutate: (details: MutableMigrationDetails) => { details.snapshotKind = "SAMPLE"; } },
+    { name: "missing immutable snapshot manifest pointer", mutate: (details: MutableMigrationDetails) => { delete details.snapshotManifest; } },
+    { name: "snapshot manifest pointer digest mismatch", mutate: (details: MutableMigrationDetails) => { details.snapshotManifest.reference = `urn:sha256:${"0".repeat(64)}`; } },
+    { name: "snapshot identity mismatch", mutate: (details: MutableMigrationDetails) => { details.sourceSnapshotIdentity = "different-snapshot"; } },
     { name: "missing manifest digest", mutate: (details: MutableMigrationDetails) => { delete details.manifestSha256; } },
     { name: "invalid manifest digest", mutate: (details: MutableMigrationDetails) => { details.manifestSha256 = "not-a-digest"; } },
     { name: "omitted manifest file", mutate: (details: MutableMigrationDetails) => { details.manifestFiles.pop(); } },
@@ -490,7 +525,7 @@ describe("M3-008 production release evidence", () => {
     { name: "false idempotent rerun result", mutate: (details: MutableMigrationDetails) => { details.rerunPassed = false; } },
     { name: "false reconciliation result", mutate: (details: MutableMigrationDetails) => { details.reconciliationPassed = false; } },
   ])("fails closed for migration evidence bypass: $name", async ({ mutate }) => {
-    const details = structuredClone(completeMigrationDetails());
+    const details = structuredClone(await completeMigrationDetails());
     mutate(details);
     await expect(validateMigrationEvidence(await evidence("migration", "TEST", details), candidateSha)).resolves.toMatchObject({ status: "FAIL", errorCode: "MIGRATION_EVIDENCE_INCOMPLETE" });
   });
