@@ -122,6 +122,21 @@ describe("B-M2-001 real MySQL invariants", () => {
     await new OrganizationService(prisma).createAppointment({ actor, appointment: { personId: actor.personId, organizationId: organization.id, positionTitle: "复核员", effectiveAt: new Date("2026-01-01"), isPrimary: false } });
     expect(await prisma.outboxEvent.count({ where: { eventType: { in: unregisteredFoundationEvents }, occurredAt: { gte: suiteStartedAt } } })).toBe(0);
   });
-  it("keeps the current batch unchanged when the required pre-backup fails", async () => { await prisma.batch.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } }); const current = await batch("prebackup-current", true); const target = await batch("prebackup-target"); const service = new BatchService(prisma, new BackupService(prisma, new FakeBackupProvider({ failCreate: true }))); const preview = await service.activationPreview({ actor, batchId: target.id }); await expect(service.activate({ actor, batchId: target.id, command: { confirmation: "ACTIVATE", confirm: true, reason: "TEST prebackup fail", expectedCurrentBatchId: current.id, previewToken: preview.previewToken }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "BACKUP_PROVIDER_UNAVAILABLE" }); expect(await prisma.batch.findUniqueOrThrow({ where: { id: current.id } })).toMatchObject({ isCurrent: true, status: "ACTIVE" }); expect(await prisma.batch.findUniqueOrThrow({ where: { id: target.id } })).toMatchObject({ isCurrent: false, status: "PLANNED" }); });
+  it("keeps the current production batch unchanged when the required pre-backup fails", async () => {
+    await prisma.batch.updateMany({ where: { isCurrent: true }, data: { isCurrent: false } });
+    const current = await batch("prebackup-current", true);
+    const target = await batch("prebackup-target");
+    const service = new BatchService(prisma, new BackupService(prisma, new FakeBackupProvider({ failCreate: true })));
+    const preview = await service.activationPreview({ actor, batchId: target.id });
+    const priorEnvironment = process.env.APP_ENV;
+    process.env.APP_ENV = "production";
+    try {
+      await expect(service.activate({ actor, batchId: target.id, command: { confirmation: "ACTIVATE", confirm: true, reason: "TEST prebackup fail", expectedCurrentBatchId: current.id, previewToken: preview.previewToken }, idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: "BACKUP_PROVIDER_UNAVAILABLE" });
+    } finally {
+      process.env.APP_ENV = priorEnvironment;
+    }
+    expect(await prisma.batch.findUniqueOrThrow({ where: { id: current.id } })).toMatchObject({ isCurrent: true, status: "ACTIVE" });
+    expect(await prisma.batch.findUniqueOrThrow({ where: { id: target.id } })).toMatchObject({ isCurrent: false, status: "PLANNED" });
+  });
 
 });
