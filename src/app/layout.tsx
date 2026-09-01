@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "智链宝 V2.0",
-  description: "智链宝 V2.0 项目基础骨架",
+  description: "宝应人才、企业与服务资源协同平台",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

@@ -67,7 +67,7 @@ test("unified permission service protects the admin shell for every key role", a
     const allowed = await allowedContext.newPage();
     await login(allowed, user.phone, user.password);
     await allowed.goto("/admin");
-    await expect(allowed.getByRole("heading", { name: "管理后台基础骨架" })).toBeVisible();
+    await expect(allowed.getByRole("heading", { name: "业务处理入口" })).toBeVisible();
     await allowedContext.close();
   }
 });

@@ -14,6 +14,15 @@ type LeadOption = {
   enterprise: { name: string } | null;
 };
 
+const leadStatusLabel: Record<string, string> = {
+  PENDING_TOWNSHIP_VERIFY: "待镇区核验",
+  PENDING_ENTERPRISE_LINK: "待关联企业",
+  NEED_MORE_INFO: "待补充",
+  MERGED: "已合并",
+  CLOSED: "已关闭",
+  CONVERTED: "已转正式需求",
+};
+
 async function command(path: string, body: Record<string, unknown>) {
   const response = await fetch(path, {
     method: "POST",
@@ -156,7 +165,7 @@ export function DemandLeadActions({
 
   function convert(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!window.confirm("将创建正式需求 DRAFT；本任务不会提交审核或发布。确认转换？")) return;
+    if (!window.confirm("将创建正式需求草稿；本操作不会提交审核或发布。确认转换？")) return;
     const form = new FormData(event.currentTarget);
     return run(() => command(`/api/v2/demand-leads/${leadId}/convert-to-draft`, {
       selectedContactId: value(form, "selectedContactId"),
@@ -214,13 +223,13 @@ export function DemandLeadActions({
 
       {status === "PENDING_TOWNSHIP_VERIFY" && enterpriseId && contacts.length > 0 && <form onSubmit={convert} className="space-y-3 rounded-2xl border-2 border-blue-200 bg-blue-50 p-4">
         <h3 className="font-semibold text-blue-950">转正式需求草稿</h3>
-        <p className="text-xs text-blue-800">高影响操作：只创建 DRAFT，不提交审核、不发布。</p>
+        <p className="text-xs text-blue-800">高影响操作：只创建草稿，不提交审核、不发布。</p>
         <select name="selectedContactId" required className={inputClass}><option value="">选择有效联系人</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name} · {contact.phone}</option>)}</select>
         <input name="title" required maxLength={200} placeholder="人工填写正式标题" className={inputClass} />
         <textarea name="originalDescription" required maxLength={5000} placeholder="核验后的正式原始描述" rows={5} className={inputClass} />
         <div className="grid gap-3 sm:grid-cols-2"><select name="demandType" required className={inputClass}><option value="">选择需求类型</option><option value="TECHNICAL">技术攻关</option><option value="TALENT">人才合作</option><option value="PROJECT">项目落地</option><option value="OTHER">其他需求</option></select><select name="urgency" required defaultValue="NORMAL" className={inputClass}><option value="NORMAL">普通</option><option value="URGENT">紧急</option></select></div>
         <textarea name="internalNote" maxLength={2000} placeholder="内部补充说明（可选）" rows={2} className={inputClass} />
-        <button disabled={pending} className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">确认转换 DRAFT</button>
+        <button disabled={pending} className="min-h-11 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">确认转换为草稿</button>
       </form>}
 
       {!terminal && <div className="grid gap-4 md:grid-cols-2">
@@ -232,7 +241,7 @@ export function DemandLeadActions({
             className={inputClass}
             onChange={(event) => void searchLeads(event.target.value).catch((error) => setMessage(error instanceof Error ? error.message : "线索搜索失败"))}
           />
-          {leadOptions.length > 0 && <ul aria-label="线索搜索结果" className="divide-y rounded-xl border border-slate-200">{leadOptions.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left text-sm hover:bg-slate-50" onClick={() => { setSelectedLead(option); setLeadOptions([]); }}><span className="font-medium">{option.businessNo} · {option.rawTitle}</span><span className="mt-1 block text-xs text-slate-500">{option.enterprise?.name ?? "未关联企业"} · {option.responsibleArea.name} · {option.status}</span></button></li>)}</ul>}
+          {leadOptions.length > 0 && <ul aria-label="线索搜索结果" className="divide-y rounded-xl border border-slate-200">{leadOptions.map((option) => <li key={option.id}><button type="button" className="w-full p-3 text-left text-sm hover:bg-slate-50" onClick={() => { setSelectedLead(option); setLeadOptions([]); }}><span className="font-medium">{option.businessNo} · {option.rawTitle}</span><span className="mt-1 block text-xs text-slate-500">{option.enterprise?.name ?? "未关联企业"} · {option.responsibleArea.name} · {leadStatusLabel[option.status] ?? "状态待确认"}</span></button></li>)}</ul>}
           {selectedLead && <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">已选择：{selectedLead.businessNo} · {selectedLead.rawTitle}</p>}
           <textarea name="reason" required maxLength={500} placeholder="合并原因" className={inputClass} />
           <button disabled={pending || !selectedLead} className={buttonClass}>预览并确认合并</button>
