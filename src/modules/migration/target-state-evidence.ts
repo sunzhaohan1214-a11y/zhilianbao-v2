@@ -5,7 +5,6 @@ import { LEGACY_ENTITY_TYPES } from "./types";
 export const MIGRATION_TARGET_STATE_SCHEMA_VERSION = "v1-migration-target-state-v1" as const;
 export const MIGRATION_TARGET_STATE_MODULES = [...LEGACY_ENTITY_TYPES, "ATTACHMENT"] as const;
 
-type TargetStateModule = typeof MIGRATION_TARGET_STATE_MODULES[number];
 type StateMapping = { sourceEntity: string; sourceId: string; targetEntity: string; targetId: string };
 type UnmappedSkip = { sourceEntity: string; sourceId: string };
 type AttachmentState = { sourceAttachmentKey: string; targetAttachmentId: string; targetSha256: string };
@@ -149,8 +148,11 @@ export async function collectMigrationTargetStateEvidence(input: {
   const rawMappings = await prisma.legacyMigrationMap.findMany({
     where: {
       sourceSystem: batch.sourceSystem,
-      lastMigrationBatchId: batch.id,
       sourceEntity: { in: [...MIGRATION_TARGET_STATE_MODULES] },
+      OR: [
+        { firstMigrationBatchId: batch.id },
+        { lastMigrationBatchId: batch.id },
+      ],
     },
     select: { sourceEntity: true, sourceId: true, targetEntity: true, targetId: true },
   });
