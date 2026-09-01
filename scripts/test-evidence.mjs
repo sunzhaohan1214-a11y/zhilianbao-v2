@@ -95,7 +95,7 @@ async function git(repoRoot, args) {
 
 async function gitBytes(repoRoot, args) {
   try {
-    const { stdout } = await execFile("git", args, { cwd: repoRoot, encoding: null, maxBuffer: 10 * 1024 * 1024 });
+    const { stdout } = await execFile("git", ["--no-replace-objects", ...args], { cwd: repoRoot, encoding: null, maxBuffer: 10 * 1024 * 1024 });
     return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
   }
   catch { fail("GIT_BINDING_FAILED", `git ${args.join(" ")} failed`); }
