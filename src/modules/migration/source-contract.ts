@@ -8,8 +8,10 @@ const dateTime = z.iso.datetime({ offset: true });
 export const REFERENCE_PACKAGE_SCHEMA_VERSION = "v1-package-reference-1" as const;
 export const REFERENCE_PACKAGE_ADAPTER = "V1_REFERENCE_PACKAGE" as const;
 export const REFERENCE_EXPORT_CLASSIFICATION = "REFERENCE_EXPORT_NOT_FINAL" as const;
+export const CONTROLLED_FULL_SCHEMA_VERSION = "v1-controlled-full-1" as const;
+export const CONTROLLED_FULL_CLASSIFICATION = "CONTROLLED_FULL_SNAPSHOT" as const;
 export const SNAPSHOT_SOURCE_CLASSIFICATIONS = [
-  "CONTROLLED_FULL_SNAPSHOT",
+  CONTROLLED_FULL_CLASSIFICATION,
   "SANITIZED_FIXTURE",
   "CONTROLLED_EXPORT",
   REFERENCE_EXPORT_CLASSIFICATION,
@@ -42,6 +44,9 @@ export const snapshotManifestSchema = z.object({
   const referenceMarked = manifest.schemaVersion === REFERENCE_PACKAGE_SCHEMA_VERSION
     || manifest.sourceAdapter === REFERENCE_PACKAGE_ADAPTER
     || manifest.sourceClassification === REFERENCE_EXPORT_CLASSIFICATION;
+  const controlledFullMarked = manifest.snapshotKind === "FULL"
+    || manifest.schemaVersion === CONTROLLED_FULL_SCHEMA_VERSION
+    || manifest.sourceClassification === CONTROLLED_FULL_CLASSIFICATION;
 
   if (referenceMarked) {
     if (manifest.schemaVersion !== REFERENCE_PACKAGE_SCHEMA_VERSION) {
@@ -67,9 +72,27 @@ export const snapshotManifestSchema = z.object({
     }
   }
 
-  if (manifest.snapshotKind === "FULL" && manifest.fullRehearsalEligible === false) {
-    context.addIssue({ code: "custom", path: ["fullRehearsalEligible"], message: "FULL snapshot must be explicitly eligible" });
+  if (controlledFullMarked) {
+    if (manifest.schemaVersion !== CONTROLLED_FULL_SCHEMA_VERSION) {
+      context.addIssue({ code: "custom", path: ["schemaVersion"], message: "FULL snapshot requires the recognized controlled schema" });
+    }
+    if (manifest.sourceAdapter !== "STANDARD_SNAPSHOT") {
+      context.addIssue({ code: "custom", path: ["sourceAdapter"], message: "FULL snapshot requires the standard controlled snapshot adapter" });
+    }
+    if (manifest.sourceClassification !== CONTROLLED_FULL_CLASSIFICATION) {
+      context.addIssue({ code: "custom", path: ["sourceClassification"], message: "FULL snapshot requires controlled-full provenance" });
+    }
+    if (manifest.applyEligible !== true) {
+      context.addIssue({ code: "custom", path: ["applyEligible"], message: "FULL snapshot requires explicit apply authorization" });
+    }
+    if (manifest.fullRehearsalEligible !== true) {
+      context.addIssue({ code: "custom", path: ["fullRehearsalEligible"], message: "FULL snapshot requires explicit rehearsal authorization" });
+    }
+    if (manifest.snapshotKind !== "FULL") {
+      context.addIssue({ code: "custom", path: ["snapshotKind"], message: "controlled-full provenance requires snapshotKind=FULL" });
+    }
   }
+
   if (manifest.governanceIssues) {
     const file = manifest.files[manifest.governanceIssues.path];
     if (!file || file.count !== manifest.governanceIssues.count || file.sha256 !== manifest.governanceIssues.sha256) {
@@ -92,14 +115,23 @@ export function isReferencePackageManifest(manifest: SnapshotManifest): boolean 
   return isReferenceOnlySnapshot(manifest);
 }
 
+export function isControlledFullSnapshot(manifest: SnapshotManifest): boolean {
+  return manifest.snapshotKind === "FULL"
+    && manifest.schemaVersion === CONTROLLED_FULL_SCHEMA_VERSION
+    && manifest.sourceAdapter === "STANDARD_SNAPSHOT"
+    && manifest.sourceClassification === CONTROLLED_FULL_CLASSIFICATION
+    && manifest.applyEligible === true
+    && manifest.fullRehearsalEligible === true
+    && !isReferenceOnlySnapshot(manifest);
+}
+
 export function manifestAllowsApply(manifest: SnapshotManifest): boolean {
+  if (manifest.snapshotKind === "FULL") return isControlledFullSnapshot(manifest);
   return !isReferenceOnlySnapshot(manifest) && manifest.applyEligible !== false;
 }
 
 export function manifestAllowsFullRehearsal(manifest: SnapshotManifest): boolean {
-  return manifest.snapshotKind === "FULL"
-    && !isReferenceOnlySnapshot(manifest)
-    && manifest.fullRehearsalEligible !== false;
+  return isControlledFullSnapshot(manifest);
 }
 
 const base = { sourceId, sourceUpdatedAt: dateTime.optional() };
