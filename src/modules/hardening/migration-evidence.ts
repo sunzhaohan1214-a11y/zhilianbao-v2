@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Stats } from "node:fs";
 import { lstat, open, type FileHandle } from "node:fs/promises";
-import { MIGRATION_TARGET_STATE_SCHEMA_VERSION } from "../migration/target-state-evidence.ts";
 import {
   MIGRATION_EVIDENCE_MANIFEST_PATHS,
   MIGRATION_EVIDENCE_MODULES,
@@ -31,10 +30,11 @@ type ExecutionResult = {
   writeSummary: Record<string, unknown>;
 };
 
+const MIGRATION_TARGET_STATE_SCHEMA_VERSION = "v1-migration-target-state-v1";
 const MAX_MIGRATION_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_MIGRATION_SNAPSHOT_FILE_BYTES = 128 * 1024 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
-const NON_ATTACHMENT_MODULES = MIGRATION_EVIDENCE_MODULES.filter((moduleName) => moduleName !== "ATTACHMENT");
+const NON_ATTACHMENT_MODULES: string[] = MIGRATION_EVIDENCE_MODULES.filter((moduleName) => moduleName !== "ATTACHMENT");
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
