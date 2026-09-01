@@ -16,7 +16,7 @@ This document maps the business paths in `docs/UAT_CHECKLIST.md` to repository a
 | SUPER-only system governance without broadening ADMIN | `system-admin.test.ts` unit/database suites | `route-matrix.test.ts`, `system-admin.spec.ts` | Named SUPER and ADMIN acceptance record; fake providers are not real cloud acceptance |
 | Chrome/Firefox/WebKit, timezone and weak network | `presence-e2e-time.test.ts` | `browser-compat.spec.ts`, `weak-network.spec.ts` | Required named device/browser/timestamp evidence |
 
-The confirmed automation gap is evidence governance itself: the former `scripts/test-evidence.mjs` only counted files. It did not bind evidence to a candidate commit, verify mapped files, or fail closed. The updated command now requires an exact 40-character SHA equal to a clean checked-out HEAD, verifies every mapped evidence path exists as a regular blob in that candidate and as a regular local file, and records SHA-256 from the candidate blob rather than trusting working-tree bytes.
+The confirmed automation gap is evidence governance itself: the former `scripts/test-evidence.mjs` only counted files. It did not bind evidence to a candidate commit, verify mapped files, or fail closed. The updated command now requires an exact 40-character SHA equal to a clean checked-out HEAD, derives layer inventory from that candidate tree, verifies every mapped evidence path exists as a regular blob in the candidate and as a regular local file, and records SHA-256 from the candidate blob rather than trusting working-tree bytes.
 
 ## Generate candidate-bound evidence
 

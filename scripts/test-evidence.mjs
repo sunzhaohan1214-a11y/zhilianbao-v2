@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { lstat, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 const execFile = promisify(execFileCallback);
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const ALLOWED_LAYERS = new Set(["unit", "integration", "database", "security", "e2e", "ci"]);
+const TEST_LAYERS = ["unit", "integration", "database", "e2e", "security"];
+const REGULAR_BLOB_MODES = new Set(["100644", "100755"]);
 
 const evidence = (layer, filePath) => ({ layer, path: filePath });
 const path = (code, description, evidenceFiles) => ({ code, description, evidence: evidenceFiles });
@@ -61,7 +63,7 @@ export async function buildUatPreflight({ repoRoot, candidateSha, headSha, workt
       if (!ALLOWED_LAYERS.has(entry.layer)) fail("INVALID_EVIDENCE_LAYER", `unsupported evidence layer: ${entry.layer}`);
       const candidateFile = candidateFiles.get(entry.path);
       if (!candidateFile) fail("EVIDENCE_NOT_IN_CANDIDATE", `${entry.path} is not present in candidate ${candidateSha}`);
-      if (candidateFile.type !== "blob" || !new Set(["100644", "100755"]).has(candidateFile.mode)) {
+      if (candidateFile.type !== "blob" || !REGULAR_BLOB_MODES.has(candidateFile.mode)) {
         fail("INVALID_CANDIDATE_FILE", `evidence must be a regular file in the candidate tree: ${entry.path}`);
       }
       const absolutePath = resolve(repoRoot, entry.path);
@@ -87,15 +89,6 @@ export async function buildUatPreflight({ repoRoot, candidateSha, headSha, workt
   };
 }
 
-async function countTests(directory) {
-  let total = 0;
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (entry.isDirectory()) total += await countTests(resolve(directory, entry.name));
-    else if (/\.(?:test|spec)\.(?:ts|tsx)$/.test(entry.name)) total += 1;
-  }
-  return total;
-}
-
 async function git(repoRoot, args) {
   return (await gitBytes(repoRoot, args)).toString("utf8").trim();
 }
@@ -116,6 +109,15 @@ function parseCandidateTree(bytes) {
     files.set(match[4], { mode: match[1], type: match[2], objectSha: match[3] });
   }
   return files;
+}
+
+export function countCandidateTests(candidateTree) {
+  return Object.fromEntries(TEST_LAYERS.map((layer) => [layer, [...candidateTree].filter(([filePath, entry]) => (
+    filePath.startsWith(`tests/${layer}/`)
+    && /\.(?:test|spec)\.(?:ts|tsx)$/.test(filePath)
+    && entry.type === "blob"
+    && REGULAR_BLOB_MODES.has(entry.mode)
+  )).length]));
 }
 
 function parseArguments(argv) {
@@ -175,7 +177,7 @@ async function main() {
     const bytes = await gitBytes(repoRoot, ["cat-file", "blob", treeEntry.objectSha]);
     candidateFiles.set(evidencePath, { ...treeEntry, sha256: createHash("sha256").update(bytes).digest("hex") });
   }));
-  const inventory = Object.fromEntries(await Promise.all(["unit", "integration", "database", "e2e", "security"].map(async (layer) => [layer, await countTests(resolve(repoRoot, "tests", layer))])));
+  const inventory = countCandidateTests(candidateTree);
   const report = await buildUatPreflight({ repoRoot, candidateSha, headSha, worktreeStatus, candidateFiles, inventory });
   if (!options.stdoutOnly) {
     await writeFile(outputFiles[0], `${JSON.stringify(report, null, 2)}\n`);

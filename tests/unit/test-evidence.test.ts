@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 // @ts-expect-error The production evidence entrypoint is intentionally plain Node ESM.
-import { buildUatPreflight, prepareFileOutput } from "../../scripts/test-evidence.mjs";
+import { buildUatPreflight, countCandidateTests, prepareFileOutput } from "../../scripts/test-evidence.mjs";
 
 const candidateSha = "1".repeat(40);
 const temporaryDirectories: string[] = [];
@@ -66,6 +66,19 @@ describe("UAT automation preflight evidence", () => {
     await writeFile(join(input.repoRoot, evidencePath), "locally changed but hidden from status\n");
     const report = await buildUatPreflight(input);
     expect(report.paths[0].evidence[0].sha256).toBe(createHash("sha256").update(candidateBytes).digest("hex"));
+  });
+
+  it("counts test inventory from the candidate tree instead of local files", () => {
+    const regularBlob = { mode: "100644", type: "blob" };
+    const candidateTree = new Map([
+      ["tests/unit/tracked.test.ts", regularBlob],
+      ["tests/unit/nested/tracked.spec.tsx", regularBlob],
+      ["tests/e2e/tracked.spec.ts", regularBlob],
+      ["tests/security/link.test.ts", { mode: "120000", type: "blob" }],
+      ["docs/not-a-test.test.ts", regularBlob],
+    ]);
+
+    expect(countCandidateTests(candidateTree)).toEqual({ unit: 2, integration: 0, database: 0, e2e: 1, security: 0 });
   });
 
   it("rejects a symlinked artifacts directory without deleting external reports", async () => {
