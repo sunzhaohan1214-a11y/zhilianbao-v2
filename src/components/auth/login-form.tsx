@@ -8,6 +8,7 @@ export function LoginForm({ adminContactPhone }: { adminContactPhone: string }) 
   const router = useRouter();
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,7 +45,26 @@ export function LoginForm({ adminContactPhone }: { adminContactPhone: string }) 
       </Field>
       <Field>
         <FieldLabel htmlFor="login-password">密码</FieldLabel>
-        <Input id="login-password" name="password" type="password" autoComplete="current-password" required placeholder="请输入密码" />
+        <div className="relative">
+          <Input
+            className="pr-20"
+            id="login-password"
+            name="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            required
+            placeholder="请输入密码"
+          />
+          <button
+            aria-label={showPassword ? "隐藏密码" : "显示密码"}
+            aria-pressed={showPassword}
+            className="absolute inset-y-0 right-1 my-auto min-h-10 rounded-lg px-3 text-sm font-medium text-brand hover:bg-brand-soft"
+            onClick={() => setShowPassword((current) => !current)}
+            type="button"
+          >
+            {showPassword ? "隐藏" : "显示"}
+          </button>
+        </div>
       </Field>
       {error && <FieldError>{error}</FieldError>}
       <Button className="w-full" disabled={pending} isLoading={pending} size="lg" type="submit">

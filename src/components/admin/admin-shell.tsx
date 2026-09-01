@@ -36,10 +36,14 @@ export function AdminShell({ children, capabilities }: Readonly<{ children: Reac
     <div className="baoying-atmosphere min-h-dvh lg:grid lg:grid-cols-[256px_minmax(0,1fr)]">
       <aside className="border-b border-separator bg-surface lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto lg:border-b-0 lg:border-r">
         <div className="border-b border-separator px-5 py-5">
-          <Link className="flex items-center gap-3" href="/admin">
-            <BrandLogo />
-            <span><strong className="block text-[17px] tracking-tight">智链宝</strong><span className="block text-xs text-muted">产业协同工作台</span></span>
-          </Link>
+          <div className="flex items-center justify-between gap-3">
+            <Link className="flex min-w-0 items-center gap-3" href="/admin">
+              <BrandLogo />
+              <span className="min-w-0"><strong className="block truncate text-[17px] tracking-tight">智链宝</strong><span className="block truncate text-xs text-muted">产业协同工作台</span></span>
+            </Link>
+            <Link aria-label="返回手机端首页" className="min-h-11 shrink-0 content-center rounded-xl border border-separator px-3 text-sm font-medium text-muted hover:bg-surface-secondary hover:text-foreground lg:hidden" href="/">手机端</Link>
+          </div>
+          <Link className="mt-4 hidden min-h-11 items-center justify-center rounded-xl border border-separator text-sm font-medium text-muted hover:bg-surface-secondary hover:text-foreground lg:flex" href="/">返回手机端</Link>
         </div>
         <nav aria-label="管理后台导航" className="flex gap-2 overflow-x-auto px-4 py-3 lg:block lg:space-y-5 lg:overflow-visible lg:py-5">
           {groups.map((group) => (
