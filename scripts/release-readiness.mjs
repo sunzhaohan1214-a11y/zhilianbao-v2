@@ -69,6 +69,23 @@ async function ensureMigrationBundle() {
   await migrationBundlePromise;
 }
 
+function requireIdempotentRerunActions(evidence) {
+  const counts = evidence?.actionCounts;
+  if (!counts || typeof counts !== "object" || Array.isArray(counts)
+    || !Number.isSafeInteger(evidence.sourceActionCount) || evidence.sourceActionCount < 0) {
+    throw new Error("MIGRATION_RERUN_WRITE_ATTESTATION_INVALID");
+  }
+  const actions = ["CREATE", "LINK", "UPDATE", "SKIP", "REVIEW", "FAILED"];
+  if (Object.keys(counts).length !== actions.length || !actions.every((action) => Number.isSafeInteger(counts[action]) && counts[action] >= 0)) {
+    throw new Error("MIGRATION_RERUN_WRITE_ATTESTATION_INVALID");
+  }
+  const total = actions.reduce((sum, action) => sum + counts[action], 0);
+  if (total !== evidence.sourceActionCount || counts.CREATE !== 0 || counts.LINK !== 0 || counts.UPDATE !== 0
+    || counts.REVIEW !== 0 || counts.FAILED !== 0 || counts.SKIP !== evidence.sourceActionCount) {
+    throw new Error("MIGRATION_RERUN_WRITE_ATTESTATION_INVALID");
+  }
+}
+
 async function attestMigrationTargetState(request) {
   if (mode !== "prod") throw new Error("MIGRATION_TARGET_STATE_ATTESTATION_PROD_ONLY");
   const migrationDatabaseUrl = process.env.V1_MIGRATION_DATABASE_URL?.trim();
@@ -96,7 +113,9 @@ async function attestMigrationTargetState(request) {
       },
       maxBuffer: 4 * 1024 * 1024,
     });
-    return JSON.parse(await readFile(output, "utf8"));
+    const evidence = JSON.parse(await readFile(output, "utf8"));
+    if (request.phase === "RERUN") requireIdempotentRerunActions(evidence);
+    return evidence;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
