@@ -14,3 +14,4 @@ export * from "./report";
 export * from "./snapshot-provider";
 export * from "./source-contract";
 export * from "./types";
+export * from "./v1-package-adapter";
