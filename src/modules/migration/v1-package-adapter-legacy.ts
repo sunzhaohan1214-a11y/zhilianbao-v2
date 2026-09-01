@@ -3,6 +3,7 @@ import { copyFile, lstat, mkdir, readFile, realpath, readdir, writeFile } from "
 import path from "node:path";
 import { z } from "zod";
 import { ENTITY_FILES } from "./snapshot-provider";
+import { resolveSafeMigrationOutputPath } from "./private-output-guard";
 import { LEGACY_ENTITY_TYPES, type LegacyEntityType } from "./types";
 
 const sha256Pattern = /^[a-f0-9]{64}$/;
@@ -364,7 +365,7 @@ function buildDispatchLocationMatchPreview(organizations: readonly JsonObject[],
 
 export async function prepareV1DataPackage(input: { sourceRoot: string; outputRoot: string }): Promise<PreparedV1PackageSummary> {
   const sourceRoot = await realpath(input.sourceRoot);
-  const outputRoot = path.resolve(input.outputRoot);
+  const outputRoot = await resolveSafeMigrationOutputPath(input.outputRoot);
   const sourcePrefix = sourceRoot.endsWith(path.sep) ? sourceRoot : `${sourceRoot}${path.sep}`;
   const outputPrefix = outputRoot.endsWith(path.sep) ? outputRoot : `${outputRoot}${path.sep}`;
   if (outputRoot === sourceRoot || outputRoot.startsWith(sourcePrefix) || sourceRoot.startsWith(outputPrefix)) {

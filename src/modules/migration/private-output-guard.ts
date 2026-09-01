@@ -45,9 +45,11 @@ function isMissingPath(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
-async function assertNoSymlinkedOutputAncestor(worktree: string, outputRoot: string): Promise<void> {
-  const relative = path.relative(worktree, outputRoot);
-  let current = worktree;
+async function assertNoSymlinkedOutputAncestor(outputRoot: string): Promise<void> {
+  const resolved = path.resolve(outputRoot);
+  const filesystemRoot = path.parse(resolved).root;
+  const relative = path.relative(filesystemRoot, resolved);
+  let current = filesystemRoot;
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     current = path.join(current, segment);
     try {
@@ -59,6 +61,14 @@ async function assertNoSymlinkedOutputAncestor(worktree: string, outputRoot: str
       throw new Error("V1_PACKAGE_OUTPUT_PATH_UNVERIFIED");
     }
   }
+}
+
+export async function resolveSafeMigrationOutputPath(outputRoot: string): Promise<string> {
+  const resolved = path.resolve(outputRoot);
+  await assertNoSymlinkedOutputAncestor(resolved);
+  const ancestor = await existingAncestor(resolved);
+  const ancestorReal = await realpath(ancestor);
+  return path.resolve(ancestorReal, path.relative(ancestor, resolved));
 }
 
 function migrationWorkIsIgnored(gitignore: string): boolean {
@@ -73,14 +83,13 @@ function migrationWorkIsIgnored(gitignore: string): boolean {
 }
 
 export async function assertPrivateMigrationOutput(outputRoot: string): Promise<void> {
-  const resolved = path.resolve(outputRoot);
+  const resolved = await resolveSafeMigrationOutputPath(outputRoot);
   const worktree = await findGitWorktreeRoot(path.dirname(resolved));
   if (!worktree) return;
   const privateRoot = path.join(worktree, ".migration-work");
   if (!within(privateRoot, resolved) || resolved === privateRoot) {
     throw new Error("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
   }
-  await assertNoSymlinkedOutputAncestor(worktree, resolved);
   let gitignore: string;
   try {
     gitignore = await readFile(path.join(worktree, ".gitignore"), "utf8");

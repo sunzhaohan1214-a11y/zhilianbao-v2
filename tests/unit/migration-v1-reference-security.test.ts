@@ -155,6 +155,14 @@ describe("V1 reference source safety contract", () => {
     const aliasRoot = await mkdtemp(path.join(tmpdir(), "v1-reference-symlink-alias-"));
     temporaryRoots.push(aliasRoot);
     await symlink(path.join(root, "tracked"), path.join(aliasRoot, "outside-alias"), "dir");
-    await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "outside-alias", "private"))).rejects.toThrow("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
+    await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "outside-alias", "private"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
+  });
+
+  it("rejects symlinked output ancestors even when no Git worktree is present", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "v1-reference-outside-git-"));
+    const aliasRoot = await mkdtemp(path.join(tmpdir(), "v1-reference-outside-alias-"));
+    temporaryRoots.push(root, aliasRoot);
+    await symlink(root, path.join(aliasRoot, "output-alias"), "dir");
+    await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "output-alias", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
   });
 });

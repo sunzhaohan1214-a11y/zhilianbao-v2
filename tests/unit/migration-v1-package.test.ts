@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -123,5 +123,13 @@ describe("V1 local reference package adapter", () => {
   it("rejects output nested inside the sensitive source package", async () => {
     const fixture = await createPackage();
     await expect(prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: path.join(fixture.root, "generated") })).rejects.toThrow("V1_PACKAGE_OUTPUT_PATH_OVERLAP");
+  });
+
+  it("rejects a symlinked output alias back into the sensitive source package", async () => {
+    const fixture = await createPackage();
+    const aliasRoot = path.join(path.dirname(fixture.root), "source-alias");
+    await symlink(fixture.root, aliasRoot, "dir");
+    await expect(prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: path.join(aliasRoot, "generated") })).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
+    await expect(readFile(path.join(fixture.root, "generated", "snapshot.json"), "utf8")).rejects.toThrow();
   });
 });
