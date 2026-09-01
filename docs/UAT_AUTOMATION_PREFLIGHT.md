@@ -26,7 +26,7 @@ Run from a clean checkout of the candidate:
 npm run test:evidence -- --candidate-sha=<40-character-candidate-sha>
 ```
 
-The command writes ignored local artifacts `artifacts/uat-automation-preflight.json` and `artifacts/uat-automation-preflight.md`. In file-output mode it removes reports from an earlier run before validation. Any malformed/mismatched SHA, dirty worktree, uncommitted evidence path, missing file, symlink or invalid matrix entry exits non-zero without leaving a stale success report behind.
+The command writes ignored local artifacts `artifacts/uat-automation-preflight.json` and `artifacts/uat-automation-preflight.md`. In file-output mode it first rejects a symlinked or non-directory `artifacts` path, then removes reports from an earlier run before validation. Any malformed/mismatched SHA, dirty worktree, uncommitted evidence path, missing file, symlink or invalid matrix entry exits non-zero without leaving a stale success report behind or following an output-directory link outside the repository.
 
 ## Required verification
 

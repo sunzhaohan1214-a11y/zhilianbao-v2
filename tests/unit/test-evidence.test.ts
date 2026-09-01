@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 // @ts-expect-error The production evidence entrypoint is intentionally plain Node ESM.
-import { buildUatPreflight } from "../../scripts/test-evidence.mjs";
+import { buildUatPreflight, prepareFileOutput } from "../../scripts/test-evidence.mjs";
 
 const candidateSha = "1".repeat(40);
 const temporaryDirectories: string[] = [];
@@ -53,5 +53,19 @@ describe("UAT automation preflight evidence", () => {
     await expect(buildUatPreflight({ ...input, trackedPaths: [] })).rejects.toMatchObject({ code: "EVIDENCE_NOT_IN_CANDIDATE" });
     await rm(join(input.repoRoot, evidencePath));
     await expect(buildUatPreflight(input)).rejects.toMatchObject({ code: "EVIDENCE_MISSING" });
+  });
+
+  it("rejects a symlinked artifacts directory without deleting external reports", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "zlb-uat-output-"));
+    const externalDirectory = await mkdtemp(join(tmpdir(), "zlb-uat-external-"));
+    temporaryDirectories.push(repoRoot, externalDirectory);
+    const externalReport = join(externalDirectory, "uat-automation-preflight.json");
+    await writeFile(externalReport, "stale but external\n");
+    await symlink(externalDirectory, join(repoRoot, "artifacts"), "dir");
+
+    await expect(prepareFileOutput(join(repoRoot, "artifacts"), [
+      join(repoRoot, "artifacts", "uat-automation-preflight.json"),
+    ])).rejects.toMatchObject({ code: "INVALID_OUTPUT_DIRECTORY" });
+    await expect(readFile(externalReport, "utf8")).resolves.toBe("stale but external\n");
   });
 });

@@ -114,6 +114,21 @@ function renderMarkdown(report) {
   return `# UAT automation preflight evidence\n\n- Candidate SHA: \`${report.candidateSha}\`\n- Status: \`${report.status}\`\n- Release ready: \`NO\`\n- Generated at: \`${report.generatedAt}\`\n\nAutomation evidence is not named UAT sign-off.\n\n| UAT path | Automation status | Candidate-bound evidence |\n| --- | --- | --- |\n${rows}\n\n## Remaining blockers\n\n${report.blockers.map((blocker) => `- ${blocker}`).join("\n")}\n`;
 }
 
+export async function prepareFileOutput(outputDirectory, outputFiles) {
+  let stats;
+  try {
+    stats = await lstat(outputDirectory);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    await mkdir(outputDirectory, { recursive: true });
+    stats = await lstat(outputDirectory);
+  }
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    fail("INVALID_OUTPUT_DIRECTORY", "artifacts output must be a regular directory, not a symlink or other file");
+  }
+  await Promise.all(outputFiles.map((filePath) => rm(filePath, { force: true })));
+}
+
 async function main() {
   const repoRoot = process.cwd();
   const arguments_ = process.argv.slice(2);
@@ -124,8 +139,7 @@ async function main() {
   ];
   const stdoutOnlyRequested = arguments_.includes("--stdout-only");
   if (!stdoutOnlyRequested) {
-    await mkdir(outputDirectory, { recursive: true });
-    await Promise.all(outputFiles.map((filePath) => rm(filePath, { force: true })));
+    await prepareFileOutput(outputDirectory, outputFiles);
   }
   const options = parseArguments(arguments_);
   const headSha = await git(repoRoot, ["rev-parse", "HEAD"]);
