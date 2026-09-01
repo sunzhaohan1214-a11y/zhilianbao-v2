@@ -38,7 +38,7 @@ test("SUPER exercises settings, audit, and the explicit-fake restore lifecycle",
   const prisma = getPrismaClient(); const hiddenAttachments = await prisma.attachment.findMany({ where: { isTemporary: false, uploadStatus: "UPLOADED", scanStatus: "PASSED" }, select: { id: true } });
   await login(page, e2eUsers.superAdmin);
   await page.goto("/admin");
-  await expect(page.getByRole("link", { name: "系统治理" })).toBeVisible();
+  await expect(page.locator('a[href="/admin/system"]').first()).toBeVisible();
   await page.goto("/admin/system");
   await expect(page.getByRole("heading", { name: "系统治理" })).toBeVisible();
   await expect(page.getByText("Runtime NOT_WIRED").first()).toBeVisible();
