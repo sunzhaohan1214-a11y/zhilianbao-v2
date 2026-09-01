@@ -6,7 +6,7 @@ import {
   MIGRATION_EVIDENCE_MODULES,
   validateMigrationEvidence as validateMigrationEvidenceCore,
   type EvidenceValidation,
-} from "./release-readiness-core";
+} from "./release-readiness-core.ts";
 
 export type ApprovedMigrationTarget = {
   environment?: string;

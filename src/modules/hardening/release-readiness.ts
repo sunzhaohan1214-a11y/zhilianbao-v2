@@ -1,3 +1,3 @@
-export * from "./release-readiness-core";
-export { validateMigrationEvidence } from "./migration-evidence";
-export type { ApprovedMigrationTarget } from "./migration-evidence";
+export * from "./release-readiness-core.ts";
+export { validateMigrationEvidence } from "./migration-evidence.ts";
+export type { ApprovedMigrationTarget } from "./migration-evidence.ts";
