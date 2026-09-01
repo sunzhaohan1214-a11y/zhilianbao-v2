@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { disconnectPrismaClient, getPrismaClient } from "@/lib/db/prisma";
+import { collectMigrationBatchWriteAttestation } from "@/modules/migration/batch-write-attestation";
 import { normalizeMigrationEnvironment } from "@/modules/migration/environment-guard";
 import { collectMigrationTargetStateEvidence } from "@/modules/migration/target-state-evidence";
 
@@ -35,14 +36,19 @@ async function main() {
     throw new Error("MIGRATION_TARGET_STATE_ARGUMENTS_REQUIRED");
   }
 
-  const evidence = await collectMigrationTargetStateEvidence({
-    prisma: getPrismaClient(),
-    batchId,
-    candidateSha,
-    manifestSha256,
-    targetEnvironment,
-    targetMigrationDatabase,
-  });
+  const prisma = getPrismaClient();
+  const [targetState, writeAttestation] = await Promise.all([
+    collectMigrationTargetStateEvidence({
+      prisma,
+      batchId,
+      candidateSha,
+      manifestSha256,
+      targetEnvironment,
+      targetMigrationDatabase,
+    }),
+    collectMigrationBatchWriteAttestation({ prisma, batchId }),
+  ]);
+  const evidence = { ...targetState, ...writeAttestation };
   const outputPath = path.resolve(options.output ?? path.join(".migration-output", batchId, "target-state.json"));
   await mkdir(path.dirname(outputPath), { recursive: true });
   const content = `${JSON.stringify(evidence, null, 2)}\n`;
