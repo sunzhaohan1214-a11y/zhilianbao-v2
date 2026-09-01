@@ -8,6 +8,7 @@
 snapshotKind=SAMPLE
 sourceClassification=REFERENCE_EXPORT_NOT_FINAL
 isSanitized=false
+applyEligible=false
 fullRehearsalEligible=false
 ```
 
@@ -54,4 +55,4 @@ npm run migration:v1 -- \
 
 ## 5. 安全
 
-适配器拒绝 symlink、路径穿越、源/输出重叠、checksum 覆盖不完整和 manifest 数量/字节/哈希不一致。dry-run 问题报告不写原始 `sourceSnapshot` 或候选对象标识，只保留来源 ID、问题代码和候选数量。
+适配器拒绝 symlink（包括私有输出目录任一已存在的 symlink 祖先）、路径穿越、源/输出重叠、checksum 覆盖不完整和 manifest 数量/字节/哈希不一致。dry-run 问题报告不写原始 `sourceSnapshot` 或候选对象标识，只保留来源 ID、问题代码和候选数量。

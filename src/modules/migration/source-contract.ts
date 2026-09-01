@@ -8,6 +8,8 @@ const dateTime = z.iso.datetime({ offset: true });
 export const REFERENCE_PACKAGE_SCHEMA_VERSION = "v1-package-reference-1" as const;
 export const REFERENCE_PACKAGE_ADAPTER = "V1_REFERENCE_PACKAGE" as const;
 export const REFERENCE_EXPORT_CLASSIFICATION = "REFERENCE_EXPORT_NOT_FINAL" as const;
+export const SANITIZED_FIXTURE_SCHEMA_VERSION = "v1-fixture-1" as const;
+export const SANITIZED_FIXTURE_CLASSIFICATION = "SANITIZED_FIXTURE" as const;
 export const CONTROLLED_FULL_SCHEMA_VERSION = "v1-controlled-full-1" as const;
 export const CONTROLLED_FULL_CLASSIFICATION = "CONTROLLED_FULL_SNAPSHOT" as const;
 export const SNAPSHOT_SOURCE_CLASSIFICATIONS = [
@@ -47,6 +49,8 @@ export const snapshotManifestSchema = z.object({
   const controlledFullMarked = manifest.snapshotKind === "FULL"
     || manifest.schemaVersion === CONTROLLED_FULL_SCHEMA_VERSION
     || manifest.sourceClassification === CONTROLLED_FULL_CLASSIFICATION;
+  const sanitizedFixtureMarked = manifest.schemaVersion === SANITIZED_FIXTURE_SCHEMA_VERSION
+    || manifest.sourceClassification === SANITIZED_FIXTURE_CLASSIFICATION;
 
   if (referenceMarked) {
     if (manifest.schemaVersion !== REFERENCE_PACKAGE_SCHEMA_VERSION) {
@@ -93,6 +97,30 @@ export const snapshotManifestSchema = z.object({
     }
   }
 
+  if (sanitizedFixtureMarked) {
+    if (manifest.schemaVersion !== SANITIZED_FIXTURE_SCHEMA_VERSION) {
+      context.addIssue({ code: "custom", path: ["schemaVersion"], message: "sanitized fixture schema version is immutable" });
+    }
+    if (manifest.sourceAdapter !== "STANDARD_SNAPSHOT") {
+      context.addIssue({ code: "custom", path: ["sourceAdapter"], message: "sanitized fixture requires the standard snapshot adapter" });
+    }
+    if (manifest.sourceClassification !== SANITIZED_FIXTURE_CLASSIFICATION) {
+      context.addIssue({ code: "custom", path: ["sourceClassification"], message: "sanitized fixture classification is required" });
+    }
+    if (!manifest.isSanitized) {
+      context.addIssue({ code: "custom", path: ["isSanitized"], message: "sanitized fixture must declare sanitized content" });
+    }
+    if (manifest.snapshotKind !== "SAMPLE") {
+      context.addIssue({ code: "custom", path: ["snapshotKind"], message: "sanitized fixture must remain SAMPLE" });
+    }
+    if (manifest.applyEligible !== true) {
+      context.addIssue({ code: "custom", path: ["applyEligible"], message: "sanitized fixture requires explicit apply authorization" });
+    }
+    if (manifest.fullRehearsalEligible !== false) {
+      context.addIssue({ code: "custom", path: ["fullRehearsalEligible"], message: "sanitized fixture is not eligible for FULL rehearsal" });
+    }
+  }
+
   if (manifest.governanceIssues) {
     const file = manifest.files[manifest.governanceIssues.path];
     if (!file || file.count !== manifest.governanceIssues.count || file.sha256 !== manifest.governanceIssues.sha256) {
@@ -125,9 +153,20 @@ export function isControlledFullSnapshot(manifest: SnapshotManifest): boolean {
     && !isReferenceOnlySnapshot(manifest);
 }
 
+export function isAuthorizedSampleSnapshot(manifest: SnapshotManifest): boolean {
+  return manifest.snapshotKind === "SAMPLE"
+    && manifest.schemaVersion === SANITIZED_FIXTURE_SCHEMA_VERSION
+    && manifest.sourceAdapter === "STANDARD_SNAPSHOT"
+    && manifest.sourceClassification === SANITIZED_FIXTURE_CLASSIFICATION
+    && manifest.isSanitized
+    && manifest.applyEligible === true
+    && manifest.fullRehearsalEligible === false
+    && !isReferenceOnlySnapshot(manifest);
+}
+
 export function manifestAllowsApply(manifest: SnapshotManifest): boolean {
   if (manifest.snapshotKind === "FULL") return isControlledFullSnapshot(manifest);
-  return !isReferenceOnlySnapshot(manifest) && manifest.applyEligible !== false;
+  return isAuthorizedSampleSnapshot(manifest);
 }
 
 export function manifestAllowsFullRehearsal(manifest: SnapshotManifest): boolean {

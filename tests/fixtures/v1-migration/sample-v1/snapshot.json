@@ -7,6 +7,10 @@
   "isSanitized": true,
   "snapshotKind": "SAMPLE",
   "mappingVersion": "m3-006-v1",
+  "sourceAdapter": "STANDARD_SNAPSHOT",
+  "sourceClassification": "SANITIZED_FIXTURE",
+  "applyEligible": true,
+  "fullRehearsalEligible": false,
   "files": {
     "entities/announcements.ndjson": { "count": 1, "sha256": "d00fe02be806816fccca3bdc36d3317ff2e4b210f8bd58f4f89ded6e6ec07757" },
     "entities/demands.ndjson": { "count": 3, "sha256": "7179a03f9abddd71872a10f196552c024d7be6eb3e1ec1ba554ab9e4a2195dbe" },

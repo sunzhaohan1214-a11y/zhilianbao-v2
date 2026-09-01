@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,6 +83,12 @@ describe("V1 reference source safety contract", () => {
     expect(manifestAllowsFullRehearsal(parsed)).toBe(false);
     expect(() => snapshotManifestSchema.parse({ ...fixture.snapshot, snapshotKind: "FULL" })).toThrow();
     expect(() => snapshotManifestSchema.parse({ ...fixture.snapshot, sourceClassification: "CONTROLLED_EXPORT" })).toThrow();
+
+    const repackaged = { ...fixture.snapshot, schemaVersion: "arbitrary-repacked-schema", applyEligible: true } as Record<string, unknown>;
+    for (const field of ["sourceAdapter", "sourceClassification", "governanceIssues"]) delete repackaged[field];
+    const parsedRepackaged = snapshotManifestSchema.parse(repackaged);
+    expect(manifestAllowsApply(parsedRepackaged)).toBe(false);
+    expect(manifestAllowsFullRehearsal(parsedRepackaged)).toBe(false);
   });
 
   it("feeds verified governance blockers into preview and suppresses inferred organizations", async () => {
@@ -130,5 +136,25 @@ describe("V1 reference source safety contract", () => {
     await mkdir(path.join(unsafeRoot, ".git"));
     await writeFile(path.join(unsafeRoot, ".gitignore"), "node_modules\n", "utf8");
     await expect(assertPrivateMigrationOutput(path.join(unsafeRoot, ".migration-work", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
+  });
+
+  it("rejects a symlinked private-output root or existing descendant", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "v1-reference-symlink-root-"));
+    temporaryRoots.push(root);
+    await mkdir(path.join(root, ".git"));
+    await mkdir(path.join(root, "tracked"));
+    await writeFile(path.join(root, ".gitignore"), "/.migration-work\n", "utf8");
+    await symlink(path.join(root, "tracked"), path.join(root, ".migration-work"), "dir");
+    await expect(assertPrivateMigrationOutput(path.join(root, ".migration-work", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
+
+    await rm(path.join(root, ".migration-work"));
+    await mkdir(path.join(root, ".migration-work"));
+    await symlink(path.join(root, "tracked"), path.join(root, ".migration-work", "prepared"), "dir");
+    await expect(assertPrivateMigrationOutput(path.join(root, ".migration-work", "prepared", "private"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
+
+    const aliasRoot = await mkdtemp(path.join(tmpdir(), "v1-reference-symlink-alias-"));
+    temporaryRoots.push(aliasRoot);
+    await symlink(path.join(root, "tracked"), path.join(aliasRoot, "outside-alias"), "dir");
+    await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "outside-alias", "private"))).rejects.toThrow("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
   });
 });

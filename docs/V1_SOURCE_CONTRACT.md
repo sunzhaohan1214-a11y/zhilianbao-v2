@@ -50,6 +50,8 @@ The strict manifest contains:
 
 Startup re-reads every declared file, verifies SHA-256 and line count, then reconciles file counts to entity counts before any batch can run. Unknown manifest keys fail strict validation.
 
+SAMPLE preview may read an unrecognized strict manifest, but SAMPLE database apply is fail-closed. It requires the exact recognized `v1-fixture-1` sanitized-fixture schema plus `sourceAdapter=STANDARD_SNAPSHOT`, `sourceClassification=SANITIZED_FIXTURE`, `isSanitized=true`, `applyEligible=true`, and `fullRehearsalEligible=false`. Missing or self-invented authorization/provenance remains preview-only. The reference-package schema is always apply-ineligible.
+
 ## 4. Entity semantics
 
 The TypeScript Zod schemas in `src/modules/migration/source-contract.ts` are the executable contract. Unknown non-empty fields generate `UNMAPPED_SOURCE_FIELD`; invalid required fields generate `MIGRATION_SOURCE_INVALID`. Neither case is silently discarded.
@@ -92,4 +94,4 @@ Formal cutover: prohibited
 
 ## 8. Local reference-package adapter
 
-`docs/V1_REFERENCE_PACKAGE_ADAPTER.md` describes the checksum-verified adapter for the local reference export. Its output is always `SAMPLE`, `isSanitized=false`, and ineligible for FULL rehearsal evidence.
+`docs/V1_REFERENCE_PACKAGE_ADAPTER.md` describes the checksum-verified adapter for the local reference export. Its output is always `SAMPLE`, `isSanitized=false`, apply-ineligible, and ineligible for FULL rehearsal evidence.

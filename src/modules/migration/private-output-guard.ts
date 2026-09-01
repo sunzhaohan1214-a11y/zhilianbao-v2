@@ -25,9 +25,9 @@ async function hasGitMarker(directory: string): Promise<boolean> {
 }
 
 async function findGitWorktreeRoot(start: string): Promise<string | null> {
-  let current = await existingAncestor(start);
+  let current = await realpath(await existingAncestor(start));
   while (true) {
-    if (await hasGitMarker(current)) return realpath(current);
+    if (await hasGitMarker(current)) return current;
     const parent = path.dirname(current);
     if (parent === current) return null;
     current = parent;
@@ -39,6 +39,26 @@ function within(root: string, candidate: string): boolean {
   const resolvedCandidate = path.resolve(candidate);
   const prefix = resolvedRoot.endsWith(path.sep) ? resolvedRoot : `${resolvedRoot}${path.sep}`;
   return resolvedCandidate === resolvedRoot || resolvedCandidate.startsWith(prefix);
+}
+
+function isMissingPath(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+async function assertNoSymlinkedOutputAncestor(worktree: string, outputRoot: string): Promise<void> {
+  const relative = path.relative(worktree, outputRoot);
+  let current = worktree;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink()) throw new Error("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
+    } catch (error) {
+      if (isMissingPath(error)) return;
+      if (error instanceof Error && error.message === "V1_PACKAGE_OUTPUT_SYMLINK_REJECTED") throw error;
+      throw new Error("V1_PACKAGE_OUTPUT_PATH_UNVERIFIED");
+    }
+  }
 }
 
 function migrationWorkIsIgnored(gitignore: string): boolean {
@@ -60,6 +80,7 @@ export async function assertPrivateMigrationOutput(outputRoot: string): Promise<
   if (!within(privateRoot, resolved) || resolved === privateRoot) {
     throw new Error("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
   }
+  await assertNoSymlinkedOutputAncestor(worktree, resolved);
   let gitignore: string;
   try {
     gitignore = await readFile(path.join(worktree, ".gitignore"), "utf8");
