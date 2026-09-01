@@ -22,6 +22,7 @@ async function main() {
   const result = await prepareV1DataPackage({ sourceRoot: options.source, outputRoot: options.output });
   console.info(JSON.stringify({
     status: "PREPARED_REFERENCE_BUNDLE",
+    bundleId: result.snapshotId,
     sourceClassification: result.sourceClassification,
     checksumVerifiedFileCount: result.checksumVerifiedFileCount,
     entities: result.entities,
@@ -30,7 +31,6 @@ async function main() {
     mapCandidateCount: result.mapCandidateCount,
     dispatchLocationCandidateCount: result.dispatchLocationCandidateCount,
     dispatchLocationMatchPreviewCount: result.dispatchLocationMatchPreviewCount,
-    outputRoot: result.outputRoot,
   }));
 }
 

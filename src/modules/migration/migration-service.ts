@@ -2,7 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { MigrationReconciliation, MigrationPreviewIssue } from "./types";
-import { isReferenceOnlySnapshot, type SnapshotManifest } from "./source-contract";
+import { manifestAllowsApply, manifestAllowsFullRehearsal, type SnapshotManifest } from "./source-contract";
 import type { AttachmentPreviewResult } from "./attachment-reconciliation";
 import { MigrationError } from "./errors";
 import { MigrationRepository } from "./repository";
@@ -27,12 +27,6 @@ type PersistInput = {
 
 function json(value: unknown): Prisma.InputJsonValue { return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue; }
 
-function assertFullSnapshotEligible(manifest: SnapshotManifest, mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL") {
-  if (mode === "FULL_REHEARSAL" && (manifest.snapshotKind !== "FULL" || isReferenceOnlySnapshot(manifest))) {
-    throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
-  }
-}
-
 export class MigrationService {
   constructor(
     private readonly repository = new MigrationRepository(),
@@ -45,14 +39,21 @@ export class MigrationService {
     await authorizeActor({ actor, action, resource: { resourceType: "migration_batch", requiredScope: "SYSTEM" } });
   }
 
-  private async assertGovernanceReady(provider: LegacySourceProvider) {
-    if (!provider.listGovernanceIssues) return;
-    const unresolved: MigrationPreviewIssue[] = [];
-    for await (const issue of provider.listGovernanceIssues()) {
-      if (issue.severity === "BLOCKER" || issue.severity === "REVIEW") unresolved.push(issue);
+  private assertManifestMode(manifest: SnapshotManifest, mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL") {
+    if (!manifestAllowsApply(manifest)) {
+      throw new MigrationError("MIGRATION_SOURCE_NOT_AUTHORIZED_FOR_APPLY", "该来源包仅允许 preview，不得执行数据库 apply");
     }
-    if (unresolved.length > 0) {
-      throw new MigrationError("MIGRATION_GOVERNANCE_REVIEW_REQUIRED", `存在 ${unresolved.length} 项未解决治理问题，禁止业务写入`);
+    if (mode === "FULL_REHEARSAL" && !manifestAllowsFullRehearsal(manifest)) {
+      throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控且获授权的 V1 full snapshot");
+    }
+  }
+
+  private async assertNoUnresolvedSourceGovernance(provider: LegacySourceProvider) {
+    if (!provider.listIssues) return;
+    for await (const issue of provider.listIssues()) {
+      if (issue.severity === "BLOCKER" || issue.severity === "REVIEW") {
+        throw new MigrationError("MIGRATION_SOURCE_GOVERNANCE_UNRESOLVED", "来源包仍有未解决的 BLOCKER/REVIEW，禁止 apply");
+      }
     }
   }
 
@@ -67,15 +68,15 @@ export class MigrationService {
   }) {
     assertMigrationEnvironmentAllowed(process.env.APP_ENV, "APPLY");
     await this.authorize(input.actor, "migration.execute");
-    assertFullSnapshotEligible(input.manifest, input.mode);
-    await this.assertGovernanceReady(input.provider);
+    this.assertManifestMode(input.manifest, input.mode);
+    await this.assertNoUnresolvedSourceGovernance(input.provider);
     return new MigrationApplyRunner(this.repository, this.storage, this.scanner).run(input);
   }
 
   async persistRehearsal(input: PersistInput) {
     assertMigrationEnvironmentAllowed(process.env.APP_ENV, "APPLY");
     await this.authorize(input.actor, "migration.execute");
-    assertFullSnapshotEligible(input.manifest, input.mode);
+    this.assertManifestMode(input.manifest, input.mode);
     let batchId: string;
     try {
       const batch = await this.repository.prisma.migrationBatch.create({ data: {

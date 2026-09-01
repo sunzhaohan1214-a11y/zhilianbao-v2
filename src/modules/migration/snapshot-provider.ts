@@ -5,12 +5,10 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import {
   attachmentManifestRecordSchema,
-  isReferenceOnlySnapshot,
-  migrationGovernanceIssueSchema,
+  migrationSourceIssueSchema,
   snapshotManifestSchema,
   validateLegacyPayload,
   type LegacyAttachmentManifestRecord,
-  type MigrationGovernanceIssue,
   type SnapshotManifest,
 } from "./source-contract";
 import { canonicalJson, sourceFingerprint } from "./fingerprint";
@@ -23,20 +21,28 @@ const ENTITY_FILES: Record<LegacyEntityType, string> = {
   REIMBURSEMENT: "entities/reimbursements.ndjson", HELP: "entities/helps.ndjson", ANNOUNCEMENT: "entities/announcements.ndjson",
   ROLE: "entities/roles.ndjson",
 };
+
 export const GOVERNANCE_ISSUES_FILE = "governance/manual-review.ndjson";
 
 export interface LegacySourceProvider {
   describeSnapshot(): Promise<{ manifest: SnapshotManifest; manifestSha256: string }>;
   list(entityType: LegacyEntityType): AsyncGenerator<{ record?: LegacyRecord; issues: MigrationPreviewIssue[] }>;
   listAttachments(): AsyncGenerator<{ record?: LegacyAttachmentManifestRecord; issues: MigrationPreviewIssue[] }>;
-  listGovernanceIssues?(): AsyncGenerator<MigrationGovernanceIssue>;
+  listIssues?(): AsyncGenerator<MigrationPreviewIssue>;
   getAttachment(record: LegacyAttachmentManifestRecord): Promise<Buffer>;
 }
 
 function digest(value: Buffer | string): string { return createHash("sha256").update(value).digest("hex"); }
 
+function issueKey(issue: MigrationPreviewIssue): string {
+  return `${issue.sourceEntity}:${issue.sourceId}`;
+}
+
 export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvider {
   private rootReal?: string;
+  private descriptionPromise?: Promise<{ manifest: SnapshotManifest; manifestSha256: string }>;
+  private governanceIssuesPromise?: Promise<MigrationPreviewIssue[]>;
+
   constructor(readonly root: string) {}
 
   private async safePath(relativePath: string, mustExist = true): Promise<string> {
@@ -53,12 +59,9 @@ export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvid
     return candidateReal;
   }
 
-  async describeSnapshot() {
+  private async loadDescription() {
     const manifestPath = await this.safePath("snapshot.json");
     const manifest = snapshotManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
-    if (isReferenceOnlySnapshot(manifest) && !manifest.files[GOVERNANCE_ISSUES_FILE]) {
-      throw new Error("MIGRATION_REFERENCE_GOVERNANCE_EVIDENCE_MISSING");
-    }
     for (const [relativePath, expected] of Object.entries(manifest.files)) {
       const filePath = await this.safePath(relativePath);
       const buffer = await readFile(filePath);
@@ -75,12 +78,48 @@ export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvid
     return { manifest, manifestSha256 };
   }
 
+  async describeSnapshot() {
+    return this.descriptionPromise ??= this.loadDescription();
+  }
+
   private async *lines(relativePath: string): AsyncGenerator<{ line: string; lineNumber: number }> {
     const filePath = await this.safePath(relativePath);
     const stream = createReadStream(filePath, { encoding: "utf8" });
     const reader = createInterface({ input: stream, crlfDelay: Infinity });
     let lineNumber = 0;
-    for await (const line of reader) { lineNumber += 1; if (line.trim()) yield { line, lineNumber }; }
+    for await (const line of reader) {
+      lineNumber += 1;
+      if (line.trim()) yield { line, lineNumber };
+    }
+  }
+
+  private async loadGovernanceIssues(): Promise<MigrationPreviewIssue[]> {
+    const { manifest } = await this.describeSnapshot();
+    if (!manifest.governanceIssues) return [];
+    const issues: MigrationPreviewIssue[] = [];
+    for await (const { line, lineNumber } of this.lines(manifest.governanceIssues.path)) {
+      let raw: unknown;
+      try { raw = JSON.parse(line); }
+      catch { throw new Error(`MIGRATION_SOURCE_GOVERNANCE_ISSUE_INVALID:LINE-${lineNumber}`); }
+      const parsed = migrationSourceIssueSchema.safeParse(raw);
+      if (!parsed.success) throw new Error(`MIGRATION_SOURCE_GOVERNANCE_ISSUE_INVALID:LINE-${lineNumber}`);
+      issues.push(parsed.data);
+    }
+    if (issues.length !== manifest.governanceIssues.count) throw new Error("MIGRATION_SOURCE_GOVERNANCE_ISSUE_COUNT_MISMATCH");
+    return issues;
+  }
+
+  private async governanceIssues(): Promise<MigrationPreviewIssue[]> {
+    return this.governanceIssuesPromise ??= this.loadGovernanceIssues();
+  }
+
+  async *listIssues(): AsyncGenerator<MigrationPreviewIssue> {
+    for (const issue of await this.governanceIssues()) yield issue;
+  }
+
+  private async issuesFor(sourceEntity: MigrationPreviewIssue["sourceEntity"], ...sourceIds: string[]): Promise<MigrationPreviewIssue[]> {
+    const keys = new Set(sourceIds.map((sourceIdValue) => `${sourceEntity}:${sourceIdValue}`));
+    return (await this.governanceIssues()).filter((issue) => keys.has(issueKey(issue)));
   }
 
   async *list(entityType: LegacyEntityType): AsyncGenerator<{ record?: LegacyRecord; issues: MigrationPreviewIssue[] }> {
@@ -88,14 +127,24 @@ export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvid
     for await (const { line, lineNumber } of this.lines(ENTITY_FILES[entityType])) {
       let raw: unknown;
       try { raw = JSON.parse(line); }
-      catch { yield { issues: [{ sourceEntity: entityType, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, message: "NDJSON 不是合法 JSON" }] }; continue; }
+      catch {
+        yield { issues: [{ sourceEntity: entityType, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, message: "NDJSON 不是合法 JSON" }] };
+        continue;
+      }
       const validated = validateLegacyPayload(entityType, raw);
       if (validated.record && seen.has(validated.record.sourceId)) {
         yield { issues: [{ sourceEntity: entityType, sourceId: validated.record.sourceId, code: "MIGRATION_DUPLICATE_SOURCE_ID", severity: "BLOCKER", message: "同一实体文件包含重复 sourceId" }] };
         continue;
       }
-      if (validated.record) seen.add(validated.record.sourceId);
-      yield validated;
+      if (!validated.record) {
+        yield validated;
+        continue;
+      }
+      seen.add(validated.record.sourceId);
+      const governance = await this.issuesFor(entityType, validated.record.sourceId);
+      const issues = [...validated.issues, ...governance];
+      if (issues.some((issue) => issue.severity === "BLOCKER" || issue.severity === "REVIEW")) yield { issues };
+      else yield { record: validated.record, issues };
     }
   }
 
@@ -104,30 +153,18 @@ export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvid
     for await (const { line, lineNumber } of this.lines(relativePath)) {
       let raw: unknown;
       try { raw = JSON.parse(line); }
-      catch { yield { issues: [{ sourceEntity: "ATTACHMENT" as const, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, message: "附件 manifest 不是合法 JSON" }] }; continue; }
-      const parsed = attachmentManifestRecordSchema.safeParse(raw);
-      if (!parsed.success) yield { issues: parsed.error.issues.map((issue) => ({ sourceEntity: "ATTACHMENT" as const, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, field: issue.path.join("."), message: issue.message })) };
-      else yield { record: parsed.data, issues: [] };
-    }
-  }
-
-  async *listGovernanceIssues(): AsyncGenerator<MigrationGovernanceIssue> {
-    const manifestPath = await this.safePath("snapshot.json");
-    const manifest = snapshotManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
-    if (!manifest.files[GOVERNANCE_ISSUES_FILE]) return;
-    for await (const { line, lineNumber } of this.lines(GOVERNANCE_ISSUES_FILE)) {
-      let raw: unknown;
-      try { raw = JSON.parse(line); }
       catch {
-        yield { sourceEntity: "SNAPSHOT", sourceId: `LINE-${lineNumber}`, code: "MIGRATION_GOVERNANCE_ISSUE_INVALID", severity: "BLOCKER", message: "治理问题清单不是合法 JSON" };
+        yield { issues: [{ sourceEntity: "ATTACHMENT" as const, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, message: "附件 manifest 不是合法 JSON" }] };
         continue;
       }
-      const parsed = migrationGovernanceIssueSchema.safeParse(raw);
+      const parsed = attachmentManifestRecordSchema.safeParse(raw);
       if (!parsed.success) {
-        yield { sourceEntity: "SNAPSHOT", sourceId: `LINE-${lineNumber}`, code: "MIGRATION_GOVERNANCE_ISSUE_INVALID", severity: "BLOCKER", message: "治理问题清单字段不符合严格合同" };
-      } else {
-        yield parsed.data;
+        yield { issues: parsed.error.issues.map((validationIssue) => ({ sourceEntity: "ATTACHMENT" as const, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, field: validationIssue.path.join("."), message: validationIssue.message })) };
+        continue;
       }
+      const governance = await this.issuesFor("ATTACHMENT", parsed.data.sourceAttachmentId, parsed.data.sourceId);
+      if (governance.some((issue) => issue.severity === "BLOCKER" || issue.severity === "REVIEW")) yield { issues: governance };
+      else yield { record: parsed.data, issues: governance };
     }
   }
 
