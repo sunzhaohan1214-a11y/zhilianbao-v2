@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
-import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -46,12 +46,11 @@ export class UatPreflightError extends Error {
 
 function fail(code, message) { throw new UatPreflightError(code, message); }
 
-export async function buildUatPreflight({ repoRoot, candidateSha, headSha, worktreeStatus = "", trackedPaths, paths = UAT_PATHS, inventory = {}, generatedAt = new Date().toISOString() }) {
+export async function buildUatPreflight({ repoRoot, candidateSha, headSha, worktreeStatus = "", candidateFiles, paths = UAT_PATHS, inventory = {}, generatedAt = new Date().toISOString() }) {
   if (!SHA_PATTERN.test(candidateSha ?? "")) fail("INVALID_CANDIDATE_SHA", "candidate SHA must be exactly 40 lowercase hexadecimal characters");
   if (!SHA_PATTERN.test(headSha ?? "") || candidateSha !== headSha) fail("CANDIDATE_SHA_MISMATCH", "candidate SHA must equal the checked-out HEAD");
   if (worktreeStatus.trim()) fail("DIRTY_WORKTREE", "tracked or untracked worktree changes prevent commit-bound evidence");
 
-  const committedPaths = new Set(trackedPaths);
   const codes = new Set();
   const mappedPaths = [];
   for (const item of paths) {
@@ -60,15 +59,18 @@ export async function buildUatPreflight({ repoRoot, candidateSha, headSha, workt
     const indexedEvidence = [];
     for (const entry of item.evidence) {
       if (!ALLOWED_LAYERS.has(entry.layer)) fail("INVALID_EVIDENCE_LAYER", `unsupported evidence layer: ${entry.layer}`);
-      if (!committedPaths.has(entry.path)) fail("EVIDENCE_NOT_IN_CANDIDATE", `${entry.path} is not present in candidate ${candidateSha}`);
+      const candidateFile = candidateFiles.get(entry.path);
+      if (!candidateFile) fail("EVIDENCE_NOT_IN_CANDIDATE", `${entry.path} is not present in candidate ${candidateSha}`);
+      if (candidateFile.type !== "blob" || !new Set(["100644", "100755"]).has(candidateFile.mode)) {
+        fail("INVALID_CANDIDATE_FILE", `evidence must be a regular file in the candidate tree: ${entry.path}`);
+      }
       const absolutePath = resolve(repoRoot, entry.path);
       const relativePath = relative(repoRoot, absolutePath);
       if (!relativePath || relativePath.startsWith("..") || resolve(repoRoot, relativePath) !== absolutePath) fail("INVALID_EVIDENCE_PATH", `evidence path escapes repository: ${entry.path}`);
       let stats;
       try { stats = await lstat(absolutePath); } catch { fail("EVIDENCE_MISSING", `evidence file is missing: ${entry.path}`); }
       if (stats.isSymbolicLink() || !stats.isFile()) fail("INVALID_EVIDENCE_FILE", `evidence must be a regular non-symlink file: ${entry.path}`);
-      const bytes = await readFile(absolutePath);
-      indexedEvidence.push({ ...entry, sha256: createHash("sha256").update(bytes).digest("hex") });
+      indexedEvidence.push({ ...entry, sha256: candidateFile.sha256 });
     }
     mappedPaths.push({ code: item.code, description: item.description, status: "EVIDENCE_INDEXED", evidence: indexedEvidence });
   }
@@ -95,8 +97,25 @@ async function countTests(directory) {
 }
 
 async function git(repoRoot, args) {
-  try { return (await execFile("git", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 })).stdout.trim(); }
+  return (await gitBytes(repoRoot, args)).toString("utf8").trim();
+}
+
+async function gitBytes(repoRoot, args) {
+  try {
+    const { stdout } = await execFile("git", args, { cwd: repoRoot, encoding: null, maxBuffer: 10 * 1024 * 1024 });
+    return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+  }
   catch { fail("GIT_BINDING_FAILED", `git ${args.join(" ")} failed`); }
+}
+
+function parseCandidateTree(bytes) {
+  const files = new Map();
+  for (const record of bytes.toString("utf8").split("\0").filter(Boolean)) {
+    const match = /^(\d+) ([^ ]+) ([0-9a-f]+)\t(.*)$/s.exec(record);
+    if (!match) fail("GIT_TREE_PARSE_FAILED", "candidate tree contains an unparseable entry");
+    files.set(match[4], { mode: match[1], type: match[2], objectSha: match[3] });
+  }
+  return files;
 }
 
 function parseArguments(argv) {
@@ -144,10 +163,20 @@ async function main() {
   const options = parseArguments(arguments_);
   const headSha = await git(repoRoot, ["rev-parse", "HEAD"]);
   const candidateSha = options.candidateSha ?? process.env.GITHUB_SHA ?? headSha;
+  if (!SHA_PATTERN.test(candidateSha)) fail("INVALID_CANDIDATE_SHA", "candidate SHA must be exactly 40 lowercase hexadecimal characters");
+  if (candidateSha !== headSha) fail("CANDIDATE_SHA_MISMATCH", "candidate SHA must equal the checked-out HEAD");
   const worktreeStatus = await git(repoRoot, ["status", "--porcelain", "--untracked-files=all"]);
-  const trackedPaths = (await git(repoRoot, ["ls-tree", "-r", "--name-only", candidateSha])).split("\n").filter(Boolean);
+  const candidateTree = parseCandidateTree(await gitBytes(repoRoot, ["ls-tree", "-r", "-z", candidateSha]));
+  const evidencePaths = new Set(UAT_PATHS.flatMap((item) => item.evidence.map((entry) => entry.path)));
+  const candidateFiles = new Map();
+  await Promise.all([...evidencePaths].map(async (evidencePath) => {
+    const treeEntry = candidateTree.get(evidencePath);
+    if (!treeEntry) return;
+    const bytes = await gitBytes(repoRoot, ["cat-file", "blob", treeEntry.objectSha]);
+    candidateFiles.set(evidencePath, { ...treeEntry, sha256: createHash("sha256").update(bytes).digest("hex") });
+  }));
   const inventory = Object.fromEntries(await Promise.all(["unit", "integration", "database", "e2e", "security"].map(async (layer) => [layer, await countTests(resolve(repoRoot, "tests", layer))])));
-  const report = await buildUatPreflight({ repoRoot, candidateSha, headSha, worktreeStatus, trackedPaths, inventory });
+  const report = await buildUatPreflight({ repoRoot, candidateSha, headSha, worktreeStatus, candidateFiles, inventory });
   if (!options.stdoutOnly) {
     await writeFile(outputFiles[0], `${JSON.stringify(report, null, 2)}\n`);
     await writeFile(outputFiles[1], renderMarkdown(report));

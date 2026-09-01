@@ -14,14 +14,20 @@ async function fixture() {
   temporaryDirectories.push(repoRoot);
   const evidencePath = "tests/unit/example.test.ts";
   await mkdir(join(repoRoot, "tests/unit"), { recursive: true });
-  await writeFile(join(repoRoot, evidencePath), "export {};\n");
+  const candidateBytes = "export {};\n";
+  await writeFile(join(repoRoot, evidencePath), candidateBytes);
   return {
     evidencePath,
+    candidateBytes,
     input: {
       repoRoot,
       candidateSha,
       headSha: candidateSha,
-      trackedPaths: [evidencePath],
+      candidateFiles: new Map([[evidencePath, {
+        mode: "100644",
+        type: "blob",
+        sha256: createHash("sha256").update(candidateBytes).digest("hex"),
+      }]]),
       paths: [{ code: "EXAMPLE", description: "example", evidence: [{ layer: "unit", path: evidencePath }] }],
       inventory: { unit: 1 },
       generatedAt: "2026-09-01T00:00:00.000Z",
@@ -50,9 +56,16 @@ describe("UAT automation preflight evidence", () => {
   it("fails closed for a dirty worktree, uncommitted path, or missing evidence file", async () => {
     const { input, evidencePath } = await fixture();
     await expect(buildUatPreflight({ ...input, worktreeStatus: "?? untracked" })).rejects.toMatchObject({ code: "DIRTY_WORKTREE" });
-    await expect(buildUatPreflight({ ...input, trackedPaths: [] })).rejects.toMatchObject({ code: "EVIDENCE_NOT_IN_CANDIDATE" });
+    await expect(buildUatPreflight({ ...input, candidateFiles: new Map() })).rejects.toMatchObject({ code: "EVIDENCE_NOT_IN_CANDIDATE" });
     await rm(join(input.repoRoot, evidencePath));
     await expect(buildUatPreflight(input)).rejects.toMatchObject({ code: "EVIDENCE_MISSING" });
+  });
+
+  it("hashes the candidate blob instead of changed working-tree bytes", async () => {
+    const { input, evidencePath, candidateBytes } = await fixture();
+    await writeFile(join(input.repoRoot, evidencePath), "locally changed but hidden from status\n");
+    const report = await buildUatPreflight(input);
+    expect(report.paths[0].evidence[0].sha256).toBe(createHash("sha256").update(candidateBytes).digest("hex"));
   });
 
   it("rejects a symlinked artifacts directory without deleting external reports", async () => {
