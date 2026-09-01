@@ -68,7 +68,7 @@ export default async function DemandsPage({ searchParams }: { searchParams: Prom
             <option value="OTHER">其他需求</option>
           </Select>
         </div>
-        <Button variant="secondary">查询</Button>
+        <Button type="submit" variant="secondary">查询</Button>
       </form>
 
       <FormalDemandList result={result} />

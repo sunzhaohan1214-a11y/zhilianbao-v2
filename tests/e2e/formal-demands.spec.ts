@@ -324,3 +324,40 @@ test("formal demand publish, claim, collaborate and ADMIN_DIRECT paths preserve 
   expect(await prisma.outboxEvent.count({ where: { aggregateId: demandId, publishedAt: { not: null } } })).toBeGreaterThanOrEqual(7);
   await authenticated.context.close();
 });
+
+test("mobile demand filters submit and preserve the mine scope", async ({ browser }) => {
+  const suffix = randomUUID().slice(0, 8);
+  const targetTitle = `E2E 我的筛选目标 ${suffix}`;
+  const otherTitle = `E2E 我的筛选排除 ${suffix}`;
+
+  let authenticated = await login(browser, e2eUsers.admin);
+  const createAndPublish = async (title: string) => {
+    const created = await post(authenticated.page, "/api/v2/demands", demandPayload(title, [], "ADMIN_DIRECT"));
+    expect(created.status).toBe(201);
+    const demandId = created.payload.data.id as string;
+    expect((await post(authenticated.page, `/api/v2/demands/${demandId}/direct-publish`, {})).status).toBe(200);
+    return demandId;
+  };
+  const targetId = await createAndPublish(targetTitle);
+  const otherId = await createAndPublish(otherTitle);
+  await authenticated.context.close();
+
+  authenticated = await login(browser, e2eUsers.normal);
+  expect((await post(authenticated.page, `/api/v2/demands/${targetId}/claim`, {}, { "Idempotency-Key": `filter-target-${suffix}` })).status).toBe(200);
+  expect((await post(authenticated.page, `/api/v2/demands/${otherId}/claim`, {}, { "Idempotency-Key": `filter-other-${suffix}` })).status).toBe(200);
+  await authenticated.page.goto("/demands?mine=true");
+  await expect(authenticated.page.getByRole("link", { name: new RegExp(targetTitle) })).toBeVisible();
+  await expect(authenticated.page.getByRole("link", { name: new RegExp(otherTitle) })).toBeVisible();
+
+  await authenticated.page.getByLabel("搜索需求").fill(targetTitle);
+  await authenticated.page.getByLabel("需求状态").selectOption("IN_PROGRESS");
+  await authenticated.page.getByRole("button", { name: "查询" }).click();
+
+  await expect.poll(() => {
+    const query = new URL(authenticated.page.url()).searchParams;
+    return { keyword: query.get("keyword"), mine: query.get("mine"), status: query.get("status") };
+  }).toEqual({ keyword: targetTitle, mine: "true", status: "IN_PROGRESS" });
+  await expect(authenticated.page.getByRole("link", { name: new RegExp(targetTitle) })).toBeVisible();
+  await expect(authenticated.page.getByRole("link", { name: new RegExp(otherTitle) })).toHaveCount(0);
+  await authenticated.context.close();
+});
