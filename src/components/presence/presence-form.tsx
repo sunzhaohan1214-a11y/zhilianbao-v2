@@ -82,8 +82,8 @@ export function PresenceForm({
         return;
       }
       window.localStorage.removeItem(draftKey);
-      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Full navigation avoids the post-submit RSC race.
-      window.location.assign("/presence");
+      // Replace the submitted form in history while retaining the full navigation that avoids the post-submit RSC race.
+      window.location.replace("/presence");
     } catch {
       setMessage("网络连接中断，报备内容已保留。请检查网络后重新提交；若服务端已保存，重试不会重复创建记录。");
       setRetryAvailable(true);

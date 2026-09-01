@@ -67,7 +67,7 @@ test("@weak-network Presence preserves its draft after a failed request and supp
   expect(calls).toBe(2);
 });
 
-test("@weak-network Presence response-lost retry returns the committed record exactly once", async ({ page }) => {
+test("@weak-network Presence response-lost retry returns the committed record exactly once and replaces stale form history", async ({ page }) => {
   await login(page);
   let calls = 0;
   await page.route("**/api/v2/presence", async (route) => {
@@ -82,6 +82,7 @@ test("@weak-network Presence response-lost retry returns the committed record ex
     }
   });
   const note = "E2E Presence 响应丢失幂等";
+  await page.goto("/presence");
   const interval = await fillPresence(page, 32, note);
 
   await page.getByRole("button", { name: "提交报备" }).click();
@@ -90,6 +91,7 @@ test("@weak-network Presence response-lost retry returns the committed record ex
   await page.getByRole("button", { name: "重新提交" }).click();
   await expect(page).toHaveURL(/\/presence$/);
   await expect(page.getByText(note, { exact: true })).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("presence-new-draft"))).toBeNull();
 
   const response = await page.request.get("/api/v2/presence/me");
   expect(response.ok()).toBe(true);
@@ -97,4 +99,9 @@ test("@weak-network Presence response-lost retry returns the committed record ex
   const arrivalAt = new Date(interval.arrivalAtIso).toISOString();
   expect(payload.data.filter((item) => item.arrivalAt === arrivalAt && item.note === note)).toHaveLength(1);
   expect(calls).toBe(2);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/presence$/);
+  await expect(page.getByLabel("备注（选填）")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "提交报备" })).toHaveCount(0);
 });
