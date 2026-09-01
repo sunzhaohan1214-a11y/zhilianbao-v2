@@ -2,7 +2,7 @@ import { Prisma } from "@/generated/prisma/client";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { MigrationReconciliation, MigrationPreviewIssue } from "./types";
-import type { SnapshotManifest } from "./source-contract";
+import { manifestAllowsApply, manifestAllowsFullRehearsal, type SnapshotManifest } from "./source-contract";
 import type { AttachmentPreviewResult } from "./attachment-reconciliation";
 import { MigrationError } from "./errors";
 import { MigrationRepository } from "./repository";
@@ -39,6 +39,24 @@ export class MigrationService {
     await authorizeActor({ actor, action, resource: { resourceType: "migration_batch", requiredScope: "SYSTEM" } });
   }
 
+  private assertManifestMode(manifest: SnapshotManifest, mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL") {
+    if (!manifestAllowsApply(manifest)) {
+      throw new MigrationError("MIGRATION_SOURCE_NOT_AUTHORIZED_FOR_APPLY", "该来源包仅允许 preview，不得执行数据库 apply");
+    }
+    if (mode === "FULL_REHEARSAL" && !manifestAllowsFullRehearsal(manifest)) {
+      throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控且获授权的 V1 full snapshot");
+    }
+  }
+
+  private async assertNoUnresolvedSourceGovernance(provider: LegacySourceProvider) {
+    if (!provider.listIssues) return;
+    for await (const issue of provider.listIssues()) {
+      if (issue.severity === "BLOCKER" || issue.severity === "REVIEW") {
+        throw new MigrationError("MIGRATION_SOURCE_GOVERNANCE_UNRESOLVED", "来源包仍有未解决的 BLOCKER/REVIEW，禁止 apply");
+      }
+    }
+  }
+
   async applySnapshot(input: {
     actor: PermissionActor;
     provider: LegacySourceProvider;
@@ -50,14 +68,15 @@ export class MigrationService {
   }) {
     assertMigrationEnvironmentAllowed(process.env.APP_ENV, "APPLY");
     await this.authorize(input.actor, "migration.execute");
-    if (input.mode === "FULL_REHEARSAL" && input.manifest.snapshotKind !== "FULL") throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
+    this.assertManifestMode(input.manifest, input.mode);
+    await this.assertNoUnresolvedSourceGovernance(input.provider);
     return new MigrationApplyRunner(this.repository, this.storage, this.scanner).run(input);
   }
 
   async persistRehearsal(input: PersistInput) {
     assertMigrationEnvironmentAllowed(process.env.APP_ENV, "APPLY");
     await this.authorize(input.actor, "migration.execute");
-    if (input.mode === "FULL_REHEARSAL" && input.manifest.snapshotKind !== "FULL") throw new MigrationError("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT", "没有受控 V1 full snapshot");
+    this.assertManifestMode(input.manifest, input.mode);
     let batchId: string;
     try {
       const batch = await this.repository.prisma.migrationBatch.create({ data: {

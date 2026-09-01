@@ -1,9 +1,12 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { matchPolicy } from "@/modules/entity-matching";
 import { analyzeLegacyRecord, mappedDemandStatus, mappedDemandType, mappedReimbursementStatus } from "@/modules/migration/adapters";
 import { sourceFingerprint } from "@/modules/migration/fingerprint";
 import { runMigrationPreview } from "@/modules/migration/preview-runner";
+import { writeMigrationReports } from "@/modules/migration/report";
 import { emptyModule, reconciliationFormulaPass } from "@/modules/migration/reconciliation";
 import { SnapshotDirectoryLegacySourceProvider } from "@/modules/migration/snapshot-provider";
 import { loadMigrationResolutions } from "@/modules/migration/resolutions";
@@ -101,5 +104,24 @@ describe("M3-006 sample rehearsal and reconciliation", () => {
     expect(reconciliationFormulaPass(moduleResult)).toBe(true);
     moduleResult.reviewCount = 0;
     expect(reconciliationFormulaPass(moduleResult)).toBe(false);
+  });
+
+  it("does not copy source snapshots, candidate IDs, phones, or emails into portable issue reports", async () => {
+    const result = await runMigrationPreview(new SnapshotDirectoryLegacySourceProvider(fixture), { mode: "SAMPLE_REHEARSAL", fullSnapshotAvailable: false });
+    const output = await mkdtemp(path.join(tmpdir(), "migration-report-redaction-"));
+    try {
+      const paths = await writeMigrationReports(output, result.reconciliation, [{
+        sourceEntity: "PERSON", sourceId: "PERSON-PRIVATE", code: "TEST", severity: "REVIEW", message: "review",
+        candidates: ["private-target-id"], sourceSnapshot: { phone: "13812345678", email: "private@example.com" },
+      }]);
+      const report = await readFile(paths.issuesJson, "utf8");
+      expect(report).not.toContain("sourceSnapshot");
+      expect(report).not.toContain("private-target-id");
+      expect(report).not.toContain("13812345678");
+      expect(report).not.toContain("private@example.com");
+      expect(report).toContain('"candidateCount": 1');
+    } finally {
+      await rm(output, { recursive: true, force: true });
+    }
   });
 });

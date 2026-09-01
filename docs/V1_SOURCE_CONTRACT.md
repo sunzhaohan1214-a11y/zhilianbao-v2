@@ -2,7 +2,7 @@
 
 > Contract version: `v1-fixture-1`  
 > Source: read-only directory snapshot only  
-> Status: sample contract implemented; real V1 contract pending a controlled schema/snapshot
+> Status: sample contract and local reference-package adapter implemented; real V1 FULL contract still requires a controlled final schema/snapshot
 
 ## 1. Boundary
 
@@ -57,6 +57,7 @@ The TypeScript Zod schemas in `src/modules/migration/source-contract.ts` are the
 Key semantics:
 
 - Person matching uses the shared `matchPerson`; missing, invalid, duplicate, same-name/different-phone, and archived identities require governance. Historical alumni default to no account.
+- Reference-package contacts use `INTERNAL_STAFF`; not-yet-active batch members use `FUTURE_MEMBER_CANDIDATE`. Neither value creates a current BatchMembership or account without separate current-employment governance.
 - Enterprise matching uses shared `matchEnterprise`; credit code is authoritative. A no-code name/area match is review-only. Coordinates never change responsible area.
 - Talent matching uses shared `matchTalent`; resume text never creates structured phone/email. Missing recommender is review-only.
 - Policy uses the shared four-key matcher: title + publishing department + date + primary-file SHA-256.
@@ -88,3 +89,7 @@ Sample rehearsal: supported
 Full rehearsal: FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT
 Formal cutover: prohibited
 ```
+
+## 8. Local reference-package adapter
+
+`docs/V1_REFERENCE_PACKAGE_ADAPTER.md` describes the checksum-verified adapter for the local reference export. Its output is always `SAMPLE`, `isSanitized=false`, and ineligible for FULL rehearsal evidence.
