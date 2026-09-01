@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { adminNavigation, formalDemandNavigationCapabilities } from "@/components/admin/admin-shell";
 import { visibleAdminWorkbenchEntries } from "@/components/admin/admin-workbench-model";
@@ -30,5 +32,11 @@ describe("admin UI contract", () => {
     expect(demandLeadNextStepLabel.PENDING_TOWNSHIP_VERIFY).toContain("转正式草稿");
     expect(demandLeadNextStepLabel.PENDING_TOWNSHIP_VERIFY).not.toContain("关联");
     expect(demandLeadNextStepLabel.PENDING_ENTERPRISE_LINK).toContain("关联已有企业");
+  });
+
+  it("provides a direct way back to the mobile workspace", () => {
+    const source = readFileSync(join(process.cwd(), "src/components/admin/admin-shell.tsx"), "utf8");
+    expect(source).toContain("返回手机端");
+    expect(source).toContain('href="/"');
   });
 });

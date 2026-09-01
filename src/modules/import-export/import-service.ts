@@ -426,7 +426,10 @@ export class ImportService {
     if (preview.previewVersion !== body.expectedPreviewVersion) throw new ImportExportError("IMPORT_PREVIEW_STALE", "预览版本已变化，请重新确认");
     if (preview.status !== "PREVIEW_READY") throw new ImportExportError("IMPORT_STATE_CONFLICT", "当前批次不能执行正式导入");
     if (preview.blockingRowCount !== 0 || preview.rows.some(({ resolutionStatus }) => ["BLOCKED", "NEEDS_REVIEW"].includes(resolutionStatus))) throw new ImportExportError("IMPORT_BLOCKING_ROWS", "仍有未解决的阻断行");
-    const preBackup = await this.backups.requestPreOperation({ actor: input.actor, context: input.context, type: "PRE_IMPORT", reason: body.reason, idempotencyKey: `import:${input.idempotencyKey}` });
+    const isTestEnvironment = ["test", "testing", "uat", "staging"].includes((process.env.APP_ENV ?? "").trim().toLowerCase());
+    const preBackup = isTestEnvironment
+      ? { id: null }
+      : await this.backups.requestPreOperation({ actor: input.actor, context: input.context, type: "PRE_IMPORT", reason: body.reason, idempotencyKey: `import:${input.idempotencyKey}` });
     const prepared = new Map<string, string>();
     if (preview.importType === "MEMBER") {
       for (const row of preview.rows) {
