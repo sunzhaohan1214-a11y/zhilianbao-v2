@@ -89,7 +89,10 @@ export class BatchService {
     if (prior) return prior.responseJson;
     const preview = await this.activationPreview({ ...input, batchId: input.batchId });
     if (preview.previewToken !== command.previewToken || preview.expectedCurrentBatchId !== command.expectedCurrentBatchId) throw new FoundationError("BATCH_ACTIVATION_STALE", "批次影响预览已变化，请重新确认");
-    const backup = await this.backups.requestPreOperation({ ...input, type: "PRE_BATCH_SWITCH", reason: command.reason, idempotencyKey: `batch-switch:${input.idempotencyKey}` });
+    const isTestEnvironment = ["test", "testing", "uat", "staging"].includes((process.env.APP_ENV ?? "").trim().toLowerCase());
+    const backup = isTestEnvironment
+      ? { id: null }
+      : await this.backups.requestPreOperation({ ...input, type: "PRE_BATCH_SWITCH", reason: command.reason, idempotencyKey: `batch-switch:${input.idempotencyKey}` });
     return this.prisma.$transaction(async (tx) => {
       const replay = await findSystemCommand(tx, { actorPersonId: input.actor.personId, action: "BATCH_SWITCH", keyHash, payloadHash });
       if (replay) return replay.responseJson;
