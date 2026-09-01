@@ -9,7 +9,7 @@ async function login(page: Page, user: { phone: string; password: string }) {
 test.beforeEach(async () => { await seedAuthFixtures(); });
 
 test("member reads enterprise and phone, submits correction, and cannot govern", async ({ page }) => {
-  await login(page, e2eUsers.normal); await page.goto("/resources"); await page.getByRole("link", { name: "企业", exact: true }).click();
+  await login(page, e2eUsers.normal); await page.goto("/resources/enterprises");
   await expect(page.getByRole("heading", { name: "企业名录" })).toBeVisible(); await page.getByRole("link", { name: /宝应智造示范企业/ }).click();
   await expect(page.getByText("13800003001")).toBeVisible(); await page.getByRole("button", { name: "提交纠错" }).click();
   await page.getByLabel("企业地址").fill("宝应县安宜镇纠错地址2号");
