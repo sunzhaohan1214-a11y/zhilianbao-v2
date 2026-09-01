@@ -1,4 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   buildReleaseReadiness,
   readinessExitCode,
@@ -14,6 +18,7 @@ import {
   validateUatEvidence,
 } from "../src/modules/hardening/release-readiness.ts";
 
+const execFileAsync = promisify(execFile);
 const rawMode = process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1] ?? "local";
 if (!["local", "ci", "prod"].includes(rawMode)) throw new Error("RELEASE_MODE_INVALID");
 const mode = rawMode;
@@ -50,6 +55,73 @@ async function exactHeadCiEvidence() {
   } catch { return { status: "BLOCKED_BY_EXTERNAL_ENV", errorCode: "GITHUB_CI_API_UNAVAILABLE" }; }
 }
 
+let migrationBundlePromise;
+async function ensureMigrationBundle() {
+  if (!migrationBundlePromise) {
+    const npmExecPath = process.env.npm_execpath?.trim();
+    if (!npmExecPath) throw new Error("MIGRATION_TARGET_STATE_BUILD_UNAVAILABLE");
+    migrationBundlePromise = execFileAsync(process.execPath, [npmExecPath, "run", "build:migration", "--silent"], {
+      cwd: process.cwd(),
+      env: process.env,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  }
+  await migrationBundlePromise;
+}
+
+function requireIdempotentRerunActions(evidence) {
+  const counts = evidence?.actionCounts;
+  if (!counts || typeof counts !== "object" || Array.isArray(counts)
+    || !Number.isSafeInteger(evidence.sourceActionCount) || evidence.sourceActionCount < 0) {
+    throw new Error("MIGRATION_RERUN_WRITE_ATTESTATION_INVALID");
+  }
+  const actions = ["CREATE", "LINK", "UPDATE", "SKIP", "REVIEW", "FAILED"];
+  if (Object.keys(counts).length !== actions.length || !actions.every((action) => Number.isSafeInteger(counts[action]) && counts[action] >= 0)) {
+    throw new Error("MIGRATION_RERUN_WRITE_ATTESTATION_INVALID");
+  }
+  const total = actions.reduce((sum, action) => sum + counts[action], 0);
+  if (total !== evidence.sourceActionCount || counts.CREATE !== 0 || counts.LINK !== 0 || counts.UPDATE !== 0
+    || counts.REVIEW !== 0 || counts.FAILED !== 0 || counts.SKIP !== evidence.sourceActionCount) {
+    throw new Error("MIGRATION_RERUN_WRITE_ATTESTATION_INVALID");
+  }
+}
+
+async function attestMigrationTargetState(request) {
+  if (mode !== "prod") throw new Error("MIGRATION_TARGET_STATE_ATTESTATION_PROD_ONLY");
+  const migrationDatabaseUrl = process.env.V1_MIGRATION_DATABASE_URL?.trim();
+  if (!migrationDatabaseUrl) throw new Error("V1_MIGRATION_DATABASE_URL_REQUIRED");
+  await ensureMigrationBundle();
+
+  const directory = await mkdtemp(join(tmpdir(), "zlb-release-migration-attestation-"));
+  const output = join(directory, `${request.phase.toLowerCase()}-target-state.json`);
+  const childEnv = {
+    ...process.env,
+    APP_ENV: "test",
+    APP_VERSION: request.candidateSha,
+    V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT: request.targetEnvironment,
+    V1_MIGRATION_APPROVED_TARGET_DATABASE: request.targetMigrationDatabase,
+  };
+  childEnv.DATABASE_URL = migrationDatabaseUrl;
+  try {
+    await execFileAsync(process.execPath, [
+      join(process.cwd(), "migration-dist", "target-state-main.js"),
+      "--batch", request.batchId,
+      "--candidate-sha", request.candidateSha,
+      "--manifest-sha", request.manifestSha256,
+      "--output", output,
+    ], {
+      cwd: process.cwd(),
+      env: childEnv,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const evidence = JSON.parse(await readFile(output, "utf8"));
+    if (request.phase === "RERUN") requireIdempotentRerunActions(evidence);
+    return evidence;
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 const [githubProtection, exactHeadCi, scannerEvidence, backupEvidence, maintenanceEvidence, restoreEvidence, migrationEvidence, uatEvidence, preflightEvidence, realAiEvidence] = await Promise.all([
   githubProtectionEvidence(),
   exactHeadCiEvidence(),
@@ -57,7 +129,10 @@ const [githubProtection, exactHeadCi, scannerEvidence, backupEvidence, maintenan
   validateBackupEvidence(process.env.CLOUD_BACKUP_EVIDENCE_JSON, appVersion, { region: process.env.CYNOSDB_APPROVED_REGION, clusterId: process.env.CYNOSDB_APPROVED_CLUSTER_ID, vpcId: process.env.CYNOSDB_APPROVED_VPC_ID, subnetId: process.env.CYNOSDB_APPROVED_SUBNET_ID }),
   validateMaintenanceEvidence(process.env.MAINTENANCE_EVIDENCE_JSON, appVersion),
   validateRestoreEvidence(process.env.RESTORE_DRILL_EVIDENCE_JSON, appVersion),
-  validateMigrationEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion),
+  validateMigrationEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion, {
+    environment: process.env.V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT,
+    databaseId: process.env.V1_MIGRATION_APPROVED_TARGET_DATABASE,
+  }, attestMigrationTargetState),
   validateUatEvidence(process.env.UAT_EVIDENCE_JSON, appVersion),
   validatePreflightEvidence(process.env.PROD_PREFLIGHT_EVIDENCE_JSON, appVersion),
   validateAiEvidence(process.env.REAL_AI_EVIDENCE_JSON, appVersion),

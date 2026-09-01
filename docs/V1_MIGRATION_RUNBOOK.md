@@ -8,6 +8,8 @@
 - Confirm the snapshot classification (`SAMPLE` or controlled `FULL`), checksum manifest, attachment inventory, schema/mapping version, and operator authorization.
 - For apply, use an active `SUPER_ADMIN` operator with `migration.execute`; do not use a shared account.
 - Take a V2 Migration DB restore point before every apply rehearsal.
+- Set `APP_ENV` explicitly before apply. Normalized LOCAL aliases are `local/development/dev`; normalized TEST aliases are `test/testing/uat/staging`. `prod/PROD/production/PRODUCTION` are refused in every mode, while a missing or unknown apply environment is refused with `MIGRATION_APPLY_ENVIRONMENT_REQUIRED`.
+- Before generating release evidence, inject `V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT=TEST` and `V1_MIGRATION_APPROVED_TARGET_DATABASE=<dedicated-migration-db-id>`. These values identify the independently approved isolated target; they are not inferred from `APP_ENV` or from `DATABASE_URL` and must never name daily TEST or PROD.
 
 ## 2. Build and sample rehearsal
 
@@ -87,6 +89,27 @@ attachments = attachment success + attachment issues
 ```
 
 Also sample: Demand→Enterprise, Demand→Contact, Person→Account, Person→Appointment/Membership, Reimbursement→Invoice, Policy→Primary file. Explain count reductions with merge/link counts and map evidence. Person count is not expected to equal Account count; report eligible accounts, created accounts, and historical no-account records separately. Presence reconciliation is historical only.
+
+### Release-evidence handoff draft
+
+The migration evidence document remains `status=PASS` only after a controlled FULL dry-run, apply and idempotent rerun have completed. Migration evidence is intentionally stricter than the other release categories: the outer document and every nested snapshot/execution artifact must use a local immutable pointer with both `urn:sha256:<digest>` and `sourcePath`. The controlled readiness runner must be able to reopen the exact local bytes; HTTPS-only migration evidence is rejected.
+
+Its `details` must include all of the following; omitted fields, copied summaries and self-reported booleans are rejected by `validateMigrationEvidence()`:
+
+- `snapshotManifest`, an immutable pointer to the real `snapshot.json`; the gate reads, hashes and parses it, requires the manifest itself to say `snapshotKind=FULL`, and binds its `snapshotId` to `sourceSnapshotIdentity`;
+- `snapshotKind=FULL`, `rehearsalMode=FULL_REHEARSAL`, `fullRehearsalStatus=COMPLETED` and a `manifestSha256` equal to the bytes addressed by `snapshotManifest`;
+- one `manifestFiles` metadata row and one `snapshotFiles` immutable pointer for every contract NDJSON path, including `attachments/manifest.ndjson`; the gate reopens each actual file, parses every non-empty line as a JSON object, then recomputes both record count and SHA-256 instead of trusting copied metadata;
+- `attachmentInventory` bound to the attachment manifest row, with source/copied/hash-verified counts equal for APPLY, zero issues, and `validationPassed=true`;
+- normalized, whitespace-free and globally distinct `dryRunId`, apply `migrationBatchId/migrationRunId`, and rerun `rerunBatchId/rerunRunId`;
+- `targetMigrationEnvironment=TEST` and `targetMigrationDatabase` exactly matching `V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT` and `V1_MIGRATION_APPROVED_TARGET_DATABASE` injected by the release operator;
+- `executionEvidence` containing exactly three immutable artifacts: `dryRun`, `apply` and `rerun`. Each artifact binds its phase, run/batch identity, candidate SHA, source snapshot identity, manifest digest and approved target database, and contains its own module reconciliation, attachment inventory, write summary and target-state fingerprint;
+- top-level module and attachment results byte-for-byte/canonically equal to the APPLY artifact, preventing a result set from another run being paired with valid-looking IDs;
+- a RERUN artifact with `idempotencyPassed=true`, zero created/updated/deleted rows and the same canonical target-state counts/fingerprint as APPLY;
+- `unresolvedBlockerCount=0` and `unresolvedReviewCount=0`;
+- exactly one reconciliation row for every source module and `ATTACHMENT`, with `source = success + failed + skipped + merged + review`, `attachments = attachment success + attachment issues`, and zero failed, review or attachment-issue counts;
+- `dryRunPassed`, `applyPassed`, `rerunPassed`, and `reconciliationPassed` all true as summary fields only; the immutable execution artifacts remain authoritative.
+
+This is a handoff contract, not proof that a FULL snapshot exists. Until real immutable evidence satisfies it, release status remains `BLOCKED_BY_SOURCE_DATA` and `RELEASE_READY=NO`.
 
 ## 7. Security and privacy checks
 

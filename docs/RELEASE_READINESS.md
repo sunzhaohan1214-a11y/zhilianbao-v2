@@ -26,7 +26,7 @@ External evidence variables contain a JSON pointer rather than a self-reported r
 }
 ```
 
-An HTTPS reference may be used without `sourcePath` only when the URL contains a `sha256=<64-hex-content-digest>` query parameter. The readiness gate reads the referenced bytes, limits evidence to 1 MiB, recomputes SHA-256, and rejects missing sources or digest mismatches before parsing the evidence document. The referenced document must contain:
+For non-migration categories, an HTTPS reference may be used without `sourcePath` only when the URL contains a `sha256=<64-hex-content-digest>` query parameter. The readiness gate reads the referenced bytes, limits evidence to 1 MiB, recomputes SHA-256, and rejects missing sources or digest mismatches before parsing the evidence document. The referenced document must contain:
 
 ```json
 {
@@ -39,7 +39,15 @@ An HTTPS reference may be used without `sourcePath` only when the URL contains a
 }
 ```
 
-Each variable is bound to one category and environment; category or environment substitution fails closed. Scanner details must prove ClamAV health, clean acceptance and EICAR rejection. Backup details must prove a PROD source, the approved CynosDB region/cluster, provider health, a successful backup and a real snapshot time no older than 24 hours. Maintenance must prove provider health plus enter/exit checks. Restore must identify the exact TEST source backup and cluster, the TEST target cluster, validation, RTO/RPO and completed cleanup. Migration must identify the source snapshot and target migration database and prove dry-run/apply/rerun/reconciliation. UAT must prove zero P0/P1 issues plus business and operations sign-off. Production preflight must prove checks, rollback readiness and an approved change window. Missing category fields fail closed. Legacy naked booleans and inline self-reported PASS objects are ignored.
+Each variable is bound to one category and environment; category or environment substitution fails closed. Scanner details must prove ClamAV health, clean acceptance and EICAR rejection. Backup details must prove a PROD source, the approved CynosDB region/cluster, provider health, a successful backup and a real snapshot time no older than 24 hours. Maintenance must prove provider health plus enter/exit checks. Restore must identify the exact TEST source backup and cluster, the TEST target cluster, validation, RTO/RPO and completed cleanup. UAT must prove zero P0/P1 issues plus business and operations sign-off. Production preflight must prove checks, rollback readiness and an approved change window. Missing category fields fail closed. Legacy naked booleans and inline self-reported PASS objects are ignored.
+
+Migration evidence has a stricter fail-closed FULL contract. The outer migration evidence and every nested manifest, snapshot file and execution artifact must use a local immutable `urn:sha256` plus `sourcePath` pointer so the controlled runner can reopen the exact bytes; HTTPS-only migration evidence is not accepted. The gate independently reads and hashes the real `snapshot.json`, requires its own `snapshotKind=FULL`, and binds its `snapshotId` and digest to the outer document. It then requires one `snapshotFiles` pointer for every contract NDJSON path, parses every non-empty line as a JSON object, and recomputes the actual line count and SHA-256 rather than trusting copied `manifestFiles` metadata.
+
+The release operator must inject `V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT=TEST` and `V1_MIGRATION_APPROVED_TARGET_DATABASE=<dedicated-isolated-db-id>`. Evidence must declare the same target environment and database; `APP_ENV`, `DATABASE_URL`, a non-empty string, daily TEST and PROD are not accepted as migration-target authorization.
+
+The evidence must identify normalized, whitespace-free and globally distinct dry-run, apply batch/run and rerun batch/run identities. `executionEvidence` must contain exactly three immutable artifacts (`dryRun`, `apply`, `rerun`), each bound to its phase, execution/batch ID, candidate SHA, source snapshot identity, manifest digest and approved target database. Each artifact contains its own module reconciliation, attachment inventory, write summary and target-state fingerprint. The top-level module and attachment results must canonically equal APPLY; RERUN must report `idempotencyPassed=true`, zero writes and the same target-state fingerprint as APPLY. This prevents valid-looking IDs or summary booleans from being combined with results from another run.
+
+The attachment inventory remains bound to the actual attachment manifest row and must prove every APPLY attachment was copied and re-read with matching hash, with zero issues. Every migration module plus `ATTACHMENT` must satisfy the source and attachment reconciliation equations with zero failed, review or attachment-issue counts, and unresolved BLOCKER/REVIEW counts must be zero. A SAMPLE manifest relabelled FULL, missing or changed snapshot bytes, whitespace-reused identities, wrong target database, unbound execution artifacts, copied APPLY results, non-zero rerun writes or target-state drift all fail closed.
 
 ## Approved CynosDB identity
 
@@ -47,15 +55,20 @@ Real CynosDB operations require deployment-injected approved identity values: `C
 
 ## Current M3-008 truth
 
-Code automation covers security headers, dependency/secret/dangerous-code scans, real ClamAV CI integration, fixed-scale MySQL performance, Chromium/Firefox/WebKit compatibility, weak-network behavior, AI contract evaluation, CynosDB backup integration, guarded restore-to-new-cluster tooling, and read-only consistency audit.
+Code automation covers security headers, dependency/secret/dangerous-code scans, real ClamAV CI integration, fixed-scale MySQL performance, Chromium/Firefox/WebKit compatibility, weak-network behavior, AI contract evaluation, CynosDB backup integration, guarded restore-to-new-cluster tooling, read-only consistency audit, and fail-closed migration evidence validation against actual snapshot/execution bytes.
 
-The following remain external and therefore keep `RELEASE_READY=NO`: protected `main`, UAT sign-off, V1 full rehearsal and reconciliation, production scanner configuration, real production backup evidence, real restore drill and cleanup evidence, production maintenance integration, and production cutover preflight.
+The following remain external and therefore keep `RELEASE_READY=NO`: exact-candidate review/CI, UAT sign-off, a real V1 FULL rehearsal satisfying the expanded snapshot/attachment/execution/target-identity/idempotency contract, production scanner configuration, real production backup evidence, real restore drill and cleanup evidence, production maintenance integration, and production cutover preflight. This draft does not claim that any of those external gates has completed.
 
 ## Operator commands
 
 ```bash
 npm run release:check -- --mode=ci
-APP_ENV=prod APP_VERSION=<40-hex-commit> GITHUB_CANDIDATE_RUN_ID=<run-id> npm run release:check -- --mode=prod
+APP_ENV=prod \
+APP_VERSION=<40-hex-commit> \
+GITHUB_CANDIDATE_RUN_ID=<run-id> \
+V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT=TEST \
+V1_MIGRATION_APPROVED_TARGET_DATABASE=<dedicated-migration-db-id> \
+npm run release:check -- --mode=prod
 ```
 
-The production command is a gate, not a deployment command. It creates no cloud resources and changes no data.
+The production command is a gate, not a deployment command. It creates no cloud resources and changes no data. The approved migration target remains TEST rehearsal infrastructure even while the overall production release gate is evaluated.

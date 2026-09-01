@@ -8,7 +8,7 @@
 
 This repository does not contain the real V1 database schema, SQL dump, field mapping, full snapshot, or attachment manifest. The contract in this document is therefore a versioned, sanitized fixture contract used to verify the migration framework. It must not be presented as the real V1 physical schema.
 
-The runner never accepts `V1_PROD_DATABASE_URL`. It reads only the `--source` directory and writes only to the configured V2 database when `--apply --confirm MIGRATE_TO_V2` is present. `APP_ENV=production` is refused by this milestone.
+The runner never accepts `V1_PROD_DATABASE_URL`. It reads only the `--source` directory and writes only to the configured V2 database when `--apply --confirm MIGRATE_TO_V2` is present. Environment matching is trimmed and case-insensitive: `prod` and `production` (including upper-case variants) are always refused. Apply also refuses a missing or unknown `APP_ENV`; only an explicit normalized LOCAL or TEST identity may reach the apply runner. Dry-run may use an unknown non-production identity because it performs no V2 business write, but production aliases remain refused.
 
 ## 2. Directory layout
 
