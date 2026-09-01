@@ -15,7 +15,7 @@ type LoadedPointer = { bytes: Uint8Array; digest: string };
 
 const MAX_BINDING_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
-const NON_ATTACHMENT_MODULES = MIGRATION_EVIDENCE_MODULES.filter((module) => module !== "ATTACHMENT");
+const NON_ATTACHMENT_MODULES = MIGRATION_EVIDENCE_MODULES.filter((moduleName) => moduleName !== "ATTACHMENT");
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -123,8 +123,8 @@ export function validateMigrationTargetStateBinding(modulesValue: unknown, targe
   const state = objectValue(targetStateValue);
   const moduleCounts = objectValue(state?.moduleCounts);
   const legacyMapCountsByModule = objectValue(state?.legacyMapCountsByModule);
-  if (modules.some((module) => !module) || !state || !moduleCounts || !legacyMapCountsByModule
-    || !exactStringSet((modules as Record<string, unknown>[]).map((module) => String(module.module)), MIGRATION_EVIDENCE_MODULES)
+  if (modules.some((moduleRow) => !moduleRow) || !state || !moduleCounts || !legacyMapCountsByModule
+    || !exactStringSet((modules as Record<string, unknown>[]).map((moduleRow) => String(moduleRow.module)), MIGRATION_EVIDENCE_MODULES)
     || !exactStringSet(Object.keys(moduleCounts), MIGRATION_EVIDENCE_MODULES)
     || !exactStringSet(Object.keys(legacyMapCountsByModule), NON_ATTACHMENT_MODULES)
     || !Object.values(moduleCounts).every(nonNegativeInteger)
@@ -135,18 +135,18 @@ export function validateMigrationTargetStateBinding(modulesValue: unknown, targe
 
   let expectedLegacyMapCount = 0;
   for (const moduleName of MIGRATION_EVIDENCE_MODULES) {
-    const module = (modules as Record<string, unknown>[]).find((candidate) => candidate.module === moduleName);
-    if (!module || !nonNegativeInteger(module.successCount) || !nonNegativeInteger(module.mergedCount)
-      || !nonNegativeInteger(module.skippedCount) || !nonNegativeInteger(module.attachmentSuccessCount)) return false;
+    const moduleRow = (modules as Record<string, unknown>[]).find((candidate) => candidate.module === moduleName);
+    if (!moduleRow || !nonNegativeInteger(moduleRow.successCount) || !nonNegativeInteger(moduleRow.mergedCount)
+      || !nonNegativeInteger(moduleRow.skippedCount) || !nonNegativeInteger(moduleRow.attachmentSuccessCount)) return false;
     const distinctTargetCount = moduleCounts[moduleName];
     if (!nonNegativeInteger(distinctTargetCount)) return false;
 
     if (moduleName === "ATTACHMENT") {
-      if (distinctTargetCount !== module.attachmentSuccessCount) return false;
+      if (distinctTargetCount !== moduleRow.attachmentSuccessCount) return false;
       continue;
     }
 
-    const expectedMappedSources = module.successCount + module.mergedCount + module.skippedCount;
+    const expectedMappedSources = moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount;
     if (legacyMapCountsByModule[moduleName] !== expectedMappedSources) return false;
     expectedLegacyMapCount += expectedMappedSources;
     if (expectedMappedSources === 0 ? distinctTargetCount !== 0 : distinctTargetCount < 1 || distinctTargetCount > expectedMappedSources) return false;
