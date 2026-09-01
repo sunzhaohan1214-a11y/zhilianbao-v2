@@ -118,19 +118,18 @@ export class PresenceService {
       const candidate = {
         arrivalAt: changes.arrivalAt ?? current.arrivalAt,
         expectedDepartureAt: changes.expectedDepartureAt ?? current.expectedDepartureAt,
+        origin: changes.origin === undefined ? current.origin : normalizePresenceOptional(changes.origin),
+        transportMode: changes.transportMode === undefined ? current.transportMode : normalizePresenceOptional(changes.transportMode),
+        trainFlightNo: changes.trainFlightNo === undefined ? current.trainFlightNo : normalizePresenceOptional(changes.trainFlightNo),
+        note: changes.note === undefined ? current.note : normalizePresenceOptional(changes.note),
       };
       assertInterval(candidate.arrivalAt, candidate.expectedDepartureAt);
       if (candidate.expectedDepartureAt <= now) {
         throw new PresenceError("PRESENCE_SELF_EDIT_FORBIDDEN", "本人修改后的预计离宝时间必须晚于当前时间");
       }
+      if (isSemanticallySamePresenceSubmission(current, candidate)) return current;
       await this.assertNoOverlap(tx, { personId: current.personId, ...candidate, excludeId: current.id });
-      const updated = await tx.presenceReport.update({ where: { id: current.id }, data: {
-        ...candidate,
-        origin: normalizeOptional(changes.origin),
-        transportMode: normalizeOptional(changes.transportMode),
-        trainFlightNo: normalizeOptional(changes.trainFlightNo),
-        note: normalizeOptional(changes.note),
-      } });
+      const updated = await tx.presenceReport.update({ where: { id: current.id }, data: candidate });
       await writePresenceAudit(tx, {
         ...input,
         actionCode: "PRESENCE_UPDATED",
