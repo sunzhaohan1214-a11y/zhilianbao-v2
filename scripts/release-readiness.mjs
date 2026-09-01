@@ -1,4 +1,8 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   buildReleaseReadiness,
   readinessExitCode,
@@ -14,6 +18,7 @@ import {
   validateUatEvidence,
 } from "../src/modules/hardening/release-readiness.ts";
 
+const execFileAsync = promisify(execFile);
 const rawMode = process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1] ?? "local";
 if (!["local", "ci", "prod"].includes(rawMode)) throw new Error("RELEASE_MODE_INVALID");
 const mode = rawMode;
@@ -50,6 +55,53 @@ async function exactHeadCiEvidence() {
   } catch { return { status: "BLOCKED_BY_EXTERNAL_ENV", errorCode: "GITHUB_CI_API_UNAVAILABLE" }; }
 }
 
+let migrationBundlePromise;
+async function ensureMigrationBundle() {
+  if (!migrationBundlePromise) {
+    const npmExecPath = process.env.npm_execpath?.trim();
+    if (!npmExecPath) throw new Error("MIGRATION_TARGET_STATE_BUILD_UNAVAILABLE");
+    migrationBundlePromise = execFileAsync(process.execPath, [npmExecPath, "run", "build:migration", "--silent"], {
+      cwd: process.cwd(),
+      env: process.env,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  }
+  await migrationBundlePromise;
+}
+
+async function attestMigrationTargetState(request) {
+  if (mode !== "prod") throw new Error("MIGRATION_TARGET_STATE_ATTESTATION_PROD_ONLY");
+  const migrationDatabaseUrl = process.env.V1_MIGRATION_DATABASE_URL?.trim();
+  if (!migrationDatabaseUrl) throw new Error("V1_MIGRATION_DATABASE_URL_REQUIRED");
+  await ensureMigrationBundle();
+
+  const directory = await mkdtemp(join(tmpdir(), "zlb-release-migration-attestation-"));
+  const output = join(directory, `${request.phase.toLowerCase()}-target-state.json`);
+  try {
+    await execFileAsync(process.execPath, [
+      join(process.cwd(), "migration-dist", "target-state-main.js"),
+      "--batch", request.batchId,
+      "--candidate-sha", request.candidateSha,
+      "--manifest-sha", request.manifestSha256,
+      "--output", output,
+    ], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        APP_ENV: "test",
+        APP_VERSION: request.candidateSha,
+        DATABASE_URL: migrationDatabaseUrl,
+        V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT: request.targetEnvironment,
+        V1_MIGRATION_APPROVED_TARGET_DATABASE: request.targetMigrationDatabase,
+      },
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return JSON.parse(await readFile(output, "utf8"));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 const [githubProtection, exactHeadCi, scannerEvidence, backupEvidence, maintenanceEvidence, restoreEvidence, migrationEvidence, uatEvidence, preflightEvidence, realAiEvidence] = await Promise.all([
   githubProtectionEvidence(),
   exactHeadCiEvidence(),
@@ -60,7 +112,7 @@ const [githubProtection, exactHeadCi, scannerEvidence, backupEvidence, maintenan
   validateMigrationEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion, {
     environment: process.env.V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT,
     databaseId: process.env.V1_MIGRATION_APPROVED_TARGET_DATABASE,
-  }),
+  }, attestMigrationTargetState),
   validateUatEvidence(process.env.UAT_EVIDENCE_JSON, appVersion),
   validatePreflightEvidence(process.env.PROD_PREFLIGHT_EVIDENCE_JSON, appVersion),
   validateAiEvidence(process.env.REAL_AI_EVIDENCE_JSON, appVersion),
