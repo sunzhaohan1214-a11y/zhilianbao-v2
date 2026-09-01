@@ -19,7 +19,7 @@ test("admin creates, extracts, confirms and publishes; member reads file; replac
   await page.getByRole("button", { name: "管理员人工确认" }).click(); await expect(page.getByText("当前版本已人工确认，如需修改请建立新内容版本。")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept()); await page.getByRole("button", { name: "发布政策" }).click(); await expect(page.getByText("PUBLISHED/CURRENT")).toBeVisible();
 
-  await page.context().clearCookies(); await login(page, e2eUsers.normal); await page.goto("/resources"); await page.getByRole("link", { name: "政策", exact: true }).click(); await expect(page.getByRole("link", { name: /E2E 新政策/ })).toBeVisible(); await page.getByRole("link", { name: /E2E 新政策/ }).click();
+  await page.context().clearCookies(); await login(page, e2eUsers.normal); await page.goto("/resources/policies"); await expect(page.getByRole("link", { name: /E2E 新政策/ })).toBeVisible(); await page.getByRole("link", { name: /E2E 新政策/ }).click();
   await expect(page.getByText("AI 智能解读，仅供内部辅助")).toBeVisible(); const access = page.waitForResponse((response) => response.url().includes("/api/v2/attachments/") && new URL(response.url()).pathname.endsWith("/access")); await page.getByRole("button", { name: "新政策.pdf" }).click(); expect((await access).status()).toBe(200);
   const forbidden = await page.evaluate(async (id) => (await fetch(`/api/v2/admin/policies/${id}/withdraw`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason: "越权" }) })).status, policyId); expect(forbidden).toBe(403);
 
