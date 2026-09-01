@@ -13,6 +13,20 @@ export type ApprovedMigrationTarget = {
   databaseId?: string;
 };
 
+export type MigrationTargetStateAttestationRequest = {
+  phase: "APPLY" | "RERUN";
+  batchId: string;
+  candidateSha: string;
+  sourceSnapshotIdentity: string;
+  manifestSha256: string;
+  targetEnvironment: "TEST";
+  targetMigrationDatabase: string;
+};
+
+export type MigrationTargetStateAttestor = (
+  request: MigrationTargetStateAttestationRequest,
+) => Promise<unknown>;
+
 type EvidenceFileHandle = Pick<FileHandle, "close" | "read" | "stat">;
 type LoadedPointer = { bytes: Uint8Array; digest: string };
 type ExecutionPhase = "DRY_RUN" | "APPLY" | "RERUN";
@@ -464,6 +478,7 @@ export async function validateMigrationEvidence(
   raw: string | undefined,
   candidateSha: string,
   expected: ApprovedMigrationTarget = {},
+  attestTargetState?: MigrationTargetStateAttestor,
 ): Promise<EvidenceValidation> {
   const coreValidation = await validateMigrationEvidenceCore(raw, candidateSha);
   if (coreValidation.status !== "PASS") return coreValidation;
@@ -553,6 +568,50 @@ export async function validateMigrationEvidence(
     || !validateMigrationTargetStateBinding(apply.modules, apply.targetState)
     || !validateMigrationTargetStateBinding(rerun.modules, rerun.targetState)) {
     return failure("MIGRATION_TARGET_STATE_BINDING_INVALID", coreValidation.evidenceRef);
+  }
+
+  if (!attestTargetState) {
+    return failure("MIGRATION_TARGET_STATE_ATTESTATION_REQUIRED", coreValidation.evidenceRef);
+  }
+  let freshApplyRaw: unknown;
+  let freshRerunRaw: unknown;
+  try {
+    freshApplyRaw = await attestTargetState({
+      phase: "APPLY",
+      batchId: migrationBatchId,
+      candidateSha,
+      sourceSnapshotIdentity: details.sourceSnapshotIdentity as string,
+      manifestSha256: loadedManifest.digest,
+      targetEnvironment: "TEST",
+      targetMigrationDatabase: approvedDatabase,
+    });
+    freshRerunRaw = await attestTargetState({
+      phase: "RERUN",
+      batchId: rerunBatchId,
+      candidateSha,
+      sourceSnapshotIdentity: details.sourceSnapshotIdentity as string,
+      manifestSha256: loadedManifest.digest,
+      targetEnvironment: "TEST",
+      targetMigrationDatabase: approvedDatabase,
+    });
+  } catch {
+    return failure("MIGRATION_TARGET_STATE_ATTESTATION_UNAVAILABLE", coreValidation.evidenceRef);
+  }
+  const freshApplyObject = objectValue(freshApplyRaw);
+  const freshRerunObject = objectValue(freshRerunRaw);
+  const freshApply = freshApplyObject
+    ? validateDatabaseTargetStateContent(freshApplyObject, migrationBatchId, candidateSha, details.sourceSnapshotIdentity as string, loadedManifest.digest, approvedDatabase)
+    : null;
+  const freshRerun = freshRerunObject
+    ? validateDatabaseTargetStateContent(freshRerunObject, rerunBatchId, candidateSha, details.sourceSnapshotIdentity as string, loadedManifest.digest, approvedDatabase)
+    : null;
+  if (!freshApply || !freshRerun
+    || freshApply.sha256 !== apply.databaseTargetState.sha256
+    || freshRerun.sha256 !== rerun.databaseTargetState.sha256
+    || freshApply.sha256 !== freshRerun.sha256
+    || !sameCanonical(targetStateSummary(freshApply), apply.targetState)
+    || !sameCanonical(targetStateSummary(freshRerun), rerun.targetState)) {
+    return failure("MIGRATION_TARGET_STATE_ATTESTATION_INVALID", coreValidation.evidenceRef);
   }
 
   return coreValidation;
