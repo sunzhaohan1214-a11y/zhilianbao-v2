@@ -56,6 +56,10 @@ type EvidenceDraft = {
     apply: ExecutionArtifact;
     rerun: ExecutionArtifact;
   };
+  databaseTargetStates: {
+    apply: Record<string, unknown>;
+    rerun: Record<string, unknown>;
+  };
   snapshotPaths: Record<string, string>;
 };
 
@@ -75,6 +79,10 @@ function canonicalValue(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const object = value as Record<string, unknown>;
   return Object.fromEntries(Object.keys(object).sort().map((key) => [key, canonicalValue(object[key])]));
+}
+
+function digest(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(canonicalValue(value))).digest("hex");
 }
 
 function moduleRows(manifestFiles: ManifestFile[], phase: "DRY_RUN" | "APPLY" | "RERUN"): ModuleRow[] {
@@ -107,30 +115,61 @@ function attachmentInventory(attachmentFile: ManifestFile, phase: "DRY_RUN" | "A
   };
 }
 
-function targetState(manifestFiles: ManifestFile[]) {
+function databaseTargetState(manifestFiles: ManifestFile[], batchId: string, snapshotId: string, manifestSha256: string) {
   const moduleCounts = Object.fromEntries(MIGRATION_EVIDENCE_MODULES.map((module, index) => [module, manifestFiles[index].count]));
   const legacyMapCountsByModule = Object.fromEntries(MIGRATION_EVIDENCE_MODULES
     .filter((module) => module !== "ATTACHMENT")
     .map((module, index) => [module, manifestFiles[index].count]));
-  const legacyMapCount = Object.values(legacyMapCountsByModule).reduce((sum, count) => sum + count, 0);
-  const recordCount = Object.values(moduleCounts).reduce((sum, count) => sum + count, 0);
-  const state = {
+  const unmappedSkipCountsByModule = Object.fromEntries(MIGRATION_EVIDENCE_MODULES
+    .filter((module) => module !== "ATTACHMENT")
+    .map((module) => [module, 0]));
+  const mappings = MIGRATION_EVIDENCE_MODULES.flatMap((module, index) => Array.from({ length: manifestFiles[index].count }, (_, itemIndex) => ({
+    sourceEntity: module,
+    sourceId: `${module.toLowerCase()}-${itemIndex + 1}`,
+    targetEntity: module === "ATTACHMENT" ? "ATTACHMENT" : `${module}_TARGET`,
+    targetId: `target-${module.toLowerCase()}-${itemIndex + 1}`,
+  })));
+  const attachments = mappings.filter(({ sourceEntity }) => sourceEntity === "ATTACHMENT").map((mapping) => ({
+    sourceAttachmentKey: mapping.sourceId,
+    targetAttachmentId: mapping.targetId,
+    targetSha256: createHash("sha256").update(mapping.sourceId).digest("hex"),
+  }));
+  const stateBody = {
     moduleCounts,
     legacyMapCountsByModule,
-    recordCount,
+    unmappedSkipCountsByModule,
+    recordCount: Object.values(moduleCounts).reduce((sum, count) => sum + count, 0),
     attachmentCount: moduleCounts.ATTACHMENT,
-    legacyMapCount,
+    legacyMapCount: Object.values(legacyMapCountsByModule).reduce((sum, count) => sum + count, 0),
     danglingLegacyMapCount: 0,
+    mappings,
+    unmappedSkips: [],
+    attachments,
   };
   return {
-    ...state,
-    sha256: createHash("sha256").update(JSON.stringify(canonicalValue({
-      moduleCounts,
-      legacyMapCountsByModule,
-      legacyMapCount,
-      danglingLegacyMapCount: state.danglingLegacyMapCount,
-      attachmentCount: state.attachmentCount,
-    }))).digest("hex"),
+    schemaVersion: "v1-migration-target-state-v1",
+    batchId,
+    candidateSha,
+    sourceSystem: "ZHILIANBAO_V1",
+    sourceSnapshotIdentity: snapshotId,
+    manifestSha256,
+    targetEnvironment: "TEST",
+    targetMigrationDatabase: approvedTarget.databaseId,
+    ...stateBody,
+    sha256: digest(stateBody),
+  };
+}
+
+function summary(databaseState: Record<string, unknown>) {
+  return {
+    moduleCounts: structuredClone(databaseState.moduleCounts),
+    legacyMapCountsByModule: structuredClone(databaseState.legacyMapCountsByModule),
+    unmappedSkipCountsByModule: structuredClone(databaseState.unmappedSkipCountsByModule),
+    recordCount: databaseState.recordCount,
+    attachmentCount: databaseState.attachmentCount,
+    legacyMapCount: databaseState.legacyMapCount,
+    danglingLegacyMapCount: databaseState.danglingLegacyMapCount,
+    sha256: databaseState.sha256,
   };
 }
 
@@ -170,7 +209,9 @@ async function buildDraft(): Promise<EvidenceDraft> {
   const manifestSha256 = digestFromPointer(snapshotManifest);
   const applyModules = moduleRows(manifestFiles, "APPLY");
   const applyInventory = attachmentInventory(manifestFiles.at(-1)!, "APPLY");
-  const finalState = targetState(manifestFiles);
+  const applyDatabaseState = databaseTargetState(manifestFiles, "apply-batch-full-20260901", snapshotId, manifestSha256);
+  const rerunDatabaseState = databaseTargetState(manifestFiles, "rerun-batch-full-20260901", snapshotId, manifestSha256);
+  const finalState = summary(applyDatabaseState);
 
   const commonExecution = {
     schemaVersion: "v1-migration-execution-v1",
@@ -204,7 +245,7 @@ async function buildDraft(): Promise<EvidenceDraft> {
       modules: structuredClone(applyModules),
       attachmentInventory: structuredClone(applyInventory),
       targetState: structuredClone(finalState),
-      writeSummary: { createdCount: finalState.recordCount, updatedCount: 0, deletedCount: 0 },
+      writeSummary: { createdCount: Number(finalState.recordCount), updatedCount: 0, deletedCount: 0 },
     },
     rerun: {
       ...commonExecution,
@@ -247,11 +288,16 @@ async function buildDraft(): Promise<EvidenceDraft> {
       reconciliationPassed: true,
     },
     executionArtifacts,
+    databaseTargetStates: { apply: applyDatabaseState, rerun: rerunDatabaseState },
     snapshotPaths,
   };
 }
 
 async function seal(draft: EvidenceDraft): Promise<string> {
+  const applyStatePointer = await immutableFile(join(draft.root, "target-state", "apply.json"), JSON.stringify(draft.databaseTargetStates.apply));
+  const rerunStatePointer = await immutableFile(join(draft.root, "target-state", "rerun.json"), JSON.stringify(draft.databaseTargetStates.rerun));
+  if (draft.executionArtifacts.apply.targetStateEvidence === undefined) draft.executionArtifacts.apply.targetStateEvidence = applyStatePointer;
+  if (draft.executionArtifacts.rerun.targetStateEvidence === undefined) draft.executionArtifacts.rerun.targetStateEvidence = rerunStatePointer;
   const executionEvidence = {
     dryRun: await immutableFile(join(draft.root, "executions", "dry-run.json"), JSON.stringify(draft.executionArtifacts.dryRun)),
     apply: await immutableFile(join(draft.root, "executions", "apply.json"), JSON.stringify(draft.executionArtifacts.apply)),
@@ -277,7 +323,7 @@ afterEach(async () => {
 });
 
 describe("FULL V1 migration evidence hardening", () => {
-  it("accepts actual snapshot bytes and separately bound dry-run, apply, and idempotent-rerun artifacts", async () => {
+  it("accepts actual snapshot bytes plus database-derived APPLY/RERUN target-state artifacts", async () => {
     const draft = await buildDraft();
     await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({ status: "PASS" });
   });
@@ -307,7 +353,7 @@ describe("FULL V1 migration evidence hardening", () => {
     });
   });
 
-  it("rejects a missing snapshot-file pointer even when the manifest and copied metadata still claim completeness", async () => {
+  it("rejects a missing snapshot-file pointer even when copied metadata still claims completeness", async () => {
     const draft = await buildDraft();
     draft.details.snapshotFiles.pop();
     await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
@@ -319,8 +365,8 @@ describe("FULL V1 migration evidence hardening", () => {
   it("recomputes snapshot-file bytes and rejects post-seal tampering", async () => {
     const draft = await buildDraft();
     const raw = await seal(draft);
-    const path = MIGRATION_EVIDENCE_MANIFEST_PATHS[0];
-    await writeFile(draft.snapshotPaths[path], `${JSON.stringify({ id: "tampered" })}\n`);
+    const snapshotPath = MIGRATION_EVIDENCE_MANIFEST_PATHS[0];
+    await writeFile(draft.snapshotPaths[snapshotPath], `${JSON.stringify({ id: "tampered" })}\n`);
     await expect(validateMigrationEvidence(raw, candidateSha, approvedTarget)).resolves.toMatchObject({
       status: "FAIL",
       errorCode: "MIGRATION_SNAPSHOT_FILE_EVIDENCE_INVALID",
@@ -336,6 +382,35 @@ describe("FULL V1 migration evidence hardening", () => {
     });
   });
 
+  it("requires a database-derived target-state pointer for APPLY and RERUN", async () => {
+    const draft = await buildDraft();
+    draft.executionArtifacts.apply.targetStateEvidence = null;
+    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
+      status: "FAIL",
+      errorCode: "MIGRATION_EXECUTION_EVIDENCE_INVALID",
+    });
+  });
+
+  it("rejects a target-state artifact whose detailed source-to-target identities do not match its digest", async () => {
+    const draft = await buildDraft();
+    const mappings = draft.databaseTargetStates.apply.mappings as Array<Record<string, unknown>>;
+    mappings[0].targetId = "fabricated-target";
+    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
+      status: "FAIL",
+      errorCode: "MIGRATION_EXECUTION_EVIDENCE_INVALID",
+    });
+  });
+
+  it("rejects post-seal tampering of database target-state bytes", async () => {
+    const draft = await buildDraft();
+    const raw = await seal(draft);
+    await writeFile(join(draft.root, "target-state", "rerun.json"), JSON.stringify({ tampered: true }));
+    await expect(validateMigrationEvidence(raw, candidateSha, approvedTarget)).resolves.toMatchObject({
+      status: "FAIL",
+      errorCode: "MIGRATION_EXECUTION_EVIDENCE_INVALID",
+    });
+  });
+
   it("rejects top-level reconciliation copied from another run", async () => {
     const draft = await buildDraft();
     draft.executionArtifacts.apply.modules[0].successCount = 0;
@@ -346,7 +421,7 @@ describe("FULL V1 migration evidence hardening", () => {
     });
   });
 
-  it("rejects zero target and LegacyMigrationMap counts when APPLY reports successful rows", async () => {
+  it("rejects inline target/map counts that are not the database-derived state", async () => {
     const draft = await buildDraft();
     const moduleCounts = draft.executionArtifacts.apply.targetState.moduleCounts as Record<string, number>;
     const legacyMapCountsByModule = draft.executionArtifacts.apply.targetState.legacyMapCountsByModule as Record<string, number>;
@@ -356,7 +431,6 @@ describe("FULL V1 migration evidence hardening", () => {
     for (const moduleName of Object.keys(legacyMapCountsByModule)) legacyMapCountsByModule[moduleName] = 0;
     draft.executionArtifacts.apply.targetState.recordCount = moduleCounts.ATTACHMENT;
     draft.executionArtifacts.apply.targetState.legacyMapCount = 0;
-    draft.executionArtifacts.apply.targetState.sha256 = "0".repeat(64);
     draft.executionArtifacts.rerun.targetState = structuredClone(draft.executionArtifacts.apply.targetState);
     await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
       status: "FAIL",
@@ -373,7 +447,7 @@ describe("FULL V1 migration evidence hardening", () => {
     });
   });
 
-  it("rejects a rerun whose final target fingerprint differs from the apply result", async () => {
+  it("rejects a rerun whose final target fingerprint differs from APPLY", async () => {
     const draft = await buildDraft();
     draft.executionArtifacts.rerun.targetState.legacyMapCount = Number(draft.executionArtifacts.rerun.targetState.legacyMapCount) + 1;
     await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
