@@ -5,7 +5,13 @@
 - Exact-head seven CI jobs green: `quality`, `database`, `critical-e2e`, `docker-build`, `security`, `performance`, `browser-compat`.
 - `main` protected with required reviews and required exact-head checks.
 - UAT signed; P0/P1 count is zero.
-- V1 full rehearsal evidence is immutable and passes the complete manifest-file counts/SHA-256, attachment inventory/re-read, distinct batch/run identity, zero unresolved BLOCKER/REVIEW, per-module equations, timing, idempotent rerun, and rollback-decision gates. A SAMPLE or summary boolean is not acceptable.
+- V1 full rehearsal evidence is immutable and passes all of these independent checks:
+  - the real FULL manifest and every contract NDJSON file are reopened through local `urn:sha256` plus `sourcePath` pointers, with actual line counts and SHA-256 recomputed;
+  - the target is `TEST` and its database ID exactly matches operator-injected `V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT` / `V1_MIGRATION_APPROVED_TARGET_DATABASE`; daily TEST and PROD are forbidden;
+  - dry-run, apply and rerun each have a separate immutable execution artifact bound to normalized distinct run/batch IDs, candidate SHA, snapshot, manifest and approved target;
+  - top-level reconciliation equals APPLY, attachments were copied/re-read with matching hashes, unresolved BLOCKER/REVIEW counts are zero, and every module equation balances;
+  - RERUN writes zero rows and reproduces the same target-state fingerprint as APPLY.
+  A SAMPLE package, HTTPS-only migration pointer, non-empty database label, summary boolean or copied result set is not acceptable.
 - Production ClamAV health and clean/malware probes pass.
 - CynosDB `backupReady=true`; latest successful backup is no older than 24 hours.
 - Restore-to-new-cluster drill completed, data validation passed, RTO/RPO recorded, and temporary cluster cleanup confirmed.
