@@ -57,7 +57,10 @@ const [githubProtection, exactHeadCi, scannerEvidence, backupEvidence, maintenan
   validateBackupEvidence(process.env.CLOUD_BACKUP_EVIDENCE_JSON, appVersion, { region: process.env.CYNOSDB_APPROVED_REGION, clusterId: process.env.CYNOSDB_APPROVED_CLUSTER_ID, vpcId: process.env.CYNOSDB_APPROVED_VPC_ID, subnetId: process.env.CYNOSDB_APPROVED_SUBNET_ID }),
   validateMaintenanceEvidence(process.env.MAINTENANCE_EVIDENCE_JSON, appVersion),
   validateRestoreEvidence(process.env.RESTORE_DRILL_EVIDENCE_JSON, appVersion),
-  validateMigrationEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion),
+  validateMigrationEvidence(process.env.V1_REHEARSAL_EVIDENCE_JSON, appVersion, {
+    environment: process.env.V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT,
+    databaseId: process.env.V1_MIGRATION_APPROVED_TARGET_DATABASE,
+  }),
   validateUatEvidence(process.env.UAT_EVIDENCE_JSON, appVersion),
   validatePreflightEvidence(process.env.PROD_PREFLIGHT_EVIDENCE_JSON, appVersion),
   validateAiEvidence(process.env.REAL_AI_EVIDENCE_JSON, appVersion),
