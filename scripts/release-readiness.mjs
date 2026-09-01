@@ -94,6 +94,14 @@ async function attestMigrationTargetState(request) {
 
   const directory = await mkdtemp(join(tmpdir(), "zlb-release-migration-attestation-"));
   const output = join(directory, `${request.phase.toLowerCase()}-target-state.json`);
+  const childEnv = {
+    ...process.env,
+    APP_ENV: "test",
+    APP_VERSION: request.candidateSha,
+    V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT: request.targetEnvironment,
+    V1_MIGRATION_APPROVED_TARGET_DATABASE: request.targetMigrationDatabase,
+  };
+  childEnv.DATABASE_URL = migrationDatabaseUrl;
   try {
     await execFileAsync(process.execPath, [
       join(process.cwd(), "migration-dist", "target-state-main.js"),
@@ -103,14 +111,7 @@ async function attestMigrationTargetState(request) {
       "--output", output,
     ], {
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        APP_ENV: "test",
-        APP_VERSION: request.candidateSha,
-        DATABASE_URL: migrationDatabaseUrl,
-        V1_MIGRATION_APPROVED_TARGET_ENVIRONMENT: request.targetEnvironment,
-        V1_MIGRATION_APPROVED_TARGET_DATABASE: request.targetMigrationDatabase,
-      },
+      env: childEnv,
       maxBuffer: 4 * 1024 * 1024,
     });
     const evidence = JSON.parse(await readFile(output, "utf8"));
