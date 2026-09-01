@@ -10,6 +10,7 @@ import {
 import {
   validateMigrationEvidence,
   type ApprovedMigrationTarget,
+  type MigrationTargetStateAttestor,
 } from "@/modules/hardening/migration-evidence";
 
 const candidateSha = "1".repeat(40);
@@ -293,6 +294,10 @@ async function buildDraft(): Promise<EvidenceDraft> {
   };
 }
 
+function attestorFor(draft: EvidenceDraft): MigrationTargetStateAttestor {
+  return async ({ phase }) => structuredClone(phase === "APPLY" ? draft.databaseTargetStates.apply : draft.databaseTargetStates.rerun);
+}
+
 async function seal(draft: EvidenceDraft): Promise<string> {
   const applyStatePointer = await immutableFile(join(draft.root, "target-state", "apply.json"), JSON.stringify(draft.databaseTargetStates.apply));
   const rerunStatePointer = await immutableFile(join(draft.root, "target-state", "rerun.json"), JSON.stringify(draft.databaseTargetStates.rerun));
@@ -323,9 +328,26 @@ afterEach(async () => {
 });
 
 describe("FULL V1 migration evidence hardening", () => {
-  it("accepts actual snapshot bytes plus database-derived APPLY/RERUN target-state artifacts", async () => {
+  it("accepts actual snapshot bytes plus freshly attested APPLY/RERUN target state", async () => {
     const draft = await buildDraft();
-    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({ status: "PASS" });
+    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget, attestorFor(draft))).resolves.toMatchObject({ status: "PASS" });
+  });
+
+  it("rejects otherwise valid evidence when live target-state attestation is absent", async () => {
+    const draft = await buildDraft();
+    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
+      status: "FAIL",
+      errorCode: "MIGRATION_TARGET_STATE_ATTESTATION_REQUIRED",
+    });
+  });
+
+  it("fails closed when the live target-state attestor cannot query the approved database", async () => {
+    const draft = await buildDraft();
+    const unavailable: MigrationTargetStateAttestor = async () => { throw new Error("database unavailable"); };
+    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget, unavailable)).resolves.toMatchObject({
+      status: "FAIL",
+      errorCode: "MIGRATION_TARGET_STATE_ATTESTATION_UNAVAILABLE",
+    });
   });
 
   it("fails closed without an operator-injected approved TEST migration database", async () => {
@@ -382,7 +404,7 @@ describe("FULL V1 migration evidence hardening", () => {
     });
   });
 
-  it("requires a database-derived target-state pointer for APPLY and RERUN", async () => {
+  it("requires a database-derived target-state pointer for APPLY and RERUN archival evidence", async () => {
     const draft = await buildDraft();
     draft.executionArtifacts.apply.targetStateEvidence = null;
     await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
