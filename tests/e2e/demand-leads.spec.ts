@@ -115,7 +115,9 @@ test("township links, supplements and converts a public lead to exactly one DRAF
   await page.getByLabel("企业名称搜索").fill("宝应智造");
   await page.getByRole("button", { name: /宝应智造示范企业/ }).click();
   await expect(page.getByText(/已选择：宝应智造示范企业/)).toBeVisible();
+  const linked = page.waitForResponse((response) => response.url().endsWith(`/api/v2/demand-leads/${lead.id}/link-enterprise`) && response.request().method() === "POST");
   await page.getByRole("button", { name: "确认关联" }).click();
+  expect((await linked).status()).toBe(200);
   await expect(page.getByText(/宝应智造示范企业/).first()).toBeVisible();
   const result = await page.evaluate(async ({ leadId, contactId }) => {
     const post = async (path: string, body: unknown) => {
