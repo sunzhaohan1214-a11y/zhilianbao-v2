@@ -5,9 +5,17 @@ const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const sourceId = z.string().trim().min(1).max(191);
 const dateTime = z.iso.datetime({ offset: true });
 
-export const snapshotManifestSchema = z.object({
+export const SNAPSHOT_SOURCE_CLASSIFICATIONS = [
+  "CONTROLLED_FULL_SNAPSHOT",
+  "SANITIZED_FIXTURE",
+  "REFERENCE_EXPORT_NOT_FINAL",
+] as const;
+export type SnapshotSourceClassification = typeof SNAPSHOT_SOURCE_CLASSIFICATIONS[number];
+
+const snapshotManifestBaseSchema = z.object({
   sourceSystem: z.literal("ZHILIANBAO_V1"),
   schemaVersion: z.string().trim().min(1).max(100),
+  sourceClassification: z.enum(SNAPSHOT_SOURCE_CLASSIFICATIONS).optional(),
   snapshotId: z.string().trim().min(1).max(191),
   snapshotAt: dateTime,
   exportedAt: dateTime,
@@ -18,7 +26,22 @@ export const snapshotManifestSchema = z.object({
   entities: z.record(z.enum(LEGACY_ENTITY_TYPES), z.number().int().nonnegative()),
 }).strict();
 
+export const snapshotManifestSchema = snapshotManifestBaseSchema.superRefine((value, context) => {
+  const referenceSchema = value.schemaVersion === "v1-package-reference-1";
+  const referenceClassification = value.sourceClassification === "REFERENCE_EXPORT_NOT_FINAL";
+  if (referenceSchema !== referenceClassification) {
+    context.addIssue({ code: "custom", path: ["sourceClassification"], message: "reference adapter schema and provenance must remain bound" });
+  }
+  if ((referenceSchema || referenceClassification) && value.snapshotKind !== "SAMPLE") {
+    context.addIssue({ code: "custom", path: ["snapshotKind"], message: "reference export can never be upgraded to FULL" });
+  }
+});
+
 export type SnapshotManifest = z.infer<typeof snapshotManifestSchema>;
+
+export function isReferenceOnlySnapshot(manifest: Pick<SnapshotManifest, "schemaVersion" | "sourceClassification">): boolean {
+  return manifest.schemaVersion === "v1-package-reference-1" || manifest.sourceClassification === "REFERENCE_EXPORT_NOT_FINAL";
+}
 
 const base = { sourceId, sourceUpdatedAt: dateTime.optional() };
 const schemas = {
@@ -67,6 +90,17 @@ export const attachmentManifestRecordSchema = z.object({
 }).strict();
 
 export type LegacyAttachmentManifestRecord = z.infer<typeof attachmentManifestRecordSchema>;
+
+export const migrationGovernanceIssueSchema = z.object({
+  sourceEntity: z.enum([...LEGACY_ENTITY_TYPES, "ATTACHMENT", "SNAPSHOT"]),
+  sourceId,
+  code: z.string().trim().min(1).max(191),
+  severity: z.enum(["WARNING", "REVIEW", "BLOCKER"]),
+  field: z.string().trim().min(1).max(191).optional(),
+  message: z.string().trim().min(1).max(2000),
+}).strict();
+
+export type MigrationGovernanceIssue = z.infer<typeof migrationGovernanceIssueSchema>;
 
 export const migrationResolutionFileSchema = z.object({
   version: z.string().trim().min(1).max(100),
