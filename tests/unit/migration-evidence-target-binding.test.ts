@@ -45,35 +45,33 @@ function applyModules(): ModuleRow[] {
   });
 }
 
-function targetState(modules: ModuleRow[], overrides: Partial<Record<string, unknown>> = {}) {
-  const moduleCounts = Object.fromEntries(modules.map((moduleRow) => [
-    moduleRow.module,
-    moduleRow.module === "ATTACHMENT"
-      ? moduleRow.attachmentSuccessCount
-      : moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount > 0 ? 1 : 0,
-  ]));
+function targetState(modules: ModuleRow[], unmappedOverrides: Record<string, number> = {}) {
+  const unmappedSkipCountsByModule = Object.fromEntries(modules
+    .filter((moduleRow) => moduleRow.module !== "ATTACHMENT")
+    .map((moduleRow) => [moduleRow.module, unmappedOverrides[moduleRow.module] ?? 0]));
   const legacyMapCountsByModule = Object.fromEntries(modules
     .filter((moduleRow) => moduleRow.module !== "ATTACHMENT")
-    .map((moduleRow) => [moduleRow.module, moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount]));
+    .map((moduleRow) => [
+      moduleRow.module,
+      moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount - unmappedSkipCountsByModule[moduleRow.module],
+    ]));
+  const moduleCounts = Object.fromEntries(modules.map((moduleRow) => {
+    if (moduleRow.module === "ATTACHMENT") return [moduleRow.module, moduleRow.attachmentSuccessCount];
+    const mapped = legacyMapCountsByModule[moduleRow.module];
+    return [moduleRow.module, mapped > 0 ? 1 : 0];
+  }));
   const legacyMapCount = Object.values(legacyMapCountsByModule).reduce((sum, count) => sum + count, 0);
   const attachmentCount = moduleCounts.ATTACHMENT;
   const base = {
     moduleCounts,
     legacyMapCountsByModule,
+    unmappedSkipCountsByModule,
     legacyMapCount,
     danglingLegacyMapCount: 0,
     recordCount: Object.values(moduleCounts).reduce((sum, count) => sum + count, 0),
     attachmentCount,
   };
-  const state = { ...base, ...overrides } as Record<string, unknown>;
-  state.sha256 = digest({
-    moduleCounts: state.moduleCounts,
-    legacyMapCountsByModule: state.legacyMapCountsByModule,
-    legacyMapCount: state.legacyMapCount,
-    danglingLegacyMapCount: state.danglingLegacyMapCount,
-    attachmentCount: state.attachmentCount,
-  });
-  return state;
+  return { ...base, sha256: digest(base) };
 }
 
 describe("migration target-state binding", () => {
@@ -91,12 +89,13 @@ describe("migration target-state binding", () => {
       if (moduleName !== "ATTACHMENT") moduleCounts[moduleName] = 0;
     }
     for (const moduleName of Object.keys(legacyMapCountsByModule)) legacyMapCountsByModule[moduleName] = 0;
-    expect(validateMigrationTargetStateBinding(modules, targetState(modules, {
+    expect(validateMigrationTargetStateBinding(modules, {
+      ...state,
       moduleCounts,
       legacyMapCountsByModule,
       legacyMapCount: 0,
       recordCount: moduleCounts.ATTACHMENT,
-    }))).toBe(false);
+    })).toBe(false);
   });
 
   it("rejects a LegacyMigrationMap total that is not reconciled per source module", () => {
@@ -104,10 +103,11 @@ describe("migration target-state binding", () => {
     const state = targetState(modules);
     const legacyMapCountsByModule = { ...(state.legacyMapCountsByModule as Record<string, number>) };
     legacyMapCountsByModule.ORGANIZATION = 0;
-    expect(validateMigrationTargetStateBinding(modules, targetState(modules, {
+    expect(validateMigrationTargetStateBinding(modules, {
+      ...state,
       legacyMapCountsByModule,
       legacyMapCount: Number(state.legacyMapCount) - 1,
-    }))).toBe(false);
+    })).toBe(false);
   });
 
   it("allows many source mappings to one distinct linked target while preserving map counts", () => {
@@ -122,11 +122,28 @@ describe("migration target-state binding", () => {
     expect(validateMigrationTargetStateBinding(modules, state)).toBe(true);
   });
 
-  it("rejects dangling map evidence and a self-reported target-state digest", () => {
+  it("allows a governed SKIP without a LegacyMigrationMap and distinguishes it from mapped rerun skips", () => {
     const modules = applyModules();
-    expect(validateMigrationTargetStateBinding(modules, targetState(modules, { danglingLegacyMapCount: 1 }))).toBe(false);
+    const organization = modules.find((moduleRow) => moduleRow.module === "ORGANIZATION")!;
+    organization.successCount = 0;
+    organization.skippedCount = 1;
+    const state = targetState(modules, { ORGANIZATION: 1 });
+    expect((state.legacyMapCountsByModule as Record<string, number>).ORGANIZATION).toBe(0);
+    expect((state.unmappedSkipCountsByModule as Record<string, number>).ORGANIZATION).toBe(1);
+    expect((state.moduleCounts as Record<string, number>).ORGANIZATION).toBe(0);
+    expect(validateMigrationTargetStateBinding(modules, state)).toBe(true);
+  });
+
+  it("rejects an unmapped-skip count larger than the reconciled skipped rows", () => {
+    const modules = applyModules();
     const state = targetState(modules);
-    state.sha256 = "0".repeat(64);
-    expect(validateMigrationTargetStateBinding(modules, state)).toBe(false);
+    const unmappedSkipCountsByModule = { ...(state.unmappedSkipCountsByModule as Record<string, number>), ORGANIZATION: 1 };
+    expect(validateMigrationTargetStateBinding(modules, { ...state, unmappedSkipCountsByModule })).toBe(false);
+  });
+
+  it("rejects dangling map evidence and a malformed database-state digest", () => {
+    const modules = applyModules();
+    expect(validateMigrationTargetStateBinding(modules, { ...targetState(modules), danglingLegacyMapCount: 1 })).toBe(false);
+    expect(validateMigrationTargetStateBinding(modules, { ...targetState(modules), sha256: "not-a-sha" })).toBe(false);
   });
 });
