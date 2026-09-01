@@ -38,8 +38,8 @@ test("admin approves create, manages primary contact, and disables/restores", as
   page.once("dialog", (dialog) => dialog.accept("E2E 审核通过")); const approved = page.waitForResponse((r) => r.url().endsWith(`/enterprise-change-requests/${created}/review`)); await page.getByRole("button", { name: "通过" }).click();
   expect((await approved).status()).toBe(200); await page.goto("/admin/enterprises?keyword=E2E%20审核通过企业"); await expect(page.getByRole("link", { name: "E2E 审核通过企业" })).toBeVisible();
   await page.goto(`/admin/enterprises/${enterpriseE2e.enterpriseId}`); await page.getByPlaceholder("姓名").fill("李总"); await page.getByPlaceholder("手机或座机").fill("13800003003"); await page.getByRole("button", { name: "新增联系人" }).click(); await expect(page.getByText(/李总/)).toBeVisible(); await page.getByText(/李总/).locator("..").getByRole("button", { name: "设为主要" }).click();
-  await page.getByPlaceholder("操作原因").fill("E2E 停用验证"); await page.getByRole("button", { name: "停用企业" }).click(); await expect(page.getByText(/DISABLED/)).toBeVisible();
-  await page.getByPlaceholder("操作原因").fill("E2E 恢复验证"); await page.getByRole("button", { name: "恢复企业" }).click(); await expect(page.getByText(/NORMAL/)).toBeVisible();
+  await page.getByPlaceholder("操作原因").fill("E2E 停用验证"); await page.getByRole("button", { name: "停用企业" }).click(); await expect(page.getByText("已停用", { exact: true })).toBeVisible();
+  await page.getByPlaceholder("操作原因").fill("E2E 恢复验证"); await page.getByRole("button", { name: "恢复企业" }).click(); await expect(page.getByText("正常", { exact: true })).toBeVisible();
 });
 
 test("minister can read but has no governance UI or API", async ({ page }) => {
