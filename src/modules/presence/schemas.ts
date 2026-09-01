@@ -62,6 +62,31 @@ export const presenceHistoryQuerySchema = z.object({
 
 export type PresenceStatus = "FUTURE" | "IN_BAO" | "ENDED" | "CANCELED";
 
+type PresenceSubmission = {
+  arrivalAt: Date;
+  expectedDepartureAt: Date;
+  origin?: string | null;
+  transportMode?: string | null;
+  trainFlightNo?: string | null;
+  note?: string | null;
+};
+
+export function normalizePresenceOptional(value: string | null | undefined): string | null {
+  return value === null || value === undefined || value.trim() === "" ? null : value.trim();
+}
+
+export function isSemanticallySamePresenceSubmission(
+  left: PresenceSubmission,
+  right: PresenceSubmission,
+) {
+  return left.arrivalAt.getTime() === right.arrivalAt.getTime()
+    && left.expectedDepartureAt.getTime() === right.expectedDepartureAt.getTime()
+    && normalizePresenceOptional(left.origin) === normalizePresenceOptional(right.origin)
+    && normalizePresenceOptional(left.transportMode) === normalizePresenceOptional(right.transportMode)
+    && normalizePresenceOptional(left.trainFlightNo) === normalizePresenceOptional(right.trainFlightNo)
+    && normalizePresenceOptional(left.note) === normalizePresenceOptional(right.note);
+}
+
 export function intervalsOverlap(
   left: { arrivalAt: Date; expectedDepartureAt: Date },
   right: { arrivalAt: Date; expectedDepartureAt: Date },

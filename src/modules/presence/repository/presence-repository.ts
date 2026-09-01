@@ -22,11 +22,11 @@ export class PresenceRepository {
     return tx.presenceReport.findUnique({ where: { id } });
   }
 
-  findOverlap(
+  findOverlaps(
     tx: PresenceTransaction,
     input: { personId: string; arrivalAt: Date; expectedDepartureAt: Date; excludeId?: string },
   ) {
-    return tx.presenceReport.findFirst({
+    return tx.presenceReport.findMany({
       where: {
         personId: input.personId,
         canceledAt: null,
@@ -34,7 +34,7 @@ export class PresenceRepository {
         expectedDepartureAt: { gt: input.arrivalAt },
         ...(input.excludeId ? { id: { not: input.excludeId } } : {}),
       },
-      select: { id: true, arrivalAt: true, expectedDepartureAt: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
   }
 

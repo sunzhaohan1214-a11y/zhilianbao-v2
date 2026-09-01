@@ -5,6 +5,8 @@ import {
   canSelfMutatePresence,
   derivePresenceStatus,
   intervalsOverlap,
+  isSemanticallySamePresenceSubmission,
+  normalizePresenceOptional,
   presenceCreateSchema,
 } from "@/modules/presence";
 
@@ -44,6 +46,24 @@ describe("M2-003 Presence interval and time rules", () => {
     expect(presenceCreateSchema.parse(valid).arrivalAt.toISOString()).toBe("2026-08-27T01:00:00.000Z");
     expect(presenceCreateSchema.safeParse({ ...valid, arrivalAt: "2026-08-27T09:00:00" }).success).toBe(false);
     expect(presenceCreateSchema.safeParse({ ...valid, expectedDepartureAt: valid.arrivalAt }).success).toBe(false);
+  });
+
+  it("normalizes optional content and recognizes only an exact semantic replay", () => {
+    const interval = {
+      arrivalAt: new Date("2026-09-10T01:00:00.000Z"),
+      expectedDepartureAt: new Date("2026-09-10T04:00:00.000Z"),
+    };
+    expect(normalizePresenceOptional("  南京  ")).toBe("南京");
+    expect(normalizePresenceOptional("   ")).toBeNull();
+    expect(normalizePresenceOptional(undefined)).toBeNull();
+    expect(isSemanticallySamePresenceSubmission(
+      { ...interval, origin: " 南京 ", transportMode: "", trainFlightNo: undefined, note: " 弱网重试 " },
+      { ...interval, origin: "南京", transportMode: null, trainFlightNo: "  ", note: "弱网重试" },
+    )).toBe(true);
+    expect(isSemanticallySamePresenceSubmission(
+      { ...interval, note: "原内容" },
+      { ...interval, note: "不同内容" },
+    )).toBe(false);
   });
 });
 
