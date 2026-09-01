@@ -70,6 +70,13 @@ function digestFromPointer(pointer: Pointer): string {
   return pointer.reference.slice("urn:sha256:".length);
 }
 
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (!value || typeof value !== "object") return value;
+  const object = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(object).sort().map((key) => [key, canonicalValue(object[key])]));
+}
+
 function moduleRows(manifestFiles: ManifestFile[], phase: "DRY_RUN" | "APPLY" | "RERUN"): ModuleRow[] {
   return MIGRATION_EVIDENCE_MODULES.map((module, index) => {
     const sourceCount = manifestFiles[index].count;
@@ -102,13 +109,28 @@ function attachmentInventory(attachmentFile: ManifestFile, phase: "DRY_RUN" | "A
 
 function targetState(manifestFiles: ManifestFile[]) {
   const moduleCounts = Object.fromEntries(MIGRATION_EVIDENCE_MODULES.map((module, index) => [module, manifestFiles[index].count]));
+  const legacyMapCountsByModule = Object.fromEntries(MIGRATION_EVIDENCE_MODULES
+    .filter((module) => module !== "ATTACHMENT")
+    .map((module, index) => [module, manifestFiles[index].count]));
+  const legacyMapCount = Object.values(legacyMapCountsByModule).reduce((sum, count) => sum + count, 0);
   const recordCount = Object.values(moduleCounts).reduce((sum, count) => sum + count, 0);
-  return {
+  const state = {
     moduleCounts,
+    legacyMapCountsByModule,
     recordCount,
     attachmentCount: moduleCounts.ATTACHMENT,
-    legacyMapCount: recordCount,
-    sha256: createHash("sha256").update(JSON.stringify(moduleCounts)).digest("hex"),
+    legacyMapCount,
+    danglingLegacyMapCount: 0,
+  };
+  return {
+    ...state,
+    sha256: createHash("sha256").update(JSON.stringify(canonicalValue({
+      moduleCounts,
+      legacyMapCountsByModule,
+      legacyMapCount,
+      danglingLegacyMapCount: state.danglingLegacyMapCount,
+      attachmentCount: state.attachmentCount,
+    }))).digest("hex"),
   };
 }
 
@@ -321,6 +343,24 @@ describe("FULL V1 migration evidence hardening", () => {
     await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
       status: "FAIL",
       errorCode: "MIGRATION_APPLY_RESULT_BINDING_INVALID",
+    });
+  });
+
+  it("rejects zero target and LegacyMigrationMap counts when APPLY reports successful rows", async () => {
+    const draft = await buildDraft();
+    const moduleCounts = draft.executionArtifacts.apply.targetState.moduleCounts as Record<string, number>;
+    const legacyMapCountsByModule = draft.executionArtifacts.apply.targetState.legacyMapCountsByModule as Record<string, number>;
+    for (const moduleName of MIGRATION_EVIDENCE_MODULES) {
+      if (moduleName !== "ATTACHMENT") moduleCounts[moduleName] = 0;
+    }
+    for (const moduleName of Object.keys(legacyMapCountsByModule)) legacyMapCountsByModule[moduleName] = 0;
+    draft.executionArtifacts.apply.targetState.recordCount = moduleCounts.ATTACHMENT;
+    draft.executionArtifacts.apply.targetState.legacyMapCount = 0;
+    draft.executionArtifacts.apply.targetState.sha256 = "0".repeat(64);
+    draft.executionArtifacts.rerun.targetState = structuredClone(draft.executionArtifacts.apply.targetState);
+    await expect(validateMigrationEvidence(await seal(draft), candidateSha, approvedTarget)).resolves.toMatchObject({
+      status: "FAIL",
+      errorCode: "MIGRATION_TARGET_STATE_BINDING_INVALID",
     });
   });
 

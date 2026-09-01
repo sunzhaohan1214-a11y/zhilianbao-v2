@@ -32,6 +32,7 @@ type ExecutionResult = {
 const MAX_MIGRATION_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_MIGRATION_SNAPSHOT_FILE_BYTES = 128 * 1024 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
+const NON_ATTACHMENT_MODULES = MIGRATION_EVIDENCE_MODULES.filter((moduleName) => moduleName !== "ATTACHMENT");
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -131,6 +132,64 @@ function canonicalValue(value: unknown): unknown {
 
 function sameCanonical(left: unknown, right: unknown): boolean {
   return JSON.stringify(canonicalValue(left)) === JSON.stringify(canonicalValue(right));
+}
+
+function targetStateDigest(input: {
+  moduleCounts: Record<string, unknown>;
+  legacyMapCountsByModule: Record<string, unknown>;
+  legacyMapCount: number;
+  danglingLegacyMapCount: number;
+  attachmentCount: number;
+}): string {
+  return createHash("sha256").update(JSON.stringify(canonicalValue(input))).digest("hex");
+}
+
+export function validateMigrationTargetStateBinding(modulesValue: unknown, targetStateValue: unknown): boolean {
+  if (!Array.isArray(modulesValue)) return false;
+  const modules = modulesValue.map(objectValue);
+  const state = objectValue(targetStateValue);
+  const moduleCounts = objectValue(state?.moduleCounts);
+  const legacyMapCountsByModule = objectValue(state?.legacyMapCountsByModule);
+  if (modules.some((moduleRow) => !moduleRow) || !state || !moduleCounts || !legacyMapCountsByModule
+    || !exactStringSet((modules as Record<string, unknown>[]).map((moduleRow) => String(moduleRow.module)), MIGRATION_EVIDENCE_MODULES)
+    || !exactStringSet(Object.keys(moduleCounts), MIGRATION_EVIDENCE_MODULES)
+    || !exactStringSet(Object.keys(legacyMapCountsByModule), NON_ATTACHMENT_MODULES)
+    || !Object.values(moduleCounts).every(nonNegativeInteger)
+    || !Object.values(legacyMapCountsByModule).every(nonNegativeInteger)
+    || !nonNegativeInteger(state.recordCount) || !nonNegativeInteger(state.attachmentCount)
+    || !nonNegativeInteger(state.legacyMapCount) || state.danglingLegacyMapCount !== 0
+    || !sha256Digest(state.sha256)) return false;
+
+  let expectedLegacyMapCount = 0;
+  for (const moduleName of MIGRATION_EVIDENCE_MODULES) {
+    const moduleRow = (modules as Record<string, unknown>[]).find((candidate) => candidate.module === moduleName);
+    if (!moduleRow || !nonNegativeInteger(moduleRow.successCount) || !nonNegativeInteger(moduleRow.mergedCount)
+      || !nonNegativeInteger(moduleRow.skippedCount) || !nonNegativeInteger(moduleRow.attachmentSuccessCount)) return false;
+    const distinctTargetCount = moduleCounts[moduleName];
+    if (!nonNegativeInteger(distinctTargetCount)) return false;
+
+    if (moduleName === "ATTACHMENT") {
+      if (distinctTargetCount !== moduleRow.attachmentSuccessCount) return false;
+      continue;
+    }
+
+    const expectedMappedSources = moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount;
+    if (legacyMapCountsByModule[moduleName] !== expectedMappedSources) return false;
+    expectedLegacyMapCount += expectedMappedSources;
+    if (expectedMappedSources === 0 ? distinctTargetCount !== 0 : distinctTargetCount < 1 || distinctTargetCount > expectedMappedSources) return false;
+  }
+
+  const recordCount = Object.values(moduleCounts).reduce<number>((sum, count) => sum + (count as number), 0);
+  if (state.recordCount !== recordCount || state.attachmentCount !== moduleCounts.ATTACHMENT
+    || state.legacyMapCount !== expectedLegacyMapCount) return false;
+
+  return state.sha256 === targetStateDigest({
+    moduleCounts,
+    legacyMapCountsByModule,
+    legacyMapCount: state.legacyMapCount,
+    danglingLegacyMapCount: state.danglingLegacyMapCount as number,
+    attachmentCount: state.attachmentCount,
+  });
 }
 
 function countNdjsonRecords(bytes: Uint8Array): number | null {
@@ -362,6 +421,10 @@ export async function validateMigrationEvidence(
   }
   if (!sameCanonical(apply.targetState, rerun.targetState)) {
     return failure("MIGRATION_RERUN_NOT_IDEMPOTENT", coreValidation.evidenceRef);
+  }
+  if (!validateMigrationTargetStateBinding(apply.modules, apply.targetState)
+    || !validateMigrationTargetStateBinding(rerun.modules, rerun.targetState)) {
+    return failure("MIGRATION_TARGET_STATE_BINDING_INVALID", coreValidation.evidenceRef);
   }
 
   return coreValidation;

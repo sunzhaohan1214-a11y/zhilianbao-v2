@@ -4,8 +4,8 @@ import { validateMigrationEvidence as targetBindingValidator } from "../../src/m
 import { validateMigrationEvidence as baseValidator } from "../../src/modules/hardening/migration-evidence.ts";
 
 describe("migration evidence public entrypoint", () => {
-  it("exports the target-state-bound validator used by the release script", () => {
+  it("cannot bypass target-state binding through the base validator", () => {
     expect(publicValidator).toBe(targetBindingValidator);
-    expect(publicValidator).not.toBe(baseValidator);
+    expect(publicValidator).toBe(baseValidator);
   });
 });

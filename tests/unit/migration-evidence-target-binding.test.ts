@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { MIGRATION_EVIDENCE_MODULES } from "@/modules/hardening/release-readiness-core";
-import { validateMigrationTargetStateBinding } from "@/modules/hardening/migration-evidence-target-binding";
+import { validateMigrationTargetStateBinding } from "@/modules/hardening/migration-evidence";
 
 type ModuleRow = {
   module: string;
