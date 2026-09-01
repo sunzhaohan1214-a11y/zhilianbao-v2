@@ -2,12 +2,80 @@
 
 :root {
   color-scheme: light;
-  --background: #f5f5f7;
-  --foreground: #1d1d1f;
-  --muted: #6e6e73;
-  --surface: rgba(255, 255, 255, 0.92);
-  --line: rgba(0, 0, 0, 0.08);
-  --accent: #1677ff;
+
+  /* Semantic color tokens. Pages consume meaning, never a one-off palette. */
+  --bg-primary: #f5f7fa;
+  --bg-grouped: #edf1f6;
+  --surface: #ffffff;
+  --surface-secondary: #f8fafc;
+  --text-primary: #101828;
+  --text-secondary: #475467;
+  --text-tertiary: #667085;
+  --separator: #e4e7ec;
+  --brand: #1769ff;
+  --brand-hover: #0b57e3;
+  --brand-soft: #eaf1ff;
+  --water: #426d7a;
+  --water-soft: #edf5f6;
+  --lotus: #5f7d65;
+  --lotus-soft: #f1f6f1;
+  --success: #079455;
+  --success-soft: #ecfdf3;
+  --warning: #dc6803;
+  --warning-soft: #fffaeb;
+  --danger: #d92d20;
+  --danger-soft: #fef3f2;
+  --info: #1570ef;
+  --info-soft: #eff8ff;
+  --focus-ring: rgba(23, 105, 255, 0.34);
+
+  /* Spacing, radius and elevation tokens follow the approved 4px system. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --radius-s: 0.5rem;
+  --radius-m: 0.75rem;
+  --radius-l: 1rem;
+  --radius-xl: 1.25rem;
+  --shadow-subtle: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-raised: 0 12px 32px rgba(16, 24, 40, 0.09);
+
+  /* Compatibility aliases for existing pages during the staged migration. */
+  --background: var(--bg-primary);
+  --foreground: var(--text-primary);
+  --muted: var(--text-tertiary);
+  --line: var(--separator);
+  --accent: var(--brand);
+}
+
+@theme inline {
+  --color-background: var(--bg-primary);
+  --color-grouped: var(--bg-grouped);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-foreground: var(--text-primary);
+  --color-muted: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-separator: var(--separator);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-water: var(--water);
+  --color-water-soft: var(--water-soft);
+  --color-lotus: var(--lotus);
+  --color-lotus-soft: var(--lotus-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 * {
@@ -21,14 +89,65 @@ body {
 
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea,
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--brand-soft);
+  color: var(--text-primary);
+}
+
+dialog::backdrop {
+  background: rgba(16, 24, 40, 0.38);
+  backdrop-filter: blur(2px);
+}
+
+/* A restrained Baoying water-and-lotus atmosphere, reserved for product shells. */
+.baoying-atmosphere {
+  background-color: var(--bg-primary);
+  background-image:
+    radial-gradient(circle at 8% 10%, rgba(95, 125, 101, 0.09), transparent 22rem),
+    radial-gradient(ellipse at 92% 88%, rgba(82, 127, 141, 0.11), transparent 28rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
