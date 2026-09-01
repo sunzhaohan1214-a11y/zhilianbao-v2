@@ -13,7 +13,6 @@ export type ApprovedMigrationTarget = {
   databaseId?: string;
 };
 
-type EvidencePointer = { reference?: unknown; sourcePath?: unknown };
 type EvidenceFileHandle = Pick<FileHandle, "close" | "read" | "stat">;
 type LoadedPointer = { bytes: Uint8Array; digest: string };
 type ExecutionPhase = "DRY_RUN" | "APPLY" | "RERUN";
@@ -318,7 +317,8 @@ export async function validateMigrationEvidence(
   const manifestPointer = objectValue(details.snapshotManifest);
   const loadedManifest = manifestPointer ? await readImmutableLocalPointer(manifestPointer, MAX_MIGRATION_DOCUMENT_BYTES) : null;
   const manifest = loadedManifest ? parseSnapshotManifest(loadedManifest.bytes) : null;
-  if (!manifest || manifest.snapshotId !== details.sourceSnapshotIdentity || loadedManifest?.digest !== details.manifestSha256) {
+  if (!loadedManifest || !manifest || manifest.snapshotId !== details.sourceSnapshotIdentity
+    || loadedManifest.digest !== details.manifestSha256) {
     return failure("MIGRATION_SNAPSHOT_MANIFEST_INVALID", coreValidation.evidenceRef);
   }
 
