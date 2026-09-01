@@ -104,4 +104,5 @@ test("@weak-network Presence response-lost retry returns the committed record ex
   await expect(page).toHaveURL(/\/presence$/);
   await expect(page.getByLabel("备注（选填）")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "提交报备" })).toHaveCount(0);
+  expect(calls).toBe(2);
 });
