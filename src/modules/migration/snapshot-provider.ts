@@ -3,7 +3,16 @@ import { createReadStream } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
-import { attachmentManifestRecordSchema, snapshotManifestSchema, validateLegacyPayload, type LegacyAttachmentManifestRecord, type SnapshotManifest } from "./source-contract";
+import {
+  attachmentManifestRecordSchema,
+  isReferenceOnlySnapshot,
+  migrationGovernanceIssueSchema,
+  snapshotManifestSchema,
+  validateLegacyPayload,
+  type LegacyAttachmentManifestRecord,
+  type MigrationGovernanceIssue,
+  type SnapshotManifest,
+} from "./source-contract";
 import { canonicalJson, sourceFingerprint } from "./fingerprint";
 import { LEGACY_ENTITY_TYPES, type LegacyEntityType, type LegacyRecord, type MigrationPreviewIssue } from "./types";
 
@@ -14,11 +23,13 @@ const ENTITY_FILES: Record<LegacyEntityType, string> = {
   REIMBURSEMENT: "entities/reimbursements.ndjson", HELP: "entities/helps.ndjson", ANNOUNCEMENT: "entities/announcements.ndjson",
   ROLE: "entities/roles.ndjson",
 };
+export const GOVERNANCE_ISSUES_FILE = "governance/manual-review.ndjson";
 
 export interface LegacySourceProvider {
   describeSnapshot(): Promise<{ manifest: SnapshotManifest; manifestSha256: string }>;
   list(entityType: LegacyEntityType): AsyncGenerator<{ record?: LegacyRecord; issues: MigrationPreviewIssue[] }>;
   listAttachments(): AsyncGenerator<{ record?: LegacyAttachmentManifestRecord; issues: MigrationPreviewIssue[] }>;
+  listGovernanceIssues?(): AsyncGenerator<MigrationGovernanceIssue>;
   getAttachment(record: LegacyAttachmentManifestRecord): Promise<Buffer>;
 }
 
@@ -45,6 +56,9 @@ export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvid
   async describeSnapshot() {
     const manifestPath = await this.safePath("snapshot.json");
     const manifest = snapshotManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
+    if (isReferenceOnlySnapshot(manifest) && !manifest.files[GOVERNANCE_ISSUES_FILE]) {
+      throw new Error("MIGRATION_REFERENCE_GOVERNANCE_EVIDENCE_MISSING");
+    }
     for (const [relativePath, expected] of Object.entries(manifest.files)) {
       const filePath = await this.safePath(relativePath);
       const buffer = await readFile(filePath);
@@ -94,6 +108,26 @@ export class SnapshotDirectoryLegacySourceProvider implements LegacySourceProvid
       const parsed = attachmentManifestRecordSchema.safeParse(raw);
       if (!parsed.success) yield { issues: parsed.error.issues.map((issue) => ({ sourceEntity: "ATTACHMENT" as const, sourceId: `LINE-${lineNumber}`, code: "MIGRATION_SOURCE_INVALID", severity: "BLOCKER" as const, field: issue.path.join("."), message: issue.message })) };
       else yield { record: parsed.data, issues: [] };
+    }
+  }
+
+  async *listGovernanceIssues(): AsyncGenerator<MigrationGovernanceIssue> {
+    const manifestPath = await this.safePath("snapshot.json");
+    const manifest = snapshotManifestSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
+    if (!manifest.files[GOVERNANCE_ISSUES_FILE]) return;
+    for await (const { line, lineNumber } of this.lines(GOVERNANCE_ISSUES_FILE)) {
+      let raw: unknown;
+      try { raw = JSON.parse(line); }
+      catch {
+        yield { sourceEntity: "SNAPSHOT", sourceId: `LINE-${lineNumber}`, code: "MIGRATION_GOVERNANCE_ISSUE_INVALID", severity: "BLOCKER", message: "治理问题清单不是合法 JSON" };
+        continue;
+      }
+      const parsed = migrationGovernanceIssueSchema.safeParse(raw);
+      if (!parsed.success) {
+        yield { sourceEntity: "SNAPSHOT", sourceId: `LINE-${lineNumber}`, code: "MIGRATION_GOVERNANCE_ISSUE_INVALID", severity: "BLOCKER", message: "治理问题清单字段不符合严格合同" };
+      } else {
+        yield parsed.data;
+      }
     }
   }
 
