@@ -43,7 +43,7 @@ test("public submit is minimal and the responsible township sees the immutable s
   await login(page, e2eUsers.township);
   await page.goto("/demands");
   await page.getByRole("link", { name: /进入需求线索工作池/ }).click();
-  await expect(page.getByRole("heading", { name: "待核验线索" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "需求线索" })).toBeVisible();
   await page.getByRole("link", { name: new RegExp(`E2E 公开线索 ${suffix}`) }).click();
   await expect(page.getByText("原始提交 / 走访来源 · 永久快照")).toBeVisible();
   await expect(page.getByText("企业公开提交的原始内容，镇区核验不得覆盖。")).toBeVisible();
