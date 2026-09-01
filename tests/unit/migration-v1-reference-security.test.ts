@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   manifestAllowsApply,
@@ -16,6 +18,11 @@ import { assertLegacyMemberIdPathSafe } from "@/modules/migration/v1-package-ada
 import { LEGACY_ENTITY_TYPES } from "@/modules/migration/types";
 
 const temporaryRoots: string[] = [];
+const execFileAsync = promisify(execFile);
+
+async function initializeGitRoot(root: string): Promise<void> {
+  await execFileAsync("git", ["init", "--quiet"], { cwd: root });
+}
 
 function digest(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
@@ -126,14 +133,16 @@ describe("V1 reference source safety contract", () => {
   it("rejects sensitive output in a Git worktree unless it is under the dedicated ignored root", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "v1-reference-git-root-"));
     temporaryRoots.push(root);
-    await mkdir(path.join(root, ".git"));
+    await initializeGitRoot(root);
     await writeFile(path.join(root, ".gitignore"), "/.migration-work\n", "utf8");
     await expect(assertPrivateMigrationOutput(path.join(root, "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
     await expect(assertPrivateMigrationOutput(path.join(root, ".migration-work", "prepared"))).resolves.toBeUndefined();
+    await writeFile(path.join(root, ".gitignore"), "/.migration-work\n!/*\n", "utf8");
+    await expect(assertPrivateMigrationOutput(path.join(root, ".migration-work", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
 
     const unsafeRoot = await mkdtemp(path.join(tmpdir(), "v1-reference-unignored-root-"));
     temporaryRoots.push(unsafeRoot);
-    await mkdir(path.join(unsafeRoot, ".git"));
+    await initializeGitRoot(unsafeRoot);
     await writeFile(path.join(unsafeRoot, ".gitignore"), "node_modules\n", "utf8");
     await expect(assertPrivateMigrationOutput(path.join(unsafeRoot, ".migration-work", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
   });
@@ -141,7 +150,7 @@ describe("V1 reference source safety contract", () => {
   it("rejects a symlinked private-output root or existing descendant", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "v1-reference-symlink-root-"));
     temporaryRoots.push(root);
-    await mkdir(path.join(root, ".git"));
+    await initializeGitRoot(root);
     await mkdir(path.join(root, "tracked"));
     await writeFile(path.join(root, ".gitignore"), "/.migration-work\n", "utf8");
     await symlink(path.join(root, "tracked"), path.join(root, ".migration-work"), "dir");
@@ -164,5 +173,14 @@ describe("V1 reference source safety contract", () => {
     temporaryRoots.push(root, aliasRoot);
     await symlink(root, path.join(aliasRoot, "output-alias"), "dir");
     await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "output-alias", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
+  });
+
+  it("treats a symlinked .git marker as a worktree instead of accepting tracked output", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "v1-reference-git-marker-"));
+    temporaryRoots.push(root);
+    await initializeGitRoot(root);
+    await rename(path.join(root, ".git"), path.join(root, "git-metadata"));
+    await symlink("git-metadata", path.join(root, ".git"), "dir");
+    await expect(assertPrivateMigrationOutput(path.join(root, "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFile, lstat, mkdir, readFile, realpath, readdir, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, realpath, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { ENTITY_FILES } from "./snapshot-provider";
@@ -7,6 +7,8 @@ import { resolveSafeMigrationOutputPath } from "./private-output-guard";
 import { LEGACY_ENTITY_TYPES, type LegacyEntityType } from "./types";
 
 const sha256Pattern = /^[a-f0-9]{64}$/;
+const privateDirectoryMode = 0o700;
+const privateFileMode = 0o600;
 const packageManifestSchema = z.object({
   packageName: z.string().trim().min(1).max(191),
   fileCount: z.number().int().nonnegative(),
@@ -221,13 +223,20 @@ function parseChinesePeriod(value: string): { startDate: string; endDate: string
   };
 }
 
-function dateOnly(iso: string): string {
-  return iso.slice(0, 10);
+function shanghaiDateOnly(iso: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(iso));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function memberKind(period: { startDate: string; endDate: string } | undefined, snapshotAt: string) {
   if (!period) return "ALUMNI_HISTORICAL" as const;
-  const current = dateOnly(snapshotAt);
+  const current = shanghaiDateOnly(snapshotAt);
   if (period.startDate > current) return "FUTURE_MEMBER_CANDIDATE" as const;
   if (period.endDate >= current) return "CURRENT" as const;
   return "ALUMNI_HISTORICAL" as const;
@@ -238,7 +247,7 @@ function ndjson(values: readonly JsonObject[]): string {
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: privateFileMode });
 }
 
 function describeCoordinates(value: unknown, state: { minLng: number; maxLng: number; minLat: number; maxLat: number; valid: boolean }) {
@@ -465,10 +474,10 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     return value;
   }).sort((left, right) => String(left.sourceId).localeCompare(String(right.sourceId)));
 
-  await mkdir(outputRoot);
-  await mkdir(path.join(outputRoot, "entities"));
-  await mkdir(path.join(outputRoot, "attachments", "blobs", "members"), { recursive: true });
-  await mkdir(path.join(outputRoot, "governance"));
+  await mkdir(outputRoot, { mode: privateDirectoryMode });
+  await mkdir(path.join(outputRoot, "entities"), { mode: privateDirectoryMode });
+  await mkdir(path.join(outputRoot, "attachments", "blobs", "members"), { recursive: true, mode: privateDirectoryMode });
+  await mkdir(path.join(outputRoot, "governance"), { mode: privateDirectoryMode });
 
   const entityValues = Object.fromEntries(LEGACY_ENTITY_TYPES.map((entityType) => [entityType, [] as JsonObject[]])) as Record<LegacyEntityType, JsonObject[]>;
   entityValues.ORGANIZATION = organizations;
@@ -478,7 +487,7 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
   for (const entityType of LEGACY_ENTITY_TYPES) {
     const body = ndjson(entityValues[entityType]);
     const relative = ENTITY_FILES[entityType];
-    await writeFile(path.join(outputRoot, relative), body, "utf8");
+    await writeFile(path.join(outputRoot, relative), body, { encoding: "utf8", mode: privateFileMode });
     fileManifest[relative] = { count: entityValues[entityType].length, sha256: digest(body) };
   }
 
@@ -493,7 +502,9 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     const extension = path.extname(sourceRelative).toLowerCase();
     const sourceId = `MEMBER-${String(member.id)}`;
     const targetRelative = `members/${sourceId}${extension}`;
-    await copyFile(sourceAbsolute, path.join(outputRoot, "attachments", "blobs", targetRelative));
+    const targetAbsolute = path.join(outputRoot, "attachments", "blobs", targetRelative);
+    await copyFile(sourceAbsolute, targetAbsolute);
+    await chmod(targetAbsolute, privateFileMode);
     referencedMedia.add(sourceRelative);
     attachmentRows.push({
       sourceAttachmentId: `MEMBER-PHOTO-${String(member.id)}`,
@@ -508,7 +519,7 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
   }
   attachmentRows.sort((left, right) => String(left.sourceAttachmentId).localeCompare(String(right.sourceAttachmentId)));
   const attachmentBody = ndjson(attachmentRows);
-  await writeFile(path.join(outputRoot, "attachments", "manifest.ndjson"), attachmentBody, "utf8");
+  await writeFile(path.join(outputRoot, "attachments", "manifest.ndjson"), attachmentBody, { encoding: "utf8", mode: privateFileMode });
   fileManifest["attachments/manifest.ndjson"] = { count: attachmentRows.length, sha256: digest(attachmentBody) };
 
   const allMedia = (await listRegularFiles(path.join(sourceRoot, "media", "member-photos"))).map((value) => `media/member-photos/${value}`);
@@ -566,7 +577,7 @@ export async function prepareV1DataPackage(input: { sourceRoot: string; outputRo
     gitEligible: false,
     fullRehearsalEligible: false,
   });
-  await writeFile(path.join(outputRoot, "governance", "manual-review.ndjson"), ndjson(review as unknown as JsonObject[]), "utf8");
+  await writeFile(path.join(outputRoot, "governance", "manual-review.ndjson"), ndjson(review as unknown as JsonObject[]), { encoding: "utf8", mode: privateFileMode });
   await writeJson(path.join(outputRoot, "governance", "map-candidates.json"), {
     policy: "REVIEW_BEFORE_MAP_BOUNDARY_VERSION; NEVER_INFER_RESPONSIBLE_AREA_FROM_COORDINATES",
     candidates: mapCandidates,

@@ -55,4 +55,4 @@ npm run migration:v1 -- \
 
 ## 5. 安全
 
-适配器在 Git 内外均拒绝私有输出路径任一已存在的 symlink 祖先，并用实际解析路径校验源/输出重叠；同时拒绝路径穿越、checksum 覆盖不完整和 manifest 数量/字节/哈希不一致。dry-run 问题报告不写原始 `sourceSnapshot` 或候选对象标识，只保留来源 ID、问题代码和候选数量。
+适配器在 Git 内外均拒绝私有输出路径任一已存在的 symlink 祖先，并用实际解析路径校验源/输出重叠；Git 内输出是否被忽略由 `git check-ignore` 的最终规则判定。输出目录固定为 `0700`、敏感文件固定为 `0600`，批次日期按 `Asia/Shanghai` 自然日分类。同时拒绝路径穿越、checksum 覆盖不完整和 manifest 数量/字节/哈希不一致。dry-run 问题报告不写原始 `sourceSnapshot` 或候选对象标识，只保留来源 ID、问题代码和候选数量。

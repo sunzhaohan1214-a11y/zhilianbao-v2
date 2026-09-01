@@ -1,5 +1,9 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 async function existingAncestor(value: string): Promise<string> {
   let current = path.resolve(value);
@@ -17,10 +21,11 @@ async function existingAncestor(value: string): Promise<string> {
 
 async function hasGitMarker(directory: string): Promise<boolean> {
   try {
-    const stat = await lstat(path.join(directory, ".git"));
-    return stat.isDirectory() || stat.isFile();
-  } catch {
-    return false;
+    await lstat(path.join(directory, ".git"));
+    return true;
+  } catch (error) {
+    if (isMissingPath(error)) return false;
+    throw new Error("V1_PACKAGE_OUTPUT_GIT_MARKER_UNVERIFIED");
   }
 }
 
@@ -71,15 +76,16 @@ export async function resolveSafeMigrationOutputPath(outputRoot: string): Promis
   return path.resolve(ancestorReal, path.relative(ancestor, resolved));
 }
 
-function migrationWorkIsIgnored(gitignore: string): boolean {
-  const rules = gitignore.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
-  let ignored = false;
-  for (const rule of rules) {
-    if (["/.migration-work", "/.migration-work/", ".migration-work", ".migration-work/"].includes(rule)) ignored = true;
-    if (["!/.migration-work", "!/.migration-work/", "!.migration-work", "!.migration-work/"].includes(rule)
-      || rule.startsWith("!/.migration-work/") || rule.startsWith("!.migration-work/")) ignored = false;
+async function assertOutputIgnoredByGit(worktree: string, outputRoot: string): Promise<void> {
+  const relative = path.relative(worktree, outputRoot);
+  try {
+    await execFileAsync("git", ["check-ignore", "--quiet", "--no-index", "--", relative], { cwd: worktree });
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === 1) {
+      throw new Error("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
+    }
+    throw new Error("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
   }
-  return ignored;
 }
 
 export async function assertPrivateMigrationOutput(outputRoot: string): Promise<void> {
@@ -90,11 +96,5 @@ export async function assertPrivateMigrationOutput(outputRoot: string): Promise<
   if (!within(privateRoot, resolved) || resolved === privateRoot) {
     throw new Error("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
   }
-  let gitignore: string;
-  try {
-    gitignore = await readFile(path.join(worktree, ".gitignore"), "utf8");
-  } catch {
-    throw new Error("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
-  }
-  if (!migrationWorkIsIgnored(gitignore)) throw new Error("V1_PACKAGE_OUTPUT_GIT_IGNORE_UNVERIFIED");
+  await assertOutputIgnoredByGit(worktree, resolved);
 }

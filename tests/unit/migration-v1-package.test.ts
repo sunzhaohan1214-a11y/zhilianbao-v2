@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ async function writeJson(root: string, relative: string, value: unknown) {
   await writeFile(absolute, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-async function createPackage(): Promise<{ root: string; output: string }> {
+async function createPackage(generatedAt = "2026-08-31T15:14:14.898Z"): Promise<{ root: string; output: string }> {
   const parent = await mkdtemp(path.join(tmpdir(), "zhilianbao-v1-package-"));
   temporaryRoots.push(parent);
   const root = path.join(parent, "source");
@@ -61,7 +61,7 @@ async function createPackage(): Promise<{ root: string; output: string }> {
     qualification: ["高新"], industries: ["制造"], tags: ["重点"], lng: "119.1", lat: "33.2", phone: "0514-88000000",
   }]);
   await writeJson(root, "reports/data-quality-report.json", {
-    generatedAt: "2026-08-31T15:14:14.898Z", timezone: "Asia/Shanghai", counts: {},
+    generatedAt, timezone: "Asia/Shanghai", counts: {},
     geoJson: [{ file: "maps/geojson/baoying_county.geojson.json", type: "FeatureCollection", featureCount: 1, validFeatureCollection: true }],
     warnings: [], exclusions: {},
   });
@@ -112,6 +112,10 @@ describe("V1 local reference package adapter", () => {
     const matchPreview = JSON.parse(await readFile(path.join(fixture.output, "governance/dispatch-organization-location-match-preview.json"), "utf8")) as { summary: Record<string, number>; matches: Array<Record<string, unknown>> };
     expect(matchPreview.summary).toEqual({ organizationCount: 1, uniqueCandidateCount: 1, unmatchedCount: 0, ambiguousCount: 0 });
     expect(matchPreview.matches[0]).toMatchObject({ candidateCount: 1, disposition: "REVIEW_REQUIRED", reviewCode: "DISPATCH_LOCATION_MATCH_CONFIRMATION_REQUIRED" });
+    expect((await stat(fixture.output)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(fixture.output, "snapshot.json"))).mode & 0o777).toBe(0o600);
+    const attachmentManifest = (await readFile(path.join(fixture.output, "attachments/manifest.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { relativePath: string });
+    expect((await stat(path.join(fixture.output, "attachments", "blobs", attachmentManifest[0].relativePath))).mode & 0o777).toBe(0o600);
   });
 
   it("fails closed when a checksummed payload changes", async () => {
@@ -131,5 +135,13 @@ describe("V1 local reference package adapter", () => {
     await symlink(fixture.root, aliasRoot, "dir");
     await expect(prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: path.join(aliasRoot, "generated") })).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
     await expect(readFile(path.join(fixture.root, "generated", "snapshot.json"), "utf8")).rejects.toThrow();
+  });
+
+  it("classifies batch membership by the Asia/Shanghai natural day", async () => {
+    const fixture = await createPackage("2026-12-31T16:30:00.000Z");
+    await prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: fixture.output });
+    const people = (await readFile(path.join(fixture.output, "entities/persons.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { sourceId: string; memberKind: string });
+    expect(people.find((person) => person.sourceId === "MEMBER-1")?.memberKind).toBe("ALUMNI_HISTORICAL");
+    expect(people.find((person) => person.sourceId === "MEMBER-2")?.memberKind).toBe("CURRENT");
   });
 });
