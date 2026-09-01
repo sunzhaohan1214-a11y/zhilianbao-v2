@@ -3,15 +3,16 @@ import { analyzeLegacyRecord, type MigrationMatchContext } from "./adapters";
 import { reconcileSourceAttachment, type AttachmentPreviewResult } from "./attachment-reconciliation";
 import { finalizeReconciliation, emptyModule } from "./reconciliation";
 import type { LegacySourceProvider } from "./snapshot-provider";
+import { isReferenceOnlySnapshot } from "./source-contract";
 import { LEGACY_ENTITY_TYPES, type LegacyRecord, type MigrationPreviewIssue, type ReconciliationModule } from "./types";
 
-function countOutcome(module: ReturnType<typeof emptyModule>, classification: ReturnType<typeof analyzeLegacyRecord>["classification"]) {
-  module.sourceCount += 1;
-  if (classification === "SUCCESS") module.successCount += 1;
-  else if (classification === "FAILED") module.failedCount += 1;
-  else if (classification === "SKIPPED") module.skippedCount += 1;
-  else if (classification === "MERGED") module.mergedCount += 1;
-  else module.reviewCount += 1;
+function countOutcome(moduleResult: ReturnType<typeof emptyModule>, classification: ReturnType<typeof analyzeLegacyRecord>["classification"]) {
+  moduleResult.sourceCount += 1;
+  if (classification === "SUCCESS") moduleResult.successCount += 1;
+  else if (classification === "FAILED") moduleResult.failedCount += 1;
+  else if (classification === "SKIPPED") moduleResult.skippedCount += 1;
+  else if (classification === "MERGED") moduleResult.mergedCount += 1;
+  else moduleResult.reviewCount += 1;
 }
 
 function addSourceCandidate(context: MigrationMatchContext, record: LegacyRecord) {
@@ -24,8 +25,13 @@ function addSourceCandidate(context: MigrationMatchContext, record: LegacyRecord
 
 export async function runMigrationPreview(provider: LegacySourceProvider, input: { mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL"; fullSnapshotAvailable?: boolean }) {
   const { manifest, manifestSha256 } = await provider.describeSnapshot();
-  if (input.mode === "FULL_REHEARSAL" && manifest.snapshotKind !== "FULL") throw new Error("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT");
+  if (input.mode === "FULL_REHEARSAL" && (manifest.snapshotKind !== "FULL" || isReferenceOnlySnapshot(manifest))) {
+    throw new Error("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT");
+  }
   const issues: MigrationPreviewIssue[] = [];
+  if (provider.listGovernanceIssues) {
+    for await (const issue of provider.listGovernanceIssues()) issues.push(issue);
+  }
   const modules: ReconciliationModule[] = [];
   const context: MigrationMatchContext = { people: [], enterprises: [], talents: [], policies: [] };
   for (const entityType of LEGACY_ENTITY_TYPES) {
