@@ -28,33 +28,33 @@ function digest(value: unknown): string {
 }
 
 function applyModules(): ModuleRow[] {
-  return MIGRATION_EVIDENCE_MODULES.map((module) => {
-    const sourceCount = module === "ATTACHMENT" ? 3 : 1;
+  return MIGRATION_EVIDENCE_MODULES.map((moduleName) => {
+    const sourceCount = moduleName === "ATTACHMENT" ? 3 : 1;
     return {
-      module,
+      module: moduleName,
       sourceCount,
       successCount: sourceCount,
       failedCount: 0,
       skippedCount: 0,
       mergedCount: 0,
       reviewCount: 0,
-      attachmentCount: module === "ATTACHMENT" ? sourceCount : 0,
-      attachmentSuccessCount: module === "ATTACHMENT" ? sourceCount : 0,
+      attachmentCount: moduleName === "ATTACHMENT" ? sourceCount : 0,
+      attachmentSuccessCount: moduleName === "ATTACHMENT" ? sourceCount : 0,
       attachmentIssueCount: 0,
     };
   });
 }
 
 function targetState(modules: ModuleRow[], overrides: Partial<Record<string, unknown>> = {}) {
-  const moduleCounts = Object.fromEntries(modules.map((module) => [
-    module.module,
-    module.module === "ATTACHMENT"
-      ? module.attachmentSuccessCount
-      : module.successCount + module.mergedCount + module.skippedCount > 0 ? 1 : 0,
+  const moduleCounts = Object.fromEntries(modules.map((moduleRow) => [
+    moduleRow.module,
+    moduleRow.module === "ATTACHMENT"
+      ? moduleRow.attachmentSuccessCount
+      : moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount > 0 ? 1 : 0,
   ]));
   const legacyMapCountsByModule = Object.fromEntries(modules
-    .filter((module) => module.module !== "ATTACHMENT")
-    .map((module) => [module.module, module.successCount + module.mergedCount + module.skippedCount]));
+    .filter((moduleRow) => moduleRow.module !== "ATTACHMENT")
+    .map((moduleRow) => [moduleRow.module, moduleRow.successCount + moduleRow.mergedCount + moduleRow.skippedCount]));
   const legacyMapCount = Object.values(legacyMapCountsByModule).reduce((sum, count) => sum + count, 0);
   const attachmentCount = moduleCounts.ATTACHMENT;
   const base = {
@@ -87,10 +87,10 @@ describe("migration target-state binding", () => {
     const state = targetState(modules);
     const moduleCounts = { ...(state.moduleCounts as Record<string, number>) };
     const legacyMapCountsByModule = { ...(state.legacyMapCountsByModule as Record<string, number>) };
-    for (const module of MIGRATION_EVIDENCE_MODULES) {
-      if (module !== "ATTACHMENT") moduleCounts[module] = 0;
+    for (const moduleName of MIGRATION_EVIDENCE_MODULES) {
+      if (moduleName !== "ATTACHMENT") moduleCounts[moduleName] = 0;
     }
-    for (const module of Object.keys(legacyMapCountsByModule)) legacyMapCountsByModule[module] = 0;
+    for (const moduleName of Object.keys(legacyMapCountsByModule)) legacyMapCountsByModule[moduleName] = 0;
     expect(validateMigrationTargetStateBinding(modules, targetState(modules, {
       moduleCounts,
       legacyMapCountsByModule,
@@ -112,7 +112,7 @@ describe("migration target-state binding", () => {
 
   it("allows many source mappings to one distinct linked target while preserving map counts", () => {
     const modules = applyModules();
-    const organization = modules.find((module) => module.module === "ORGANIZATION")!;
+    const organization = modules.find((moduleRow) => moduleRow.module === "ORGANIZATION")!;
     organization.sourceCount = 2;
     organization.successCount = 0;
     organization.mergedCount = 2;
