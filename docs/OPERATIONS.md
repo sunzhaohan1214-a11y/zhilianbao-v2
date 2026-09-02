@@ -1,8 +1,16 @@
 # 智链宝 V2.0 — OPERATIONS.md
 
-> 版本：v1.0  
-> 状态：部署与运维基线  
+> 版本：v1.2
+> 状态：第一阶段代码已合入，TEST/UAT 与真实运维证据待执行
 > 继承 V1 已验证 CloudBase / Docker / VPC 经验，但 V2 环境必须独立。
+
+## 当前运维事实（2026-09-02）
+
+- `main@b97588e721d954ae7590ffd6f70dab5dc99e4480` 已受保护，required checks 为 `quality`、`database`、`critical-e2e`、`docker-build`、`security`、`performance`、`browser-compat`；该提交的 CI #482 全部通过。
+- M0–M3 代码和运维编排已经合入，但本事实同步不声称已部署真实 V2 TEST/PROD，也不声称真实 CynosDB、COS、ClamAV、Maintenance Provider 或 AI provider 已完成环境验收。
+- 仓库当前为 public，且不得包含 Secret、真实业务数据、V1 原始资料包或运行证据。生产上线前须再次确认是否维持公开。
+- PR #42 的参考资料包输出仍为 `SAMPLE`，不能进入正式 FULL/cutover 口径。
+- 当前运维顺序是 TEST 配置与部署、smoke、具名 UAT、专用迁移库 FULL 演练、真实备份/恢复演练、PROD preflight；完成前 `RELEASE_READY=NO`。
 
 ## 1. 环境隔离
 
@@ -170,6 +178,8 @@ WorkBuddy               → TEST/PROD部署执行
 WorkBuddy不得绕过GitHub永久修改线上源码。
 
 ## 7. Branch / Release
+
+GitHub 是唯一代码真源。仓库当前为 public，`main` 受保护且所有改动继续通过 PR；公开可见性不降低 Secret、业务数据和迁移资料的隔离要求。
 
 ```text
 feature/*
@@ -497,9 +507,9 @@ Expected policy remains nightly incremental/30 days, weekly full/12 weeks, criti
 
 Restore is same-environment, same-provider, exact-schema only. Preview captures runtime environment, app version, Provider readiness and schema `20260901140000_m3_system_admin`; confirmation rechecks each value and reruns Provider preview. Backup and restore starts use stable Provider idempotency keys so an unknown network result remains resumable rather than being declared failed.
 
-Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. After Provider success, automatic validation performs `SELECT 1`, checks the required Prisma migration is finished/not rolled back/without failure logs, enforces exactly one current ACTIVE batch and at least one NORMAL account, probes up to three formal PASSED attachment objects through the configured storage adapter, and proves Job/Outbox queries execute. Any required failure keeps the restore active and maintenance enabled. Manual completion is reentrant, requires successful validation and explicit inspection, releases only the matching maintenance operation, and invalidates all sessions. Real provider integration and controlled restore drill remain M3-008.
+Restore confirmation also requires a durable deployment/ingress `MaintenanceProvider`; a database boolean is not accepted as the write lock. After Provider success, automatic validation performs `SELECT 1`, checks the required Prisma migration is finished/not rolled back/without failure logs, enforces exactly one current ACTIVE batch and at least one NORMAL account, probes up to three formal PASSED attachment objects through the configured storage adapter, and proves Job/Outbox queries execute. Any required failure keeps the restore active and maintenance enabled. Manual completion is reentrant, requires successful validation and explicit inspection, releases only the matching maintenance operation, and invalidates all sessions. The official CynosDB adapter was added in M3-008. Real deployment identity/configuration, successful backup evidence and a controlled restore-to-new-TEST-cluster drill remain external and unverified until the corresponding immutable evidence is attached.
 
-**OPERATIONS.md v1.1 END**
+**OPERATIONS.md v1.2 END**
 # M3-008 release operations addendum
 
 The operational source of truth is `docs/RELEASE_READINESS.md`, with detailed checklists in `UAT_CHECKLIST.md`, `PROD_RELEASE_CHECKLIST.md`, `RESTORE_DRILL_RUNBOOK.md`, `MONITORING_RUNBOOK.md`, `GITHUB_RELEASE_GATES.md`, and `DB_PRIVILEGE_RUNBOOK.md`.
@@ -507,6 +517,8 @@ The operational source of truth is `docs/RELEASE_READINESS.md`, with detailed ch
 The official CynosDB adapter may create/list/reconcile snapshots. It does not expose credentials/private endpoints and does not enable web-triggered restore. Restore drills use `RollbackToNewCluster` only, require TEST identity, fixed confirmation, cost acknowledgment, target prefix and manual cleanup. In-place source restoration remains an approved production runbook action outside application code.
 
 Production release requires `backupReady`, a successful backup no older than 24 hours, production scanner readiness, protected main, exact-head checks, UAT, V1 full rehearsal/reconciliation and restore evidence. Missing external evidence remains BLOCKED and must not be converted into a code pass.
+
+For the current code baseline, PR #50 exact-head CI #481 and post-merge `main` CI #482 passed. Those runs prove the repository automation for `b97588e721d954ae7590ffd6f70dab5dc99e4480`; they do not substitute for TEST deployment, named UAT, real provider acceptance, FULL migration rehearsal or production cutover evidence. Every later release candidate must repeat exact-candidate review and CI binding.
 
 ## 25. On-demand attachment scan job
 

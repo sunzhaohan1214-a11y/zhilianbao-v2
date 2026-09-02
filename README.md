@@ -1,6 +1,19 @@
 # 智链宝 V2.0
 
-智链宝 V2.0 的模块化单体工程。当前基线包含 M0 阶段的数据库、认证、组织权限、附件服务、MySQL Job Queue 与 Transactional Outbox 底座，不包含正式业务模块。
+智链宝 V2.0 的模块化单体工程。当前 `main` 已包含 M0–M3 第一阶段代码基线：数据库与权限底座、企业与需求闭环、团员/通讯录/地图/行程/人才/政策、报销/求助/消息、固定报表、导入迁移、系统管理、备份恢复编排及发布安全门。代码合并完成不等于正式上线，当前仍为内测、真实数据演练与上线验收阶段。
+
+## 当前事实快照
+
+截至 2026-09-02：
+
+| 项目 | 当前事实 |
+| --- | --- |
+| `main` | `b97588e721d954ae7590ffd6f70dab5dc99e4480`，PR #50 合并后的代码树已通过 CI #482 |
+| 第一阶段代码 | M0–M3 已合入；PR #22、#24、#28、#29、#35、#36、#39、#40、#41、#42、#50 等均已合并 |
+| 主线治理 | `main` 受保护；required checks 为 `quality`、`database`、`critical-e2e`、`docker-build`、`security`、`performance`、`browser-compat` |
+| 仓库可见性 | 当前为 public；这是仓库治理事实，不是发布证据，上线前仍须确认是否继续维持公开 |
+| V1 数据 | PR #42 只完成参考资料包的 `SAMPLE` 适配，不能替代受控 `FULL` 演练、正式迁移或对账 |
+| 发布结论 | `RELEASE_READY=NO`；TEST 部署与 smoke、具名 UAT、真实 FULL 演练、生产备份/恢复及 PROD preflight 尚未形成完整证据 |
 
 ## 技术栈
 
@@ -34,7 +47,9 @@ npm run typecheck
 npm run test:unit
 npm run test:integration
 npm run test:worker
+npm run test:security
 npm run test:e2e:critical
+npm run release:check -- --mode=ci
 npm run build
 ```
 
@@ -47,8 +62,8 @@ npx playwright install chromium
 ## Docker
 
 ```bash
-docker build -t zhilianbao-v2:m0-006 .
-docker run --rm -p 3000:3000 zhilianbao-v2:m0-006
+docker build -t zhilianbao-v2:m3-008 .
+docker run --rm -p 3000:3000 zhilianbao-v2:m3-008
 ```
 
 容器内服务监听 `0.0.0.0:3000`。
