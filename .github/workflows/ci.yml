@@ -151,7 +151,7 @@ jobs:
       - name: Verify non-root runtime image
         run: test "$(docker image inspect zhilianbao-v2:m3-008 --format '{{.Config.User}}')" = "nextjs"
       - name: Verify runtime image excludes env, source tests, and evidence artifacts
-        run: docker run --rm --entrypoint sh zhilianbao-v2:m3-008 -c 'test ! -e /app/.env && test ! -d /app/tests && test ! -d /app/artifacts && test ! -d /app/src && test -f /app/prisma/schema.prisma && test -d /app/prisma/migrations && test -f /app/prisma.config.ts'
+        run: docker run --rm --entrypoint sh zhilianbao-v2:m3-008 -c 'test ! -e /app/.env && test ! -d /app/tests && test ! -d /app/artifacts && test ! -d /app/src && test -f /app/prisma/schema.prisma && test -d /app/prisma/migrations && test -f /app/prisma.config.ts && test -f /app/operations-dist/test-uat-accounts.mjs'
       - name: Verify image config contains no database or cloud credentials
         run: '! docker image inspect zhilianbao-v2:m3-008 --format "{{json .Config.Env}}" | grep -E "DATABASE_URL|SECRET_(ID|KEY)|GITHUB_TOKEN"'
       - run: docker run --rm zhilianbao-v2:m3-008 node worker-dist/main.js --help
@@ -168,6 +168,7 @@ jobs:
             test -f /app/prisma/schema.prisma &&
             test -d /app/prisma/migrations &&
             test -f /app/prisma.config.ts &&
+            test -f /app/operations-dist/test-uat-accounts.mjs &&
             test -x /usr/local/bin/zhilianbao-runtime-entrypoint &&
             grep -Fx "TCPAddr 127.0.0.1" /etc/clamav/clamd.conf &&
             test -n "$(find /var/lib/clamav -maxdepth 1 -type f \( -name "*.cvd" -o -name "*.cld" \) -print -quit)" &&
