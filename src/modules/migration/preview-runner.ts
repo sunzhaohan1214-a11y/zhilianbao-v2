@@ -3,15 +3,16 @@ import { analyzeLegacyRecord, type MigrationMatchContext } from "./adapters";
 import { reconcileSourceAttachment, type AttachmentPreviewResult } from "./attachment-reconciliation";
 import { finalizeReconciliation, emptyModule } from "./reconciliation";
 import type { LegacySourceProvider } from "./snapshot-provider";
+import { isReferencePackageManifest, manifestAllowsFullRehearsal } from "./source-contract";
 import { LEGACY_ENTITY_TYPES, type LegacyRecord, type MigrationPreviewIssue, type ReconciliationModule } from "./types";
 
-function countOutcome(module: ReturnType<typeof emptyModule>, classification: ReturnType<typeof analyzeLegacyRecord>["classification"]) {
-  module.sourceCount += 1;
-  if (classification === "SUCCESS") module.successCount += 1;
-  else if (classification === "FAILED") module.failedCount += 1;
-  else if (classification === "SKIPPED") module.skippedCount += 1;
-  else if (classification === "MERGED") module.mergedCount += 1;
-  else module.reviewCount += 1;
+function countOutcome(moduleResult: ReturnType<typeof emptyModule>, classification: ReturnType<typeof analyzeLegacyRecord>["classification"]) {
+  moduleResult.sourceCount += 1;
+  if (classification === "SUCCESS") moduleResult.successCount += 1;
+  else if (classification === "FAILED") moduleResult.failedCount += 1;
+  else if (classification === "SKIPPED") moduleResult.skippedCount += 1;
+  else if (classification === "MERGED") moduleResult.mergedCount += 1;
+  else moduleResult.reviewCount += 1;
 }
 
 function addSourceCandidate(context: MigrationMatchContext, record: LegacyRecord) {
@@ -22,10 +23,17 @@ function addSourceCandidate(context: MigrationMatchContext, record: LegacyRecord
   if (record.entityType === "POLICY") (context.policies as PolicyMatchCandidate[]).push({ id: `source:${record.sourceId}`, title: String(value.title), publishingDepartment: String(value.publishingDepartment), publishedDate: String(value.publishedDate), primaryFileSha256: String(value.primaryFileSha256) });
 }
 
+function dedupeIssues(values: MigrationPreviewIssue[]): MigrationPreviewIssue[] {
+  const issues = new Map<string, MigrationPreviewIssue>();
+  for (const value of values) issues.set(`${value.sourceEntity}:${value.sourceId}:${value.code}:${value.field ?? ""}`, value);
+  return [...issues.values()];
+}
+
 export async function runMigrationPreview(provider: LegacySourceProvider, input: { mode: "SAMPLE_REHEARSAL" | "FULL_REHEARSAL"; fullSnapshotAvailable?: boolean }) {
   const { manifest, manifestSha256 } = await provider.describeSnapshot();
-  if (input.mode === "FULL_REHEARSAL" && manifest.snapshotKind !== "FULL") throw new Error("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT");
+  if (input.mode === "FULL_REHEARSAL" && !manifestAllowsFullRehearsal(manifest)) throw new Error("FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT");
   const issues: MigrationPreviewIssue[] = [];
+  if (provider.listIssues) for await (const sourceIssue of provider.listIssues()) issues.push(sourceIssue);
   const modules: ReconciliationModule[] = [];
   const context: MigrationMatchContext = { people: [], enterprises: [], talents: [], policies: [] };
   for (const entityType of LEGACY_ENTITY_TYPES) {
@@ -59,11 +67,13 @@ export async function runMigrationPreview(provider: LegacySourceProvider, input:
     else { attachmentModule.failedCount += 1; attachmentModule.attachmentIssueCount += 1; }
   }
   modules.push(attachmentModule);
-  const unresolvedBlockerCount = issues.filter(({ severity }) => severity === "BLOCKER").length;
+  const uniqueIssues = dedupeIssues(issues);
+  const unresolvedBlockerCount = uniqueIssues.filter(({ severity }) => severity === "BLOCKER").length;
+  const fullAvailable = input.fullSnapshotAvailable === true && !isReferencePackageManifest(manifest);
   return {
-    manifest, manifestSha256, issues, attachmentResults,
+    manifest, manifestSha256, issues: uniqueIssues, attachmentResults,
     reconciliation: finalizeReconciliation({ sourceSystem: manifest.sourceSystem, snapshotId: manifest.snapshotId, schemaVersion: manifest.schemaVersion,
       snapshotAt: manifest.snapshotAt, mode: input.mode, dryRun: true, modules, unresolvedBlockerCount,
-      fullRehearsalStatus: input.mode === "FULL_REHEARSAL" ? "COMPLETED" : input.fullSnapshotAvailable ? "NOT_REQUESTED" : "FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT" }),
+      fullRehearsalStatus: input.mode === "FULL_REHEARSAL" ? "COMPLETED" : fullAvailable ? "NOT_REQUESTED" : "FULL_REHEARSAL_BLOCKED_BY_SOURCE_SNAPSHOT" }),
   };
 }

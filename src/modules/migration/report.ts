@@ -12,7 +12,16 @@ export async function writeMigrationReports(outputDirectory: string, reconciliat
   const issuesPath = path.join(outputDirectory, `${stem}-issues.json`);
   const xlsxPath = path.join(outputDirectory, `${stem}-reconciliation.xlsx`);
   await writeFile(jsonPath, `${JSON.stringify(reconciliation, null, 2)}\n`, "utf8");
-  await writeFile(issuesPath, `${JSON.stringify({ snapshotId: reconciliation.snapshotId, issueCount: issues.length, issues }, null, 2)}\n`, "utf8");
+  const reportIssues = issues.map((value) => ({
+    sourceEntity: value.sourceEntity,
+    sourceId: value.sourceId,
+    code: value.code,
+    severity: value.severity,
+    field: value.field,
+    message: value.message,
+    candidateCount: value.candidates?.length ?? 0,
+  }));
+  await writeFile(issuesPath, `${JSON.stringify({ snapshotId: reconciliation.snapshotId, issueCount: reportIssues.length, issues: reportIssues }, null, 2)}\n`, "utf8");
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "智链宝 V1 Migration";
   const summary = workbook.addWorksheet("Reconciliation");
