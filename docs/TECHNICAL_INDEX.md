@@ -26,8 +26,8 @@ Codex 进入仓库时先读取根目录 `AGENTS.md`，再按 AGENTS 指示读取
 16. `SECURITY_SPEC.md`（当前文档版本 v1.0）
 17. `MIGRATION_PLAN.md`（当前文档版本 v1.0）
 18. `TEST_PLAN.md`（当前文档版本 v1.1）
-19. `OPERATIONS.md`（当前文档版本 v1.0）
-20. `IMPLEMENTATION_PLAN.md`（当前文档版本 v1.1）
+19. `OPERATIONS.md`（当前文档版本 v1.2）
+20. `IMPLEMENTATION_PLAN.md`（当前文档版本 v1.3）
 21. 根目录 `AGENTS.md`
 
 > 仓库内规格文件使用稳定文件名，版本号记录在文件内容中；不要根据文档版本号自行拼接不存在的文件名。
@@ -95,19 +95,19 @@ WorkBuddy部署
 GROUP_LEADER与MINISTER独立角色映射同一团队协调能力包
 ```
 
-## 5. 开发是否可以开始
+## 5. 当前开发阶段
 
-可以。
-
-但只从：
+M0–M3 第一阶段代码已经合入 `main`，不得从 M0 重启、重复实现既有模块或提前启动 M4。当前工作模式是发布收口：
 
 ```text
-IMPLEMENTATION_PLAN M0
+TEST部署与smoke
+→ 具名UAT
+→ 受控V1 FULL演练与对账
+→ 真实备份/恢复
+→ PROD preflight与cutover
 ```
 
-开始。
-
-不得跳到“直接开发全部页面”。
+只有内测发现的明确缺陷或已确认功能缺口才进入新的 Issue/PR；外部证据未齐前始终保持 `RELEASE_READY=NO`。
 
 ## 6. 不再需要产品逐项确认的技术细节
 
