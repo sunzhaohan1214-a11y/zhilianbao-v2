@@ -250,6 +250,8 @@ describe("on-demand explicit attachment storage selection", () => {
     expect(createAttachmentStorageRuntime(environment).storage).toBeInstanceOf(InMemoryStorageAdapter);
     expect(() => createAttachmentStorageRuntime({ ...environment, NODE_ENV: "production" }))
       .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
+    expect(() => createAttachmentStorageRuntime({ ...environment, APP_ENV: "prod" }))
+      .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
   });
 
   it("rejects removed paid COS storage in every environment", () => {

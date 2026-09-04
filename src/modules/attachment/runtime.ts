@@ -18,6 +18,7 @@ import { registerReimbursementAttachmentAuthorizers } from "@/modules/reimbursem
 import { registerAnnouncementAttachmentAuthorizer } from "@/modules/announcement/attachment-authorizer";
 import { registerImportAttachmentAuthorizer } from "@/modules/import-export/attachment-authorizer";
 import { registerMonthlyReportAttachmentAuthorizer } from "@/modules/reporting/attachment-authorizer";
+import { testOnlyProviderRuntimeAllowed } from "@/runtime/zero-extra-cost-policy";
 
 type AttachmentRuntime = {
   storage: StorageAdapter;
@@ -59,12 +60,9 @@ function createRuntime(): AttachmentRuntime {
 }
 
 export function testMemoryAttachmentStorageEnabled(environment: Record<string, string | undefined> = process.env): boolean {
-  const appEnvironment = environment.APP_ENV?.trim().toLowerCase();
-  const nodeEnvironment = environment.NODE_ENV?.trim().toLowerCase();
   return environment.ATTACHMENT_STORAGE_PROVIDER?.trim().toLowerCase() === "memory"
     && environment.ENABLE_TEST_MEMORY_ATTACHMENT_STORAGE === "true"
-    && nodeEnvironment !== "production"
-    && (nodeEnvironment === "test" || appEnvironment === "test" || appEnvironment === "local");
+    && testOnlyProviderRuntimeAllowed(environment);
 }
 
 export function createAttachmentStorageRuntime(environment: Record<string, string | undefined> = process.env): {

@@ -1,10 +1,11 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { DemandProgressSourceType, Prisma } from "@/generated/prisma/client";
 import { authorizeActor } from "@/modules/permissions/authorization";
 import type { PermissionActor } from "@/modules/permissions/types";
 import { OutboxRepository } from "@/modules/outbox/outbox-repository";
 import { activeAdministrators, activeAreaStaff } from "@/modules/notification/recipient-resolver";
 import { getCurrentMemberEligibility } from "@/modules/member-foundation/current-member-eligibility";
+import { testOnlyProviderRuntimeAllowed } from "@/runtime/zero-extra-cost-policy";
 import { writeDemandAudit, writeDemandTransition, type DemandMutationContext } from "./audit";
 import {
   getCurrentDemandResponsibilityDetailsInTransaction,
@@ -51,9 +52,13 @@ function isResponsibleTownshipStaff(actor: PermissionActor, responsibleAreaId: s
   return actor.effectiveRoles.includes("TOWNSHIP_STAFF") && actor.townshipAreaIds.includes(responsibleAreaId);
 }
 
+const testTransferSecret = randomBytes(32).toString("hex");
 function transferSecret(): string {
   const secret = process.env.AUTH_RATE_LIMIT_SECRET;
-  if (!secret || secret.length < 16) throw new Error("DEMAND_HIGH_RISK_SECRET_NOT_CONFIGURED");
+  if (!secret || secret.length < 16) {
+    if (testOnlyProviderRuntimeAllowed(process.env)) return testTransferSecret;
+    throw new Error("DEMAND_HIGH_RISK_SECRET_NOT_CONFIGURED");
+  }
   return secret;
 }
 
