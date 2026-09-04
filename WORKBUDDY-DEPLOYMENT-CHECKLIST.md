@@ -21,6 +21,8 @@ WorkBuddy 不执行 `npm ci`、不编译、不生成 migration、不修改源码
 
 若产物不完整、SHA 不匹配或需要现场改代码：停止部署，返回本地由 Codex 修复并重新验证。
 
+若所谓“从 GitHub 部署”会触发 GitHub Actions、CloudBase Dockerfile 构建、远程 `npm ci` / `npm run build`，或依赖固定套餐外的镜像仓库／制品存储：停止部署。必须先证明 WorkBuddy 能把 exact-SHA 对应的本地预构建产物直接交给固定套餐内运行环境；当前仓库不把这一外部能力视为已验证。
+
 # CloudBase
 
 必须确认：

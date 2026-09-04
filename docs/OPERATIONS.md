@@ -6,13 +6,13 @@
 > 状态：第一阶段代码已合入，TEST/UAT 与真实运维证据待执行
 > 继承 V1 已验证 CloudBase / Docker / VPC 经验，但 V2 环境必须独立。
 
-## 当前运维事实（2026-09-02）
+## 当前运维事实（2026-09-04）
 
-- `main@b97588e721d954ae7590ffd6f70dab5dc99e4480` 已受保护，required checks 为 `quality`、`database`、`critical-e2e`、`docker-build`、`security`、`performance`、`browser-compat`；该提交的 CI #482 全部通过。
+- PR #54 已合并为 `main@beba53c2f6d7cf43308316af8dc1d9abf6aa0db3`。当前树不含 `.github/workflows`，不得再把历史 GitHub Actions 检查或云端构建作为放行证据。
 - M0–M3 代码和运维编排已经合入，但本事实同步不声称已部署真实 V2 TEST/PROD，也不声称真实 CynosDB、COS、ClamAV、Maintenance Provider 或 AI provider 已完成环境验收。
 - 仓库当前为 public，且不得包含 Secret、真实业务数据、V1 原始资料包或运行证据。生产上线前须再次确认是否维持公开。
 - PR #42 的参考资料包输出仍为 `SAMPLE`，不能进入正式 FULL/cutover 口径。
-- 当前运维顺序是 TEST 配置与部署、smoke、具名 UAT、专用迁移库 FULL 演练、真实备份/恢复演练、PROD preflight；完成前 `RELEASE_READY=NO`。
+- 当前运维顺序是 exact-SHA 本地全门禁与预构建产物、合规的 GitHub 中转、WorkBuddy 仅部署、TEST smoke、具名 UAT、专用迁移库 FULL 演练、套餐内备份/恢复演练、PROD preflight；完成前 `RELEASE_READY=NO`。
 
 ## 1. 环境隔离
 
