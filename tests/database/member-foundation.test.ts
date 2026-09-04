@@ -7,7 +7,7 @@ import { BackupService } from "@/modules/system/backup-service";
 import { FakeBackupProvider } from "@/modules/system/backup-provider";
 
 const prisma = getPrismaClient();
-const personIds: string[] = []; const batchIds: string[] = []; const organizationIds: string[] = [];
+const personIds: string[] = []; const batchIds: string[] = []; const organizationIds: string[] = []; const attachmentIds: string[] = [];
 const unregisteredFoundationEvents = ["CURRENT_BATCH_CHANGED", "GROUP_LEADER_CHANGED", "BATCH_MEMBERSHIP_CHANGED", "MEMBER_CAPABILITY_UPDATED", "APPOINTMENT_CHANGED"];
 let actor: PermissionActor;
 let suiteStartedAt: Date;
@@ -28,6 +28,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.attachmentAccessLog.deleteMany({ where: { attachmentId: { in: attachmentIds } } });
+  await prisma.attachmentLink.deleteMany({ where: { attachmentId: { in: attachmentIds } } });
+  await prisma.attachment.deleteMany({ where: { id: { in: attachmentIds } } });
   await prisma.systemCommandIdempotency.deleteMany({ where: { actorPersonId: { in: personIds } } });
   await prisma.backupRecord.deleteMany({ where: { createdByPersonId: { in: personIds } } });
   await prisma.auditLog.deleteMany({ where: { actorPersonId: { in: personIds } } });
@@ -113,6 +116,30 @@ describe("B-M2-001 real MySQL invariants", () => {
     expect(phoneResult.items.some(({ id }) => id === visible.id)).toBe(false);
     const nameResult = await new MemberService(prisma).list({ actor, query: { kind: "current", keyword: visible.name, page: 1, pageSize: 100 } });
     expect(nameResult.items.map(({ id }) => id)).toContain(visible.id);
+  });
+
+  it("returns the latest scanned member photo and ignores unsafe photo attachments", async () => {
+    const current = await prisma.batch.findFirstOrThrow({ where: { isCurrent: true, status: "ACTIVE" } });
+    const target = await person("avatar");
+    await prisma.batchMembership.create({ data: { personId: target.id, batchId: current.id, startDate: new Date("2026-01-01"), endDate: new Date("2027-01-01"), status: "ACTIVE" } });
+    await prisma.roleAssignment.create({ data: { personId: target.id, roleCode: "MEMBER_CURRENT", effectiveAt: new Date("2026-01-01"), grantedByPersonId: actor.personId, reason: "avatar test" } });
+    const passedId = randomUUID(); const olderAvatarId = randomUUID(); const newestAvatarId = randomUUID(); const pendingId = randomUUID();
+    attachmentIds.push(passedId, olderAvatarId, newestAvatarId, pendingId);
+    await prisma.attachment.createMany({ data: [
+      { id: passedId, originalFilename: "member.png", extension: "png", declaredMimeType: "image/png", detectedMimeType: "image/png", detectedFileType: "png", expectedSizeBytes: 1, actualSizeBytes: 1, sha256: "a".repeat(64), bucket: "test", region: "test", objectKey: `member/${passedId}.png`, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, uploadedByPersonId: actor.personId },
+      { id: olderAvatarId, originalFilename: "older-avatar.png", extension: "png", declaredMimeType: "image/png", detectedMimeType: "image/png", detectedFileType: "png", expectedSizeBytes: 1, actualSizeBytes: 1, sha256: "b".repeat(64), bucket: "test", region: "test", objectKey: `member/${olderAvatarId}.png`, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, uploadedByPersonId: actor.personId },
+      { id: newestAvatarId, originalFilename: "newest-avatar.png", extension: "png", declaredMimeType: "image/png", detectedMimeType: "image/png", detectedFileType: "png", expectedSizeBytes: 1, actualSizeBytes: 1, sha256: "c".repeat(64), bucket: "test", region: "test", objectKey: `member/${newestAvatarId}.png`, uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, uploadedByPersonId: actor.personId },
+      { id: pendingId, originalFilename: "unsafe.png", extension: "png", declaredMimeType: "image/png", expectedSizeBytes: 1, bucket: "test", region: "test", objectKey: `member/${pendingId}.png`, uploadStatus: "UPLOADED", scanStatus: "PENDING", isTemporary: false, uploadedByPersonId: actor.personId },
+    ] });
+    await prisma.attachmentLink.createMany({ data: [
+      { attachmentId: passedId, entityType: "PERSON", entityId: target.id, relationType: "SOURCE_ATTACHMENT", createdByPersonId: actor.personId, createdAt: new Date("2026-01-04") },
+      { attachmentId: olderAvatarId, entityType: "PERSON", entityId: target.id, relationType: "AVATAR", createdByPersonId: actor.personId, createdAt: new Date("2026-01-02") },
+      { attachmentId: newestAvatarId, entityType: "PERSON", entityId: target.id, relationType: "AVATAR", createdByPersonId: actor.personId, createdAt: new Date("2026-01-03") },
+      { attachmentId: pendingId, entityType: "PERSON", entityId: target.id, relationType: "AVATAR", createdByPersonId: actor.personId, createdAt: new Date("2026-01-05") },
+    ] });
+    const listed = await new MemberService(prisma).list({ actor, query: { kind: "current", keyword: target.name, page: 1, pageSize: 20 } });
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0].avatarAttachmentId).toBe(newestAvatarId);
   });
 
   it("does not enqueue unregistered member foundation events", async () => {

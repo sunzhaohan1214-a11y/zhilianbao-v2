@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { getPrismaClient } from "@/lib/db/prisma";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
 
 test.describe.configure({ mode: "serial" });
@@ -6,7 +7,16 @@ async function login(page: Page, user: { phone: string; password: string }) {
   await page.goto("/login"); await page.getByLabel("手机号").fill(user.phone); await page.getByLabel("密码", { exact: true }).fill(user.password);
   await Promise.all([page.waitForResponse((response) => response.url().endsWith("/api/v2/auth/login")), page.getByRole("button", { name: "登录" }).click()]);
 }
-test.beforeEach(async () => { await seedAuthFixtures(); });
+test.beforeEach(async () => {
+  await seedAuthFixtures();
+  await getPrismaClient().attachmentLink.deleteMany({
+    where: {
+      entityType: "PERSON",
+      relationType: "AVATAR",
+      entityId: { in: Object.values(e2eUsers).map(({ personId }) => personId) },
+    },
+  });
+});
 
 test("internal member browses current/alumni, sees phone and separate minister label", async ({ page }) => {
   await login(page, e2eUsers.normal); await page.goto("/resources/members");
@@ -19,6 +29,31 @@ test("internal member browses current/alumni, sees phone and separate minister l
   await page.getByRole("link", { name: "往届" }).click(); await expect(page.getByText("E2E admin", { exact: true })).toBeVisible();
   await page.goto(`/resources/members/${e2eUsers.normal.personId}`); await expect(page.getByText(e2eUsers.normal.phone)).toBeVisible();
   await page.goto(`/resources/contacts?organizationId=${enterpriseE2e.organizationId}`); await expect(page.getByText("E2E normal · 挂职专员", { exact: true })).toBeVisible(); await expect(page.getByText(e2eUsers.normal.phone)).toBeVisible(); await expect(page.getByText("E2E admin · 历史任职", { exact: true })).toHaveCount(0);
+});
+
+test("member list renders an authorized photo and keeps a text fallback", async ({ page }) => {
+  await login(page, e2eUsers.normal);
+  const uploaded = await page.evaluate(async () => {
+    const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    const intent = await fetch("/api/v2/attachments/upload-intent", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: "synthetic-member-avatar.png", declaredMimeType: "image/png", expectedSizeBytes: atob(base64).length }) });
+    const intentJson = await intent.json();
+    const attachmentId = intentJson.data.attachmentId as string;
+    await fetch(`/api/v2/test/attachments/${attachmentId}/upload`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ base64 }) });
+    await fetch(`/api/v2/attachments/${attachmentId}/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const scan = await fetch(`/api/v2/test/attachments/${attachmentId}/scan`, { method: "POST" });
+    if (!scan.ok) throw new Error("avatar scan failed");
+    return attachmentId;
+  });
+  const prisma = getPrismaClient();
+  await prisma.attachmentLink.create({ data: { attachmentId: uploaded, entityType: "PERSON", entityId: e2eUsers.normal.personId, relationType: "AVATAR", createdByPersonId: e2eUsers.admin.personId } });
+  await prisma.attachment.update({ where: { id: uploaded }, data: { isTemporary: false } });
+  await page.goto("/resources/members");
+  const avatar = page.getByRole("img", { name: "E2E normal头像" });
+  await expect(avatar).toBeVisible();
+  await expect.poll(() => avatar.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(page.getByText("E2E minister头像占位", { exact: true })).toHaveCount(1);
+  await page.context().clearCookies();
+  expect((await page.request.get(`/api/v2/attachments/${uploaded}/content`)).status()).toBe(401);
 });
 
 test("member edits only capability profile and cannot mutate batch, phone or roles", async ({ page }) => {
