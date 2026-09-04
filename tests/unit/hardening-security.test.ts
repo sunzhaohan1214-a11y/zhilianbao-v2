@@ -38,6 +38,7 @@ describe("M3-008 security headers and logging", () => {
     expect(headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
     expect(headers.get("Content-Security-Policy")).not.toContain("default-src *");
     expect(headers.get("Content-Security-Policy")).not.toContain("connect-src *");
+    expect(headers.get("Content-Security-Policy")).not.toMatch(/myqcloud|map\.qq|map\.gtimg/);
     expect(headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(headers.get("X-Frame-Options")).toBe("DENY");
     expect(headers.get("Permissions-Policy")).toContain("geolocation=()");
