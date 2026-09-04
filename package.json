@@ -24,7 +24,7 @@
     "verify:local": "npm run lint && npm run typecheck && npm run test:unit && npm run test:integration && npm run test:security && npm run build",
     "verify:local:full": "npm run verify:local && npm run db:validate && npm run db:migrate:deploy && npm run test:database && npm run test:e2e:critical && npm run test:e2e:compat && npm run test:e2e:weak-network",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/prepare-typecheck.mjs && tsc --noEmit",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:worker": "vitest run tests/unit/worker-foundation.test.ts tests/integration/worker-runtime.test.ts",

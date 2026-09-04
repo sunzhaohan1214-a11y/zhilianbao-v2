@@ -9,7 +9,7 @@ export default defineConfig({
   globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: false,
   globalTimeout: process.env.CI ? 25 * 60_000 : undefined,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
   reporter: "list",
@@ -25,6 +25,7 @@ export default defineConfig({
     env: {
       ...process.env,
       APP_ENV: "test",
+      NODE_ENV: "development",
       APP_VERSION: "m3-008-e2e",
       APP_BASE_URL: e2eOrigin,
       ATTACHMENT_STORAGE_PROVIDER: "memory",
