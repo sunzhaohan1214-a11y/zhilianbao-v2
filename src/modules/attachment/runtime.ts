@@ -7,7 +7,6 @@ import { AttachmentService } from "./attachment-service";
 import { AttachmentParentAuthorizerRegistry } from "./parent-authorization";
 import { AttachmentRepository } from "./repository/attachment-repository";
 import { ClamAvFileScanAdapter, UnavailableFileScanAdapter, type FileScanAdapter } from "./scan/file-scan-adapter";
-import { CosStorageAdapter } from "./storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "./storage/in-memory-storage-adapter";
 import type { StorageAdapter } from "./storage/storage-adapter";
 import { registerPolicyAttachmentAuthorizer } from "@/modules/policy/attachment-authorizer";
@@ -74,21 +73,10 @@ export function createAttachmentStorageRuntime(environment: Record<string, strin
 } {
   const config = loadAttachmentConfig(environment);
   const provider = environment.ATTACHMENT_STORAGE_PROVIDER?.trim().toLowerCase();
-  if (provider === "cos") {
-    return {
-      config,
-      storage: new CosStorageAdapter({
-        bucket: config.bucket,
-        region: config.region,
-        secretId: environment.COS_SECRET_ID ?? "",
-        secretKey: environment.COS_SECRET_KEY ?? "",
-      }),
-    };
-  }
   if (provider === "memory" && testMemoryAttachmentStorageEnabled(environment)) {
     return { config, storage: new InMemoryStorageAdapter(config) };
   }
-  throw new AttachmentError("ATTACHMENT_STORAGE_UNAVAILABLE", "附件存储 Provider 未显式配置或当前环境不允许使用内存存储");
+  throw new AttachmentError("ATTACHMENT_STORAGE_UNAVAILABLE", "额外付费对象存储已禁用；仅本地测试内存存储或后续 CloudBase 套餐内存储可用");
 }
 
 export function createFileScanAdapter(environment: Record<string, string | undefined> = process.env): FileScanAdapter {

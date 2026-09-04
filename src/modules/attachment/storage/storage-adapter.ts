@@ -1,5 +1,5 @@
 export type UploadAuthorization = {
-  type: "COS_STS" | "TEST_MEMORY";
+  type: "TEST_MEMORY";
   credentials: {
     tmpSecretId: string;
     tmpSecretKey: string;

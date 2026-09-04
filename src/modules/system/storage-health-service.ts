@@ -42,7 +42,7 @@ export class StorageHealthService {
       const probe = await storage.healthProbe();
       provider = { ...probe, type: storage.constructor.name === "InMemoryStorageAdapter" ? "TEST_MEMORY" : "TENCENT_COS", bucketConfigured: Boolean(storage.bucket), regionConfigured: Boolean(storage.region) };
     } catch {
-      provider = { configured: false, reachable: false, type: "UNAVAILABLE", bucketConfigured: Boolean(process.env.COS_BUCKET), regionConfigured: Boolean(process.env.COS_REGION) };
+      provider = { configured: false, reachable: false, type: "UNAVAILABLE", bucketConfigured: Boolean(process.env.ATTACHMENT_BUCKET), regionConfigured: Boolean(process.env.ATTACHMENT_REGION) };
     }
     return {
       provider,

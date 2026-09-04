@@ -153,17 +153,17 @@ describe("V1 reference source safety contract", () => {
     await initializeGitRoot(root);
     await mkdir(path.join(root, "tracked"));
     await writeFile(path.join(root, ".gitignore"), "/.migration-work\n", "utf8");
-    await symlink(path.join(root, "tracked"), path.join(root, ".migration-work"), "dir");
+    await symlink(path.join(root, "tracked"), path.join(root, ".migration-work"), process.platform === "win32" ? "junction" : "dir");
     await expect(assertPrivateMigrationOutput(path.join(root, ".migration-work", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
 
     await rm(path.join(root, ".migration-work"));
     await mkdir(path.join(root, ".migration-work"));
-    await symlink(path.join(root, "tracked"), path.join(root, ".migration-work", "prepared"), "dir");
+    await symlink(path.join(root, "tracked"), path.join(root, ".migration-work", "prepared"), process.platform === "win32" ? "junction" : "dir");
     await expect(assertPrivateMigrationOutput(path.join(root, ".migration-work", "prepared", "private"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
 
     const aliasRoot = await mkdtemp(path.join(tmpdir(), "v1-reference-symlink-alias-"));
     temporaryRoots.push(aliasRoot);
-    await symlink(path.join(root, "tracked"), path.join(aliasRoot, "outside-alias"), "dir");
+    await symlink(path.join(root, "tracked"), path.join(aliasRoot, "outside-alias"), process.platform === "win32" ? "junction" : "dir");
     await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "outside-alias", "private"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
   });
 
@@ -171,7 +171,7 @@ describe("V1 reference source safety contract", () => {
     const root = await mkdtemp(path.join(tmpdir(), "v1-reference-outside-git-"));
     const aliasRoot = await mkdtemp(path.join(tmpdir(), "v1-reference-outside-alias-"));
     temporaryRoots.push(root, aliasRoot);
-    await symlink(root, path.join(aliasRoot, "output-alias"), "dir");
+    await symlink(root, path.join(aliasRoot, "output-alias"), process.platform === "win32" ? "junction" : "dir");
     await expect(assertPrivateMigrationOutput(path.join(aliasRoot, "output-alias", "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
   });
 
@@ -180,7 +180,7 @@ describe("V1 reference source safety contract", () => {
     temporaryRoots.push(root);
     await initializeGitRoot(root);
     await rename(path.join(root, ".git"), path.join(root, "git-metadata"));
-    await symlink("git-metadata", path.join(root, ".git"), "dir");
+    await symlink(process.platform === "win32" ? path.join(root, "git-metadata") : "git-metadata", path.join(root, ".git"), process.platform === "win32" ? "junction" : "dir");
     await expect(assertPrivateMigrationOutput(path.join(root, "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");
   });
 });

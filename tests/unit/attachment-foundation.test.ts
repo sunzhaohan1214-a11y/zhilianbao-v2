@@ -15,7 +15,6 @@ import { AttachmentParentAuthorizerRegistry } from "@/modules/attachment/parent-
 import type { AttachmentRepository } from "@/modules/attachment/repository/attachment-repository";
 import { ClamAvFileScanAdapter, FakeCleanScanner, UnavailableFileScanAdapter } from "@/modules/attachment/scan/file-scan-adapter";
 import { createAttachmentStorageRuntime, createFileScanAdapter, testMemoryAttachmentStorageEnabled } from "@/modules/attachment/runtime";
-import { buildCosUploadPolicy, CosStorageAdapter, COS_UPLOAD_ACTIONS } from "@/modules/attachment/storage/cos-storage-adapter";
 import { InMemoryStorageAdapter } from "@/modules/attachment/storage/in-memory-storage-adapter";
 import type { PermissionActor } from "@/modules/permissions/types";
 
@@ -229,10 +228,7 @@ describe("M3-008 explicit attachment scanner selection", () => {
 });
 
 describe("on-demand explicit attachment storage selection", () => {
-  const base = {
-    COS_BUCKET: "unit-private-bucket-1250000000",
-    COS_REGION: "ap-test",
-  };
+  const base = {};
 
   it("does not derive memory storage from APP_ENV=test or silently fall back when Provider is missing", () => {
     expect(testMemoryAttachmentStorageEnabled({ APP_ENV: "test" })).toBe(false);
@@ -256,25 +252,8 @@ describe("on-demand explicit attachment storage selection", () => {
       .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
   });
 
-  it("makes separate deployed TEST processes select COS and rejects incomplete COS configuration", () => {
-    const testCredentials = {
-      ["COS_SECRET_ID"]: "test-only",
-      ["COS_SECRET_KEY"]: "test-only",
-    };
-    const deployedTest = {
-      ...base,
-      ...testCredentials,
-      APP_ENV: "test",
-      NODE_ENV: "production",
-      ATTACHMENT_STORAGE_PROVIDER: "cos",
-    };
-    const web = createAttachmentStorageRuntime(deployedTest);
-    const scanJob = createAttachmentStorageRuntime(deployedTest);
-    expect(web.storage).toBeInstanceOf(CosStorageAdapter);
-    expect(scanJob.storage).toBeInstanceOf(CosStorageAdapter);
-    expect({ bucket: web.storage.bucket, region: web.storage.region })
-      .toEqual({ bucket: scanJob.storage.bucket, region: scanJob.storage.region });
-    expect(() => createAttachmentStorageRuntime({ ...deployedTest, ["COS_SECRET_KEY"]: "" }))
+  it("rejects removed paid COS storage in every environment", () => {
+    expect(() => createAttachmentStorageRuntime({ APP_ENV: "test", NODE_ENV: "production", ATTACHMENT_STORAGE_PROVIDER: "cos" }))
       .toThrowError(expect.objectContaining({ code: "ATTACHMENT_STORAGE_UNAVAILABLE" }));
   });
 });
@@ -286,30 +265,6 @@ describe("M0-005 storage authorization and keys", () => {
     expect(staging).toBe(`incoming/${attachmentId}/0123456789abcdef`);
     expect(finalKey).toBe(`attachments/2026/08/${attachmentId}/0123456789abcdef`);
     expect(`${staging}${finalKey}`).not.toContain("report.pdf");
-  });
-
-  it("grants only the advanced-upload actions on one exact staging object", () => {
-    const objectKey = createStagingObjectKey(attachmentId, "0123456789abcdef");
-    const otherObjectKey = createStagingObjectKey("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "fedcba9876543210");
-    const policy = buildCosUploadPolicy({
-      bucket: "private-1250000000",
-      region: "ap-shanghai",
-      objectKey,
-    });
-    const serialized = JSON.stringify(policy);
-    expect(policy.statement).toHaveLength(1);
-    expect(policy.statement[0].action).toEqual([...COS_UPLOAD_ACTIONS]);
-    expect(policy.statement[0].action).toContain("name/cos:HeadObject");
-    expect(policy.statement[0].action).toContain("name/cos:ListMultipartUploads");
-    expect(policy.statement[0].resource).toContain(objectKey);
-    expect(policy.statement[0].resource.endsWith(`/${objectKey}`)).toBe(true);
-    expect(policy.statement[0].resource).not.toBe("*");
-    expect(serialized).not.toContain(`${objectKey}*`);
-    expect(serialized).not.toContain(otherObjectKey);
-    expect(serialized).not.toContain("attachments/");
-    for (const forbiddenAction of ["name/cos:GetObject", "name/cos:DeleteObject", "name/cos:PutObjectACL"]) {
-      expect(policy.statement[0].action).not.toContain(forbiddenAction);
-    }
   });
 
   it("honors the requested signed URL TTL", async () => {

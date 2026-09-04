@@ -92,7 +92,7 @@ describe("UAT automation preflight evidence", () => {
     temporaryDirectories.push(repoRoot, externalDirectory);
     const externalReport = join(externalDirectory, "uat-automation-preflight.json");
     await writeFile(externalReport, "stale but external\n");
-    await symlink(externalDirectory, join(repoRoot, "artifacts"), "dir");
+    await symlink(externalDirectory, join(repoRoot, "artifacts"), process.platform === "win32" ? "junction" : "dir");
 
     await expect(prepareFileOutput(join(repoRoot, "artifacts"), [
       join(repoRoot, "artifacts", "uat-automation-preflight.json"),

@@ -1,5 +1,7 @@
 # 智链宝 V2.0 — OPERATIONS.md
 
+> 2026-09-04 覆盖规则：以 `LOCAL_FIRST_ZERO_EXTRA_COST.md` 为当前运维基线。GitHub 云端 CI、CynosDB/SSM/COS 专用接入、外部付费 AI/OCR 和 WorkBuddy 构建职责已取消；本文后续相关段落仅保留为历史设计背景。
+
 > 版本：v1.2
 > 状态：第一阶段代码已合入，TEST/UAT 与真实运维证据待执行
 > 继承 V1 已验证 CloudBase / Docker / VPC 经验，但 V2 环境必须独立。

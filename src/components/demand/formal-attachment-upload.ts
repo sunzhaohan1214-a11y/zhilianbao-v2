@@ -1,7 +1,7 @@
-import { uploadAttachmentToCos, type BrowserUploadIntent } from "@/modules/attachment/client/cos-browser-uploader";
+import type { UploadAuthorization } from "@/modules/attachment/storage/storage-adapter";
 import { waitForAttachmentScan } from "@/modules/attachment/client/wait-for-attachment-scan";
 
-type InternalAttachmentIntent = BrowserUploadIntent & { attachmentId: string };
+type InternalAttachmentIntent = { attachmentId: string; upload: UploadAuthorization };
 
 async function fileAsBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -27,16 +27,12 @@ export async function uploadFormalAttachments(files: readonly File[]): Promise<s
     const intentPayload = await intentResponse.json();
     if (!intentResponse.ok) throw new Error(intentPayload.error?.message ?? "附件上传申请失败");
     const intent = intentPayload.data as InternalAttachmentIntent;
-    if (intent.upload.type === "TEST_MEMORY") {
-      const testResponse = await fetch(`/api/v2/test/attachments/${intent.attachmentId}/upload`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ base64: await fileAsBase64(file) }),
-      });
-      if (!testResponse.ok) throw new Error("测试附件上传失败");
-    } else {
-      await uploadAttachmentToCos(intent, file).promise;
-    }
+    const testResponse = await fetch(`/api/v2/test/attachments/${intent.attachmentId}/upload`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ base64: await fileAsBase64(file) }),
+    });
+    if (!testResponse.ok) throw new Error("本地附件上传失败");
     const completeResponse = await fetch(`/api/v2/attachments/${intent.attachmentId}/complete`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -44,10 +40,8 @@ export async function uploadFormalAttachments(files: readonly File[]): Promise<s
     });
     const completePayload = await completeResponse.json();
     if (!completeResponse.ok) throw new Error(completePayload.error?.message ?? "附件确认失败");
-    if (intent.upload.type === "TEST_MEMORY") {
-      const scanResponse = await fetch(`/api/v2/test/attachments/${intent.attachmentId}/scan`, { method: "POST" });
-      if (!scanResponse.ok) throw new Error("测试附件安全扫描失败");
-    }
+    const scanResponse = await fetch(`/api/v2/test/attachments/${intent.attachmentId}/scan`, { method: "POST" });
+    if (!scanResponse.ok) throw new Error("本地附件安全扫描失败");
     await waitForAttachmentScan(async () => {
       const response = await fetch(`/api/v2/attachments/${intent.attachmentId}/complete`, { method: "POST" });
       const payload = await response.json();

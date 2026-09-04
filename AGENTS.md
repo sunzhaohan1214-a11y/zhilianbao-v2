@@ -5,7 +5,7 @@
 在任何编码前，必须按顺序阅读：
 
 ```text
-docs/PRD-v1.2.md
+docs/PRD.md
 docs/ARCHITECTURE.md
 docs/PERMISSIONS.md
 docs/STATE_MACHINES.md
@@ -33,7 +33,7 @@ docs/IMPLEMENTATION_PLAN.md
 
 ## 1. 项目原则
 
-- 一个私有GitHub仓库；
+- 一个公开 GitHub 仓库，仅用于版本管理、PR 审阅和代码中转；
 - Next.js + React + TypeScript；
 - 模块化单体；
 - Mobile与Admin两套UI；
@@ -45,6 +45,11 @@ docs/IMPLEMENTATION_PLAN.md
 - MySQL Job Queue + Worker；
 - 第一阶段不微服务；
 - 第一阶段不Redis。
+- 全部开发、编译、自动化测试和完整浏览器交互验收在本地电脑完成；
+- GitHub Actions 不承担编译、测试、制品或部署工作；
+- WorkBuddy 只部署 Codex 在本地完成并验证的 exact-SHA 产物，不生成或修改代码；
+- 固定成本只允许已批准的 CloudBase 套餐。任何套餐外付费 API、数据库、对象存储、Secret、AI/OCR、地图、监控、CDN、短信或备份资源默认禁用；
+- 无法证明属于固定 CloudBase 套餐内的能力必须 fail closed，不得以明文 Secret、不安全附件或无恢复能力换取低成本。
 
 ## 2. 永久红线
 

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import type { BackupType } from "@/generated/prisma/client";
-import { TencentCynosDbBackupProvider } from "./tencent-cynosdb-backup-provider";
 import { CURRENT_SCHEMA_VERSION, currentAppVersion, currentRuntimeEnvironment, fakeSystemProvidersEnabled } from "./runtime";
 
 export type ProviderHealth = {
@@ -22,9 +21,9 @@ export interface BackupProvider {
   getRestoreStatus(operationId: string): Promise<RestoreProviderStatus>;
 }
 export class UnavailableBackupProvider implements BackupProvider {
-  async health(): Promise<ProviderHealth> { return { ready: false, status: "NOT_CONFIGURED", provider: "unavailable", detail: "未配置正式云快照适配器" }; }
+  async health(): Promise<ProviderHealth> { return { ready: false, status: "NOT_CONFIGURED", provider: "unavailable", detail: "额外付费云备份 Provider 已禁用；仅允许后续接入 CloudBase 固定套餐内能力" }; }
   async listBackups(): Promise<ProviderBackup[]> { return []; } async createSnapshot(): Promise<never> { throw new Error("BACKUP_PROVIDER_UNAVAILABLE"); }
-  async getBackup(): Promise<null> { return null; } async previewRestore(): Promise<{ ready: false; detail: string }> { return { ready: false, detail: "未配置正式云快照适配器" }; }
+  async getBackup(): Promise<null> { return null; } async previewRestore(): Promise<{ ready: false; detail: string }> { return { ready: false, detail: "额外付费云恢复 Provider 已禁用" }; }
   async startRestore(): Promise<never> { throw new Error("BACKUP_PROVIDER_UNAVAILABLE"); }
   async getRestoreStatus(): Promise<RestoreProviderStatus> { return { status: "FAILED", errorCode: "BACKUP_PROVIDER_UNAVAILABLE" }; }
 }
@@ -61,7 +60,6 @@ const runtime = globalThis as typeof globalThis & { __zlbBackupProvider?: Backup
 export function getBackupProvider(): BackupProvider {
   if (runtime.__zlbBackupProvider) return runtime.__zlbBackupProvider;
   if (fakeSystemProvidersEnabled()) runtime.__zlbBackupProvider = new FakeBackupProvider();
-  else if (process.env.BACKUP_PROVIDER === "tencent-cynosdb") runtime.__zlbBackupProvider = TencentCynosDbBackupProvider.fromEnvironment();
   else runtime.__zlbBackupProvider = new UnavailableBackupProvider();
   return runtime.__zlbBackupProvider;
 }

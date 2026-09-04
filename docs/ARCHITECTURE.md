@@ -1,5 +1,7 @@
 # 智链宝 V2.0 — ARCHITECTURE.md
 
+> 2026-09-04 基础设施覆盖规则：开发、测试、云 Provider、成本和部署职责以 `LOCAL_FIRST_ZERO_EXTRA_COST.md` 为准。本文中 TDSQL-C、COS、SSM、外部 AI/OCR、付费地图 SDK、GitHub CI 和独立付费运行服务的旧方案均不再作为当前实现要求。
+
 > 版本：TECH v1.0  
 > 状态：开发基线  
 > 上游：PRD v1.2、PERMISSIONS v1.0、STATE_MACHINES v1.0、DATA_MODEL v1.1  

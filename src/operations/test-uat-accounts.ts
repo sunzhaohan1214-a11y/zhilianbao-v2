@@ -6,7 +6,6 @@ import { hashPassword, initialPasswordFromPhone } from "@/modules/identity/passw
 import { normalizePhone } from "@/modules/identity/phone";
 import { resolvePermissionActor } from "@/modules/permissions/actor-resolver";
 import { bumpPermissionVersion } from "@/modules/permissions/permission-invalidation";
-import { loadRuntimeSecret } from "@/runtime/runtime-secret";
 
 const confirmation = "PREPARE_SYNTHETIC_TEST_UAT";
 const testAliases = new Set(["test", "testing", "uat", "staging"]);
@@ -192,7 +191,6 @@ export async function prepareTestUatAccounts(
 async function main(): Promise<void> {
   const input = await readInput();
   validateTestUatEnvironment(process.env, input);
-  await loadRuntimeSecret();
   const result = await prepareTestUatAccounts(getPrismaClient(), input);
   console.log(JSON.stringify(result));
 }

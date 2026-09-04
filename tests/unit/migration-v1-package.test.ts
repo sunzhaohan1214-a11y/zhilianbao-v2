@@ -112,10 +112,14 @@ describe("V1 local reference package adapter", () => {
     const matchPreview = JSON.parse(await readFile(path.join(fixture.output, "governance/dispatch-organization-location-match-preview.json"), "utf8")) as { summary: Record<string, number>; matches: Array<Record<string, unknown>> };
     expect(matchPreview.summary).toEqual({ organizationCount: 1, uniqueCandidateCount: 1, unmatchedCount: 0, ambiguousCount: 0 });
     expect(matchPreview.matches[0]).toMatchObject({ candidateCount: 1, disposition: "REVIEW_REQUIRED", reviewCode: "DISPATCH_LOCATION_MATCH_CONFIRMATION_REQUIRED" });
-    expect((await stat(fixture.output)).mode & 0o777).toBe(0o700);
-    expect((await stat(path.join(fixture.output, "snapshot.json"))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(fixture.output)).mode & 0o777).toBe(0o700);
+      expect((await stat(path.join(fixture.output, "snapshot.json"))).mode & 0o777).toBe(0o600);
+    }
     const attachmentManifest = (await readFile(path.join(fixture.output, "attachments/manifest.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { relativePath: string });
-    expect((await stat(path.join(fixture.output, "attachments", "blobs", attachmentManifest[0].relativePath))).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(path.join(fixture.output, "attachments", "blobs", attachmentManifest[0].relativePath))).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("fails closed when a checksummed payload changes", async () => {
@@ -132,7 +136,7 @@ describe("V1 local reference package adapter", () => {
   it("rejects a symlinked output alias back into the sensitive source package", async () => {
     const fixture = await createPackage();
     const aliasRoot = path.join(path.dirname(fixture.root), "source-alias");
-    await symlink(fixture.root, aliasRoot, "dir");
+    await symlink(fixture.root, aliasRoot, process.platform === "win32" ? "junction" : "dir");
     await expect(prepareV1DataPackage({ sourceRoot: fixture.root, outputRoot: path.join(aliasRoot, "generated") })).rejects.toThrow("V1_PACKAGE_OUTPUT_SYMLINK_REJECTED");
     await expect(readFile(path.join(fixture.root, "generated", "snapshot.json"), "utf8")).rejects.toThrow();
   });

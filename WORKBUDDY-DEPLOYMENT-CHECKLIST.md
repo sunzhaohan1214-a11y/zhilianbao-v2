@@ -6,32 +6,20 @@
 # TEST发布前
 
 - [ ] GitHub main 已合并
-- [ ] CI全绿
+- [ ] exact SHA 的本地完整验证清单已通过
 - [ ] 无 `.env` / Secret commit
 - [ ] Migration已在本地测试
 - [ ] TEST数据库备份/快照（涉及重要数据时）
 - [ ] TEST DATABASE_URL确认不是PROD
-- [ ] TEST COS确认不是PROD
-- [ ] AI/OCR TEST配置确认
-- [ ] Docker build成功
+- [ ] 只使用已确认属于固定 CloudBase 套餐内的存储；否则附件保持阻断
+- [ ] 外部付费 AI/OCR 保持关闭
+- [ ] Docker/部署产物已在本地构建并验证
 
-# WorkBuddy 构建
+# WorkBuddy 只部署
 
-如 safe-delete hook 干扰：
+WorkBuddy 不执行 `npm ci`、不编译、不生成 migration、不修改源码、不修 Bug。它只接收 Codex 在本地生成并验证的产物，核对 exact SHA 后推送到 CloudBase。
 
-```bash
-NODE_OPTIONS="" npm ci
-NODE_OPTIONS="" npm run build
-```
-
-不要依赖大批量 `rm -rf`。
-
-必要时移动目录：
-
-```bash
-mv node_modules ../cache-node_modules
-mv .next ../cache-next
-```
+若产物不完整、SHA 不匹配或需要现场改代码：停止部署，返回本地由 Codex 修复并重新验证。
 
 # CloudBase
 
@@ -88,7 +76,7 @@ PROD Migration必须在：
 - [ ] P0=0
 - [ ] P1=0
 - [ ] PROD DB快照
-- [ ] COS版本保护正常
+- [ ] CloudBase 套餐内附件存储的版本保护或等效恢复能力已验证；否则停止发布
 - [ ] 回滚Git Tag已确认
 - [ ] Migration已在TEST执行成功
 - [ ] 变更清单已确认
