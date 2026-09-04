@@ -81,6 +81,8 @@ enum AuthRateLimitDimension {
 }
 
 enum AttachmentStorageProvider {
+  CLOUDBASE_PACKAGE
+  // Historical rows only; no COS adapter or SDK remains in the application.
   TENCENT_COS
 }
 
@@ -1408,7 +1410,7 @@ model Attachment {
   expectedSizeBytes     BigInt                    @map("expected_size_bytes") @db.UnsignedBigInt
   actualSizeBytes       BigInt?                   @map("actual_size_bytes") @db.UnsignedBigInt
   sha256                String?                   @db.Char(64)
-  storageProvider       AttachmentStorageProvider @default(TENCENT_COS) @map("storage_provider")
+  storageProvider       AttachmentStorageProvider @default(CLOUDBASE_PACKAGE) @map("storage_provider")
   bucket                String                    @db.VarChar(255)
   region                String                    @db.VarChar(64)
   stagingObjectKey      String?                   @map("staging_object_key") @db.VarChar(1024)

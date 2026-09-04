@@ -1,0 +1,5 @@
+ALTER TABLE `attachments`
+  MODIFY `storage_provider`
+    ENUM('CLOUDBASE_PACKAGE', 'TENCENT_COS')
+    NOT NULL
+    DEFAULT 'CLOUDBASE_PACKAGE';
