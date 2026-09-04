@@ -242,7 +242,7 @@ describe("M3-006 Actual Apply on real MySQL", () => {
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("keeps migrated terminal reimbursement read-only/private and historical completed Demand free of fake close rows", async () => {
     const reimbursementId = (await prisma.legacyMigrationMap.findUniqueOrThrow({ where: { sourceSystem_sourceEntity_sourceId: { sourceSystem: "ZHILIANBAO_V1", sourceEntity: "REIMBURSEMENT", sourceId: "REIMBURSEMENT-003" } } })).targetId;

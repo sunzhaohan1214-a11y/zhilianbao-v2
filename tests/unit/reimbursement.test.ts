@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import ExcelJS from "exceljs";
 import { PDFDocument } from "pdf-lib";
-import { DeterministicFakeInvoiceOcrProvider } from "@/modules/reimbursement/ocr/invoice-ocr-provider";
+import {
+  DeterministicFakeInvoiceOcrProvider,
+  UnavailableInvoiceOcrProvider,
+  getInvoiceOcrProvider,
+} from "@/modules/reimbursement/ocr/invoice-ocr-provider";
 import { classifyInvoiceOcr } from "@/modules/reimbursement/ocr/invoice-ocr-service";
 import { reimbursementDraftSchema, reimbursementExportSchema } from "@/modules/reimbursement/schemas";
 import { validateReimbursementExpenses } from "@/modules/reimbursement/reimbursement-service";
@@ -13,6 +17,14 @@ import { resolveCapabilities } from "@/modules/permissions/role-capabilities";
 import { OUTBOX_EVENT_TYPES, outboxPayloadSchemas } from "@/modules/outbox/outbox-types";
 
 describe("B-M3-001 reimbursement rules", () => {
+  it("keeps the automatic fake OCR provider out of production runtimes", () => {
+    expect(getInvoiceOcrProvider({ APP_ENV: "test" })).toBeInstanceOf(DeterministicFakeInvoiceOcrProvider);
+    expect(getInvoiceOcrProvider({ APP_ENV: "local" })).toBeInstanceOf(DeterministicFakeInvoiceOcrProvider);
+    expect(getInvoiceOcrProvider({ APP_ENV: "test", NODE_ENV: "production" })).toBeInstanceOf(UnavailableInvoiceOcrProvider);
+    expect(getInvoiceOcrProvider({ APP_ENV: "prod", NODE_ENV: "test" })).toBeInstanceOf(UnavailableInvoiceOcrProvider);
+    expect(getInvoiceOcrProvider({})).toBeInstanceOf(UnavailableInvoiceOcrProvider);
+  });
+
   it("accepts only the exact four travel expense types", () => {
     const draft = reimbursementDraftSchema.parse({ type: "TRAVEL", reason: "赴外招商", expenses: [
       { expenseType: "TRAVEL_TRANSPORT_ACTUAL", amount: "188.50" },

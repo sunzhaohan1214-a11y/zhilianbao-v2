@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { e2eUsers, enterpriseE2e, seedAuthFixtures } from "./auth-fixtures";
+import { e2eOrigin } from "./test-origin";
 
 type ChatPayload = {
   data: {
@@ -13,7 +14,7 @@ type ChatPayload = {
 
 async function login(page: Page) {
   const response = await page.request.post("/api/v2/auth/login", {
-    headers: { origin: "http://127.0.0.1:3000" },
+    headers: { origin: e2eOrigin },
     data: { phone: e2eUsers.normal.phone, password: e2eUsers.normal.password },
   });
   expect(response.ok()).toBe(true);

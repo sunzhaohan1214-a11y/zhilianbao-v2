@@ -6,13 +6,13 @@
 > 状态：第一阶段代码已合入，TEST/UAT 与真实运维证据待执行
 > 继承 V1 已验证 CloudBase / Docker / VPC 经验，但 V2 环境必须独立。
 
-## 当前运维事实（2026-09-02）
+## 当前运维事实（2026-09-04）
 
-- `main@b97588e721d954ae7590ffd6f70dab5dc99e4480` 已受保护，required checks 为 `quality`、`database`、`critical-e2e`、`docker-build`、`security`、`performance`、`browser-compat`；该提交的 CI #482 全部通过。
+- PR #54 已合并为 `main@beba53c2f6d7cf43308316af8dc1d9abf6aa0db3`。当前树不含 `.github/workflows`，不得再把历史 GitHub Actions 检查或云端构建作为放行证据。
 - M0–M3 代码和运维编排已经合入，但本事实同步不声称已部署真实 V2 TEST/PROD，也不声称真实 CynosDB、COS、ClamAV、Maintenance Provider 或 AI provider 已完成环境验收。
 - 仓库当前为 public，且不得包含 Secret、真实业务数据、V1 原始资料包或运行证据。生产上线前须再次确认是否维持公开。
 - PR #42 的参考资料包输出仍为 `SAMPLE`，不能进入正式 FULL/cutover 口径。
-- 当前运维顺序是 TEST 配置与部署、smoke、具名 UAT、专用迁移库 FULL 演练、真实备份/恢复演练、PROD preflight；完成前 `RELEASE_READY=NO`。
+- 当前运维顺序是 exact-SHA 本地全门禁与预构建产物、合规的 GitHub 中转、WorkBuddy 仅部署、TEST smoke、具名 UAT、专用迁移库 FULL 演练、套餐内备份/恢复演练、PROD preflight；完成前 `RELEASE_READY=NO`。
 
 ## 1. 环境隔离
 
@@ -27,9 +27,9 @@ V2 PROD       V2正式
 V2 TEST / PROD：
 
 - 独立数据库；
-- 独立COS前缀或桶；
-- 独立Secret；
-- 独立AI配置；
+- 仅使用已证明属于固定套餐的私有附件存储适配器，否则附件保持禁用；
+- 仅使用已批准且不产生额外费用的 Secret 注入方式，否则生产启动保持阻断；
+- 外部付费 AI/OCR 保持禁用，业务走人工降级；
 - 独立CloudBase service。
 
 禁止 V2 TEST 连 V1 PROD DB。
@@ -42,7 +42,7 @@ V2 TEST / PROD：
 output: "standalone"
 ```
 
-Docker：
+本地 Docker 构建：
 
 ```text
 deps
@@ -63,32 +63,12 @@ node worker-dist/runtime-entrypoint.js
 
 Node版本在 Dockerfile 显式固定兼容LTS，不依赖WorkBuddy宿主机。
 
-## 3. WorkBuddy 已知环境坑
+当前仓库不提供默认 `Dockerfile` 或 `Dockerfile.cloudbase`，避免远端平台自动执行依赖安装和应用编译。`Dockerfile.local` 仅保留腾讯云兼容的 standalone、端口、进程入口和 ClamAV 结构；当前阶段不构建交付镜像、不执行部署。未来容器验证也必须在本地电脑完成。
 
-V1已经验证：
+## 3. WorkBuddy 运行边界
 
-### NODE_OPTIONS safe-delete
-
-WorkBuddy 可能注入 safe-delete hook。
-
-若出现依赖安装/构建清理失败：
-
-```bash
-NODE_OPTIONS="" npm ci
-NODE_OPTIONS="" npm run build
-```
-
-### 大批量 rm
-
-不要在 WorkBuddy 环境依赖：
-
-```bash
-rm -rf node_modules .next
-```
-
-被安全钩子阻止时：
-
-> 使用 `mv` 移出工作目录。
+WorkBuddy 不安装依赖、不运行本地构建命令、不清理源码目录，也不修改代码。若部署步骤要求
+`npm ci`、`npm run build`、Docker 源码构建或临时修复，立即停止并退回本地开发电脑。
 
 ### VPC
 
@@ -122,34 +102,16 @@ migration user
 
 ## 5. Secret
 
-生产环境变量由CloudBase/安全配置管理。
+仓库不包含 SSM SDK，也不从外部付费 Secret 服务拉取凭据。生产 Secret 的最终注入方式必须先
+证明属于 CloudBase 固定套餐、不会进入 Git/镜像/日志，且具有最小权限和轮换方案；在形成该证据前
+生产部署保持阻断。`DATABASE_URL`、认证 Secret 等只能由获批运行时在启动进程内注入，不能写入
+仓库、manifest、镜像层或普通交付记录。检测到旧 `SSM_*`、`COS_*` 等付费服务变量时运行时直接拒绝启动。
 
-CloudBase 运行时只以普通环境变量提供非敏感定位信息：
-
-```text
-ZLB_RUNTIME_SECRET_NAME
-ZLB_RUNTIME_SECRET_REGION
-ZLB_RUNTIME_SECRET_VERSION
-ZLB_PROCESS
-```
-
-入口使用实例角色读取显式固定的 SSM 版本（例如 TEST 的 `v2`），且只接受以下完整 JSON 白名单；缺项、空值、未知键
-或读取失败都必须在启动阶段 fail closed：
-
-```text
-DATABASE_URL
-AUTH_RATE_LIMIT_SECRET
-COS_SECRET_ID
-COS_SECRET_KEY
-```
-
-不得把上述四项回填为 CloudBase 明文环境变量。实例角色只授予指定凭据的
-`ssm:GetSecretValue`，不得使用账户级通配资源。
-
-CloudBase 部署使用仓库内的 `Dockerfile.cloudbase`。它只在
-`ZLB_PROCESS=attachment-scan` 时启动绑定 `127.0.0.1:3310` 的 ClamAV，并要求显式配置
-`FILE_SCAN_PROVIDER=clamav`、`CLAMAV_HOST=127.0.0.1`、`CLAMAV_PORT=3310`；病毒库在镜像构建阶段由
-`freshclam` 下载并校验，运行时不依赖临时下载。Web 和 Worker 不启动 ClamAV。
+本地镜像构建使用 `Dockerfile.local`。它只在 `ZLB_PROCESS=attachment-scan` 时启动绑定
+`127.0.0.1:3310` 的 ClamAV，并要求显式配置 `FILE_SCAN_PROVIDER=clamav`、
+`CLAMAV_HOST=127.0.0.1`、`CLAMAV_PORT=3310`；病毒库在本地镜像构建阶段由 `freshclam`
+下载并校验，运行时不依赖临时下载。Web 和 Worker 不启动 ClamAV。CloudBase/WorkBuddy
+不得执行该 Dockerfile。
 
 仓库：
 
@@ -203,9 +165,11 @@ PRD/UI/TECH文档版本独立，不和应用版本混用。
 
 ```text
 merge main
-→ CI通过
-→ WorkBuddy构建
-→ TEST migrate deploy
+→ 本地检出 exact SHA
+→ 本地完整门禁、迁移验证和 OCI 镜像构建通过
+→ 本地操作者对获批 TEST 目标执行 migrate deploy
+→ GitHub 仅中转 exact-SHA 代码与经核验的本地镜像交付信息
+→ WorkBuddy 只导入本地预构建镜像
 → TEST deploy
 → /health
 → /ready

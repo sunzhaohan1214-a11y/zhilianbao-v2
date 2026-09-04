@@ -1,7 +1,7 @@
 # 本地优先与零额外云成本基线
 
 > 生效日期：2026-09-04  
-> 基线提交：`6f3c22d352676ed1838d85c9324207170b05048c`  
+> 当前合并基线：`beba53c2f6d7cf43308316af8dc1d9abf6aa0db3`（PR #54）
 > 状态：基础设施与交付流程的强制覆盖规则
 
 本文件只覆盖开发、验证、云 Provider、成本和部署职责；不改变 PRD、权限、状态机、字段、审计、迁移和数据安全规则。
@@ -56,6 +56,8 @@ npm run verify:local:full
 - 已移除额外付费对象存储，因此部署环境附件功能保持 fail closed；在实现并批准 CloudBase 套餐内存储适配器前不能发布依赖附件的完整版本。
 - 已移除外部 OCR，报销继续使用人工录入和人工确认。
 - 已移除真实云备份 Provider，备份/恢复就绪度为 `NOT_CONFIGURED`；在套餐内方案通过恢复验证前 `RELEASE_READY=NO`。
+- GitHub 到 CloudBase 的最终交付通道尚未证明能够直接部署本地预构建产物；若实际流程会在 GitHub Actions、CloudBase 或其他云端重新编译，必须停止，不得把该流程当成合规部署路径。
+- 仓库已删除可被远端自动发现的默认 `Dockerfile` / `Dockerfile.cloudbase`。`Dockerfile.local` 只保留腾讯云兼容运行结构，当前阶段不执行部署或制品中转；未来也只能先在本地构建和验证。
 - GitHub 仓库保持公开；严禁提交 Secret、真实业务数据、V1 原包、真实附件和敏感运行证据。
 
 ## 变更控制

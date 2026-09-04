@@ -19,7 +19,11 @@
 
 WorkBuddy 不执行 `npm ci`、不编译、不生成 migration、不修改源码、不修 Bug。它只接收 Codex 在本地生成并验证的产物，核对 exact SHA 后推送到 CloudBase。
 
+当前阶段只开发和验证本地平台，不执行本清单。仓库刻意不提供默认 `Dockerfile` 或 `Dockerfile.cloudbase`；`Dockerfile.local` 仅保留腾讯云兼容运行结构，未来必须先由本地电脑构建和验证。
+
 若产物不完整、SHA 不匹配或需要现场改代码：停止部署，返回本地由 Codex 修复并重新验证。
+
+若所谓“从 GitHub 部署”会触发 GitHub Actions、CloudBase Dockerfile 构建、远程 `npm ci` / `npm run build`，或依赖固定套餐外的镜像仓库／制品存储：停止部署。当前仓库不把任何交付通道视为已验证。
 
 # CloudBase
 

@@ -6,13 +6,13 @@
 
 ## 当前事实快照
 
-截至 2026-09-02：
+截至 2026-09-04：
 
 | 项目 | 当前事实 |
 | --- | --- |
-| `main` | 本次本地化重构基线为 `6f3c22d352676ed1838d85c9324207170b05048c` |
+| `main` | 零额外云成本整改已由 PR #54 合并至 `beba53c2f6d7cf43308316af8dc1d9abf6aa0db3`；后续工作必须重新抓取并以实时 `origin/main` 为准 |
 | 第一阶段代码 | M0–M3 已合入；PR #22、#24、#28、#29、#35、#36、#39、#40、#41、#42、#50 等均已合并 |
-| 主线治理 | GitHub Actions 云端 CI 已取消；合并依据为 exact-SHA 本地验证清单和人工 Review |
+| 主线治理 | 当前提交不含 `.github/workflows`；GitHub Actions 云端 CI 已取消，合并依据为 exact-SHA 本地验证清单和人工 Review；仓库级 Actions 开关仍须在每次交付时只读复核 |
 | 仓库可见性 | public（已确认保留）；严禁提交 Secret、真实业务数据、迁移原包和敏感运行证据 |
 | V1 数据 | PR #42 只完成参考资料包的 `SAMPLE` 适配，不能替代受控 `FULL` 演练、正式迁移或对账 |
 | 发布结论 | `RELEASE_READY=NO`；TEST 部署与 smoke、具名 UAT、真实 FULL 演练、生产备份/恢复及 PROD preflight 尚未形成完整证据 |
@@ -23,7 +23,7 @@
 - Tailwind CSS 4
 - Vitest、Playwright
 - npm + `package-lock.json`
-- Next.js standalone Docker 镜像
+- Next.js standalone 本地预构建 OCI 镜像
 
 ## 本地启动
 
@@ -66,12 +66,13 @@ npx playwright install chromium
 
 ## Docker
 
+当前阶段不部署。仓库没有默认 `Dockerfile` 或 `Dockerfile.cloudbase`，防止 GitHub、CloudBase 或其他远端构建器自动编译源码；只保留可在未来本地验证的腾讯云兼容容器结构：
+
 ```bash
-docker build -t zhilianbao-v2:m3-008 .
-docker run --rm -p 3000:3000 zhilianbao-v2:m3-008
+docker build --file Dockerfile.local --tag zhilianbao-v2:local .
 ```
 
-容器内服务监听 `0.0.0.0:3000`。
+`Dockerfile.local` 固定 Node、Next.js standalone、`0.0.0.0:3000`、Web/Worker/扫描进程入口和本地 ClamAV 结构。当前电脑未安装 Docker，因此容器构建为 `NOT_RUN`；这不影响 Node + 本地 MySQL 的平台开发与验收。未来部署前必须先在本地完成镜像验证，不能从 GitHub 源码触发远端应用编译。
 
 ## 附件服务配置
 

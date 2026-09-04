@@ -4,9 +4,11 @@ import { assertZeroExtraCostPolicy } from "@/runtime/zero-extra-cost-policy";
 describe("zero extra cost policy", () => {
   it("accepts the disabled providers and local memory storage", () => {
     expect(() => assertZeroExtraCostPolicy({
+      APP_ENV: "local",
       BACKUP_PROVIDER: "unavailable",
       ATTACHMENT_STORAGE_PROVIDER: "memory",
     })).not.toThrow();
+    expect(() => assertZeroExtraCostPolicy({ APP_ENV: "test", BACKUP_PROVIDER: "fake" })).not.toThrow();
   });
 
   it.each([
@@ -30,6 +32,15 @@ describe("zero extra cost policy", () => {
     expect(() => assertZeroExtraCostPolicy({ BACKUP_PROVIDER: "tencent-cynosdb" }))
       .toThrow("EXTRA_PAID_PROVIDER_DISABLED:BACKUP_PROVIDER");
     expect(() => assertZeroExtraCostPolicy({ ATTACHMENT_STORAGE_PROVIDER: "cos" }))
+      .toThrow("EXTRA_PAID_PROVIDER_DISABLED:ATTACHMENT_STORAGE_PROVIDER");
+  });
+
+  it("rejects test-only providers when production is declared anywhere", () => {
+    expect(() => assertZeroExtraCostPolicy({ APP_ENV: "test", NODE_ENV: "production", BACKUP_PROVIDER: "fake" }))
+      .toThrow("EXTRA_PAID_PROVIDER_DISABLED:BACKUP_PROVIDER");
+    expect(() => assertZeroExtraCostPolicy({ APP_ENV: "prod", NODE_ENV: "test", ATTACHMENT_STORAGE_PROVIDER: "memory" }))
+      .toThrow("EXTRA_PAID_PROVIDER_DISABLED:ATTACHMENT_STORAGE_PROVIDER");
+    expect(() => assertZeroExtraCostPolicy({ ATTACHMENT_STORAGE_PROVIDER: "memory" }))
       .toThrow("EXTRA_PAID_PROVIDER_DISABLED:ATTACHMENT_STORAGE_PROVIDER");
   });
 });

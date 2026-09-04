@@ -179,6 +179,7 @@ describe("V1 reference source safety contract", () => {
     const root = await mkdtemp(path.join(tmpdir(), "v1-reference-git-marker-"));
     temporaryRoots.push(root);
     await initializeGitRoot(root);
+    if (process.platform === "win32") await execFileAsync("attrib.exe", ["-H", path.join(root, ".git")]);
     await rename(path.join(root, ".git"), path.join(root, "git-metadata"));
     await symlink(process.platform === "win32" ? path.join(root, "git-metadata") : "git-metadata", path.join(root, ".git"), process.platform === "win32" ? "junction" : "dir");
     await expect(assertPrivateMigrationOutput(path.join(root, "prepared"))).rejects.toThrow("V1_PACKAGE_OUTPUT_INSIDE_TRACKED_GIT_PATH");

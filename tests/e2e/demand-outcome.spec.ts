@@ -6,6 +6,7 @@ import { DemandOutcomeDueJobHandler } from "@/modules/jobs/handlers/demand-outco
 import { DEMAND_LIFECYCLE_NOTIFICATION_EVENTS, DemandProgressCloseNotificationHandler } from "@/modules/outbox/handlers/demand-progress-close-notification-handler";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { e2eUsers, enterpriseE2e, seedAuthFixtures } from "./auth-fixtures";
+import { e2eOrigin } from "./test-origin";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
@@ -14,7 +15,7 @@ async function login(browser: Browser, user: { phone: string; password: string }
   const context = await browser.newContext();
   const page = await context.newPage();
   const response = await page.request.post("/api/v2/auth/login", {
-    headers: { origin: "http://127.0.0.1:3000" },
+    headers: { origin: e2eOrigin },
     data: { phone: user.phone, password: user.password },
   });
   expect(response.status()).toBe(200);
@@ -132,7 +133,7 @@ test("completed demand follows the tracked outcome lifecycle and exposes only ap
   await expect(page.getByText("暂无成效轮次。")).toBeVisible();
   await expect(page.getByText("¥0.00").first()).toBeVisible();
   const forbidden = await page.request.post(`/api/v2/demand-outcomes/${firstRound.id}/update`, {
-    headers: { "content-type": "application/json", origin: "http://127.0.0.1:3000" },
+    headers: { "content-type": "application/json", origin: e2eOrigin },
     data: { expectedVersion: firstRound.editVersion, trackingDate: today, contractAmountIncrement: "999", investmentAmountIncrement: "0", policyFundIncrement: "0", costReductionIncrement: "0", talentIntroducedIncrement: 0, patentIncrement: 0, nextTrackingDate: tomorrow, endTracking: false, attachmentIds: [] },
   });
   expect(forbidden.status()).toBe(403);

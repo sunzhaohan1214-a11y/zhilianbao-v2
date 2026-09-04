@@ -18,6 +18,18 @@ function isConfigured(value: string | undefined): boolean {
   return Boolean(value?.trim());
 }
 
+export function testOnlyProviderRuntimeAllowed(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const appEnvironment = environment.APP_ENV?.trim().toLowerCase();
+  const nodeEnvironment = environment.NODE_ENV?.trim().toLowerCase();
+  const explicitlyNonProduction = appEnvironment !== "prod"
+    && appEnvironment !== "production"
+    && nodeEnvironment !== "production";
+  return explicitlyNonProduction
+    && (appEnvironment === "local" || appEnvironment === "test" || nodeEnvironment === "test");
+}
+
 /**
  * Reject legacy paid-cloud configuration before the application starts.
  * Values are never included in errors or logs.
@@ -29,12 +41,13 @@ export function assertZeroExtraCostPolicy(
   if (configuredKey) throw new Error(`EXTRA_PAID_PROVIDER_DISABLED:${configuredKey}`);
 
   const backupProvider = environment.BACKUP_PROVIDER?.trim().toLowerCase();
-  if (backupProvider && backupProvider !== "unavailable" && backupProvider !== "fake") {
+  if (backupProvider && backupProvider !== "unavailable"
+    && !(backupProvider === "fake" && testOnlyProviderRuntimeAllowed(environment))) {
     throw new Error("EXTRA_PAID_PROVIDER_DISABLED:BACKUP_PROVIDER");
   }
 
   const attachmentProvider = environment.ATTACHMENT_STORAGE_PROVIDER?.trim().toLowerCase();
-  if (attachmentProvider && attachmentProvider !== "memory") {
+  if (attachmentProvider && !(attachmentProvider === "memory" && testOnlyProviderRuntimeAllowed(environment))) {
     throw new Error("EXTRA_PAID_PROVIDER_DISABLED:ATTACHMENT_STORAGE_PROVIDER");
   }
 }

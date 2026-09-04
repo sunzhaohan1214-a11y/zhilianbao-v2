@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import { assertZeroExtraCostPolicy } from "./src/runtime/zero-extra-cost-policy";
+
+assertZeroExtraCostPolicy(process.env);
 
 const production = process.env.APP_ENV?.toLowerCase() === "prod";
 const httpsReady = process.env.PROD_HTTPS_ENABLED === "true";

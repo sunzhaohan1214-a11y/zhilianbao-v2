@@ -1,3 +1,5 @@
+import { testOnlyProviderRuntimeAllowed } from "@/runtime/zero-extra-cost-policy";
+
 export type InvoiceOcrResult = {
   documentKind?: string;
   invoiceNo?: string;
@@ -32,7 +34,9 @@ export class UnavailableInvoiceOcrProvider implements InvoiceOcrProvider {
   async extract(): Promise<InvoiceOcrResult> { throw new InvoiceOcrUnavailableError("专业票据 OCR 尚未配置"); }
 }
 
-export function getInvoiceOcrProvider(): InvoiceOcrProvider {
-  if (process.env.APP_ENV === "test") return new DeterministicFakeInvoiceOcrProvider();
+export function getInvoiceOcrProvider(
+  environment: Record<string, string | undefined> = process.env,
+): InvoiceOcrProvider {
+  if (testOnlyProviderRuntimeAllowed(environment)) return new DeterministicFakeInvoiceOcrProvider();
   return new UnavailableInvoiceOcrProvider();
 }

@@ -5,6 +5,7 @@ import { shanghaiDateString } from "@/modules/demand";
 import { DEMAND_LIFECYCLE_NOTIFICATION_EVENTS, DemandProgressCloseNotificationHandler } from "@/modules/outbox/handlers/demand-progress-close-notification-handler";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { e2eUsers, enterpriseE2e, seedAuthFixtures } from "./auth-fixtures";
+import { e2eOrigin } from "./test-origin";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
@@ -13,7 +14,7 @@ async function login(browser: Browser, user: { phone: string; password: string }
   const context = await browser.newContext();
   const page = await context.newPage();
   const response = await page.request.post("/api/v2/auth/login", {
-    headers: { origin: "http://127.0.0.1:3000" },
+    headers: { origin: e2eOrigin },
     data: { phone: user.phone, password: user.password },
   });
   expect(response.status()).toBe(200);

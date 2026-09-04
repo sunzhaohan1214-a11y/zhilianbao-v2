@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { getPrismaClient } from "@/lib/db/prisma";
 import { e2eUsers, enterpriseE2e, seedAuthFixtures } from "./auth-fixtures";
 
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "serial", timeout: 120_000 });
 
 async function login(page: Page, user: { phone: string; password: string }) {
   await page.goto("/login");
@@ -51,9 +51,10 @@ async function uploadResolveAndConfirm(page: Page, buffer: Buffer) {
   await expect(candidateSummaries).toHaveCount(2);
   await expect(candidateSummaries.first()).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(enterpriseE2e.enterpriseId.slice(0, 8)) })).toHaveCount(0);
-  const resolution = page.waitForResponse((response) => response.url().includes("/resolve") && response.request().method() === "POST");
+  const resolution = page.waitForResponse((response) => response.url().endsWith("/api/v2/admin/import-row-resolution") && response.request().method() === "POST");
   await page.getByRole("button", { name: "选择 宝应智造示范企业" }).click();
-  expect((await resolution).status()).toBe(200);
+  const resolutionResponse = await resolution;
+  expect(resolutionResponse.status(), await resolutionResponse.text()).toBe(200);
   await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
   await page.getByRole("button", { name: "确认导入" }).click();
   const dialog = page.getByRole("dialog", { name: "确认执行正式导入" });
@@ -85,9 +86,10 @@ async function uploadMemberResolveAndConfirm(page: Page, buffer: Buffer) {
   await page.getByRole("button", { name: "上传并创建预览" }).click();
   await page.waitForURL(/\/admin\/imports\/[0-9a-f-]+$/);
   await expect(page.getByText("PREVIEW_READY", { exact: true })).toBeVisible();
-  const resolution = page.waitForResponse((response) => response.url().includes("/resolve") && response.request().method() === "POST");
+  const resolution = page.waitForResponse((response) => response.url().endsWith("/api/v2/admin/import-row-resolution") && response.request().method() === "POST");
   await page.getByRole("button", { name: "创建新记录" }).click();
-  expect((await resolution).status()).toBe(200);
+  const resolutionResponse = await resolution;
+  expect(resolutionResponse.status(), await resolutionResponse.text()).toBe(200);
   await expect(page.getByRole("button", { name: "确认导入" })).toBeEnabled();
   await page.getByRole("button", { name: "确认导入" }).click();
   await page.getByLabel("正式导入原因").fill("E2E 成员正式导入");

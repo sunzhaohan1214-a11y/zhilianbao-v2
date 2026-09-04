@@ -1,3 +1,6 @@
+# This image must be built and verified on the local development computer.
+# Do not configure GitHub Actions, CloudBase, WorkBuddy, or another remote builder
+# to execute this Dockerfile.
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -22,7 +25,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-RUN addgroup --system --gid 1001 nodejs \
+RUN apk add --no-cache clamav su-exec tini \
+  && freshclam \
+  && test -n "$(find /var/lib/clamav -maxdepth 1 -type f \( -name '*.cvd' -o -name '*.cld' \) -print -quit)" \
+  && addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
 
 COPY --from=builder /app/public ./public
@@ -34,7 +40,10 @@ COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY deploy/cloudbase/clamd.conf /etc/clamav/clamd.conf
+COPY deploy/cloudbase/runtime-entrypoint.sh /usr/local/bin/zhilianbao-runtime-entrypoint
+RUN chmod 0755 /usr/local/bin/zhilianbao-runtime-entrypoint \
+  && chown -R clamav:clamav /var/lib/clamav
 
-USER nextjs
 EXPOSE 3000
-CMD ["node", "worker-dist/runtime-entrypoint.js"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/zhilianbao-runtime-entrypoint"]
