@@ -284,6 +284,38 @@ export class AttachmentService {
     };
   }
 
+  async readPreviewContent(input: {
+    actor: PermissionActor;
+    attachmentId: string;
+    context: AuthRequestContext;
+  }) {
+    await authorizeActor({ actor: input.actor, action: "attachment.temporary_self_access" });
+    const attachment = await this.requireAttachment(input.attachmentId);
+    if (attachment.isTemporary) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "临时附件不能通过正式预览地址访问");
+    const allowed = await this.parentAuthorizers.authorizeAll({
+      actor: input.actor,
+      links: attachment.links,
+      action: "PREVIEW",
+    });
+    if (!allowed) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "无权访问此附件");
+    if (attachment.uploadStatus !== "UPLOADED" || attachment.scanStatus !== "PASSED" || !attachment.objectKey) {
+      throw new AttachmentError("ATTACHMENT_STATE_CONFLICT", "文件尚未通过安全检查");
+    }
+    const body = await this.storage.readObject(attachment.objectKey);
+    await this.repository.recordAccess({
+      attachmentId: attachment.id,
+      personId: input.actor.personId,
+      action: "PREVIEW",
+      ip: input.context.ip,
+      device: input.context.deviceName,
+      requestId: input.context.requestId,
+    });
+    return {
+      body,
+      mimeType: attachment.detectedMimeType ?? attachment.declaredMimeType,
+    };
+  }
+
   async abort(input: { actor: PermissionActor; attachmentId: string; context?: AuthRequestContext }) {
     const attachment = await this.requireAttachment(input.attachmentId);
     if (!attachment.uploadedByPersonId) throw new AttachmentError("ATTACHMENT_FORBIDDEN", "公开临时附件不能通过内部接口操作");

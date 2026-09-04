@@ -56,7 +56,12 @@ function cleanOptional(value: string | undefined): string | null {
   return value?.trim() ? value.trim() : null;
 }
 
-function publicMember(person: Prisma.PersonGetPayload<{ include: typeof memberInclude }>, currentBatchId: string | null, now: Date) {
+function publicMember(
+  person: Prisma.PersonGetPayload<{ include: typeof memberInclude }>,
+  currentBatchId: string | null,
+  now: Date,
+  avatarAttachmentId: string | null = null,
+) {
   const kind = classifyMember({
     memberships: person.batchMemberships,
     roles: person.roleAssignments,
@@ -70,6 +75,7 @@ function publicMember(person: Prisma.PersonGetPayload<{ include: typeof memberIn
   return {
     id: person.id,
     name: person.name,
+    avatarAttachmentId,
     kind,
     contactPhone: person.account?.phone ?? person.contactPhone,
     hasLoginAccount: person.account !== null,
@@ -97,6 +103,33 @@ function publicMember(person: Prisma.PersonGetPayload<{ include: typeof memberIn
 
 export class MemberService {
   constructor(private readonly prisma = getPrismaClient()) {}
+
+  private async avatarAttachmentIds(personIds: readonly string[]): Promise<Map<string, string>> {
+    if (personIds.length === 0) return new Map();
+    const links = await this.prisma.attachmentLink.findMany({
+      where: {
+        entityType: "PERSON",
+        entityId: { in: [...personIds] },
+        relationType: { in: ["AVATAR", "SOURCE_ATTACHMENT"] },
+        attachment: { uploadStatus: "UPLOADED", scanStatus: "PASSED", isTemporary: false, objectKey: { not: null } },
+      },
+      select: { entityId: true, attachmentId: true, relationType: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    const result = new Map<string, string>();
+    const peopleWithAvatar = new Set<string>();
+    for (const link of links) {
+      if (link.relationType === "AVATAR") {
+        if (!peopleWithAvatar.has(link.entityId)) {
+          result.set(link.entityId, link.attachmentId);
+          peopleWithAvatar.add(link.entityId);
+        }
+      } else if (!result.has(link.entityId)) {
+        result.set(link.entityId, link.attachmentId);
+      }
+    }
+    return result;
+  }
 
   private async currentBatchId(): Promise<string | null> {
     const batches = await this.prisma.batch.findMany({ where: { isCurrent: true, status: "ACTIVE" }, select: { id: true } });
@@ -176,7 +209,8 @@ export class MemberService {
       }),
     ]);
     const now = new Date();
-    const all = people.map((person) => publicMember(person, currentBatchId, now)).filter((person) => person.kind === input.query.kind);
+    const avatars = await this.avatarAttachmentIds(people.map(({ id }) => id));
+    const all = people.map((person) => publicMember(person, currentBatchId, now, avatars.get(person.id) ?? null)).filter((person) => person.kind === input.query.kind);
     const offset = (input.query.page - 1) * input.query.pageSize;
     return { items: all.slice(offset, offset + input.query.pageSize), total: all.length, page: input.query.page, pageSize: input.query.pageSize };
   }
@@ -188,7 +222,8 @@ export class MemberService {
       this.prisma.person.findUnique({ where: { id: input.personId }, include: memberInclude }),
     ]);
     if (!person) throw new FoundationError("MEMBER_NOT_FOUND", "团员不存在");
-    const result = publicMember(person, currentBatchId, new Date());
+    const avatars = await this.avatarAttachmentIds([person.id]);
+    const result = publicMember(person, currentBatchId, new Date(), avatars.get(person.id) ?? null);
     if (!result.kind) throw new FoundationError("MEMBER_NOT_FOUND", "该人员不是团员或往届成员");
     return result;
   }
