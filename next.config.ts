@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const production = process.env.APP_ENV?.toLowerCase() === "prod";
 const httpsReady = process.env.PROD_HTTPS_ENABLED === "true";
-const scriptSources = ["'self'", "'unsafe-inline'", "https://map.qq.com"];
+const scriptSources = ["'self'", "'unsafe-inline'"];
 if (!production) scriptSources.push("'unsafe-eval'");
 
 const contentSecurityPolicy = [
@@ -14,8 +14,8 @@ const contentSecurityPolicy = [
   `script-src ${scriptSources.join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
-  "img-src 'self' data: blob: https://*.myqcloud.com https://*.map.qq.com https://*.map.gtimg.com",
-  "connect-src 'self' https://*.myqcloud.com https://*.map.qq.com https://*.map.gtimg.com",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   ...(production && httpsReady ? ["upgrade-insecure-requests"] : []),

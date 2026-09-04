@@ -1,6 +1,6 @@
 import http from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
-import { loadRuntimeSecret } from "./runtime-secret";
+import { assertZeroExtraCostPolicy } from "./zero-extra-cost-policy";
 
 type RuntimeProcess = "web" | "worker" | "attachment-scan";
 
@@ -41,7 +41,7 @@ function superviseLongRunning(script: string, withProbe: boolean): void {
 }
 
 async function main(): Promise<void> {
-  await loadRuntimeSecret();
+  assertZeroExtraCostPolicy();
   const selected = runtimeProcess();
   if (selected === "web") superviseLongRunning("server.js", false);
   else if (selected === "worker") superviseLongRunning("worker-dist/main.js", true);

@@ -643,8 +643,12 @@ export async function validateBackupEvidence(raw: string | undefined, candidateS
   const details = parsed.details!;
   const snapshotAt = typeof details.snapshotAt === "string" ? new Date(details.snapshotAt) : null;
   const fresh = snapshotAt && !Number.isNaN(snapshotAt.getTime()) && snapshotAt.getTime() <= now.getTime() && now.getTime() - snapshotAt.getTime() <= 86_400_000;
-  return details.provider === "tencent-cynosdb" && details.health === "READY" && details.backupStatus === "SUCCEEDED" && details.sourceEnvironment === "PROD"
-    && details.region === expected.region && details.clusterId === expected.clusterId && details.vpcId === expected.vpcId && details.subnetId === expected.subnetId && fresh
+  const identityMatches = (!expected.region || details.region === expected.region)
+    && (!expected.clusterId || details.clusterId === expected.clusterId)
+    && (!expected.vpcId || details.vpcId === expected.vpcId)
+    && (!expected.subnetId || details.subnetId === expected.subnetId);
+  return details.provider === "cloudbase-included" && details.health === "READY" && details.backupStatus === "SUCCEEDED" && details.sourceEnvironment === "PROD"
+    && identityMatches && fresh
     ? parsed.validation
     : { status: "FAIL", errorCode: "BACKUP_EVIDENCE_IDENTITY_HEALTH_OR_FRESHNESS_INVALID", evidenceRef: parsed.validation.evidenceRef };
 }
@@ -761,13 +765,13 @@ export function buildReleaseReadiness(input: ReleaseGateInputs, timestamp = new 
     { code: "AI_CONTRACT_HARNESS_AVAILABLE", category: "ai", status: "PASS", requiredForProduction: false, codeReachable: true, version: "m3-008-v2" },
     { code: "FILE_SCANNER_CONFIGURED", category: "attachments", status: input.scannerConfigured ? "PASS" : "BLOCKED_BY_EXTERNAL_ENV", requiredForProduction: true, codeReachable: false, configured: input.scannerConfigured, provider: input.scannerConfigured ? "clamav" : "unavailable", errorCode: input.scannerConfigured ? undefined : "FILE_SCANNER_NOT_CONFIGURED" },
     evidenceGate("FILE_SCANNER_PRODUCTION_EVIDENCE", "attachments", input.scannerEvidence),
-    { code: "CLOUD_BACKUP_CONFIGURED", category: "backup", status: input.backupConfigured ? "PASS" : "BLOCKED_BY_EXTERNAL_ENV", requiredForProduction: true, codeReachable: false, configured: input.backupConfigured, provider: input.backupConfigured ? "tencent-cynosdb" : "unavailable", errorCode: input.backupConfigured ? undefined : "BACKUP_PROVIDER_NOT_CONFIGURED" },
+    { code: "CLOUD_BACKUP_CONFIGURED", category: "backup", status: input.backupConfigured ? "PASS" : "BLOCKED_BY_EXTERNAL_ENV", requiredForProduction: true, codeReachable: false, configured: input.backupConfigured, provider: input.backupConfigured ? "cloudbase-included" : "unavailable", errorCode: input.backupConfigured ? undefined : "BACKUP_PROVIDER_NOT_CONFIGURED" },
     evidenceGate("REAL_CLOUD_BACKUP_EVIDENCE", "backup", input.backupEvidence),
     evidenceGate("REAL_MAINTENANCE_PROVIDER_EVIDENCE", "restore", input.maintenanceEvidence),
     evidenceGate("REAL_RESTORE_DRILL_EVIDENCE", "restore", input.restoreEvidence),
     evidenceGate("FULL_V1_REHEARSAL_EVIDENCE", "migration", input.migrationEvidence, "BLOCKED_BY_SOURCE_DATA"),
-    evidenceGate("GITHUB_MAIN_PROTECTION", "github", input.githubProtection),
-    evidenceGate("EXACT_HEAD_SEVEN_JOB_CI", "ci", input.exactHeadCi),
+    evidenceGate("GITHUB_VERSION_CONTROL_ONLY", "github", input.githubProtection),
+    evidenceGate("EXACT_HEAD_LOCAL_VERIFICATION", "ci", input.exactHeadCi),
     evidenceGate("UAT_SIGNOFF_EVIDENCE", "uat", input.uatEvidence, "BLOCKED_BY_UAT"),
     evidenceGate("PROD_PREFLIGHT_EVIDENCE", "production", input.preflightEvidence),
     { code: "REAL_AI_PROVIDER_EVAL", category: "ai", status: input.realAiEvidence?.status ?? "BLOCKED_BY_EXTERNAL_ENV", requiredForProduction: false, codeReachable: false, errorCode: input.realAiEvidence?.errorCode ?? "REAL_AI_EVAL_NOT_EXECUTED", evidenceRef: input.realAiEvidence?.evidenceRef },

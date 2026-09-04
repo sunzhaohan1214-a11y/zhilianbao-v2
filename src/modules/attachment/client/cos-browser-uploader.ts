@@ -1,8 +1,7 @@
-"use client";
-
-import COS from "cos-js-sdk-v5";
 import type { UploadAuthorization } from "../storage/storage-adapter";
 
+// Compatibility types remain while forms are migrated to a CloudBase-package adapter.
+// This module performs no COS request and cannot initialize a paid cloud SDK.
 export type BrowserUploadIntent = {
   bucket: string;
   region: string;
@@ -18,73 +17,41 @@ export type AttachmentUploadTask = {
   getTaskId(): string | undefined;
 };
 
-type CosUploadTaskClient = Pick<COS, "uploadFile" | "pauseTask" | "restartTask" | "cancelTask">;
+type LegacyTaskClient = {
+  uploadFile(params: LegacyUploadParams): Promise<unknown>;
+  pauseTask(id: string): void;
+  restartTask(id: string): void;
+  cancelTask(id: string): void;
+};
+type LegacyUploadParams = Record<string, unknown> & { onTaskReady?: (id: string) => void };
 
-export function createAttachmentUploadTask(
-  cos: CosUploadTaskClient,
-  params: COS.UploadFileParams,
-): AttachmentUploadTask {
+export function createAttachmentUploadTask(client: LegacyTaskClient, params: LegacyUploadParams): AttachmentUploadTask {
   let taskId: string | undefined;
   let desiredState: "running" | "paused" | "canceled" = "running";
   const originalOnTaskReady = params.onTaskReady;
-  const promise = cos.uploadFile({
+  const promise = client.uploadFile({
     ...params,
-    onTaskReady(id) {
+    onTaskReady(id: string) {
       taskId = id;
-      if (desiredState === "paused") cos.pauseTask(id);
-      if (desiredState === "canceled") cos.cancelTask(id);
+      if (desiredState === "paused") client.pauseTask(id);
+      if (desiredState === "canceled") client.cancelTask(id);
       originalOnTaskReady?.(id);
     },
   }).then(() => undefined);
-
   return {
     promise,
-    pause() {
-      if (desiredState === "canceled") return;
-      desiredState = "paused";
-      if (taskId) cos.pauseTask(taskId);
-    },
-    resume() {
-      if (desiredState === "canceled") return;
-      desiredState = "running";
-      if (taskId) cos.restartTask(taskId);
-    },
-    cancel() {
-      if (desiredState === "canceled") return;
-      desiredState = "canceled";
-      if (taskId) cos.cancelTask(taskId);
-    },
-    getTaskId() {
-      return taskId;
-    },
+    pause() { if (desiredState !== "canceled") { desiredState = "paused"; if (taskId) client.pauseTask(taskId); } },
+    resume() { if (desiredState !== "canceled") { desiredState = "running"; if (taskId) client.restartTask(taskId); } },
+    cancel() { if (desiredState !== "canceled") { desiredState = "canceled"; if (taskId) client.cancelTask(taskId); } },
+    getTaskId() { return taskId; },
   };
 }
 
 export function uploadAttachmentToCos(
-  intent: BrowserUploadIntent,
-  file: File,
-  onProgress?: (progress: number) => void,
+  _intent: BrowserUploadIntent,
+  _file: File,
+  _onProgress?: (progress: number) => void,
 ): AttachmentUploadTask {
-  if (intent.upload.type !== "COS_STS") throw new Error("COS_STS_UPLOAD_REQUIRED");
-  const credentials = intent.upload.credentials;
-  const cos = new COS({
-    getAuthorization(_options, callback) {
-      callback({
-        TmpSecretId: credentials.tmpSecretId,
-        TmpSecretKey: credentials.tmpSecretKey,
-        SecurityToken: credentials.sessionToken,
-        StartTime: credentials.startTime,
-        ExpiredTime: credentials.expiredTime,
-        ScopeLimit: true,
-      });
-    },
-  });
-  return createAttachmentUploadTask(cos, {
-    Bucket: intent.bucket,
-    Region: intent.region,
-    Key: intent.stagingObjectKey,
-    Body: file,
-    SliceSize: 1024 * 1024,
-    onProgress: ({ percent }) => onProgress?.(percent),
-  });
+  void _intent; void _file; void _onProgress;
+  throw new Error("额外付费 COS 上传已禁用；请使用本地测试存储或经批准的 CloudBase 套餐内存储");
 }

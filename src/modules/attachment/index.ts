@@ -9,6 +9,5 @@ export * from "./file-policy";
 export * from "./object-keys";
 export * from "./parent-authorization";
 export * from "./scan/file-scan-adapter";
-export * from "./storage/cos-storage-adapter";
 export * from "./storage/in-memory-storage-adapter";
 export * from "./storage/storage-adapter";

@@ -262,7 +262,7 @@ export class MigrationApplyRunner {
     const inspected = await validateMigrationScan(value, body, this.scanner);
     const attachmentId = randomUUID();
     const objectKey = `migration/${input.manifest.sourceSystem.toLowerCase()}/${attachmentId}/${value.sha256}.${inspected.detected.extension}`;
-    await this.repository.prisma.attachment.create({ data: { id: attachmentId, originalFilename: inspected.originalFilename, extension: inspected.extension, declaredMimeType: inspected.declaredMimeType, expectedSizeBytes: BigInt(value.size), storageProvider: "TENCENT_COS", bucket: this.storage.bucket, region: this.storage.region, objectKey, uploadStatus: "PENDING_UPLOAD", scanStatus: "PENDING", isTemporary: true, uploadedByPersonId: input.actor.personId } });
+    await this.repository.prisma.attachment.create({ data: { id: attachmentId, originalFilename: inspected.originalFilename, extension: inspected.extension, declaredMimeType: inspected.declaredMimeType, expectedSizeBytes: BigInt(value.size), storageProvider: "CLOUDBASE_PACKAGE", bucket: this.storage.bucket, region: this.storage.region, objectKey, uploadStatus: "PENDING_UPLOAD", scanStatus: "PENDING", isTemporary: true, uploadedByPersonId: input.actor.personId } });
     await this.storage.writeObject(objectKey, body, inspected.detected.mimeType);
     const targetBody = await this.storage.readObject(objectKey);
     const digest = createHash("sha256").update(targetBody).digest("hex");

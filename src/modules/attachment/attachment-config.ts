@@ -16,11 +16,8 @@ function positiveInteger(value: string | undefined, fallback: number, maximum: n
 }
 
 export function loadAttachmentConfig(environment: Record<string, string | undefined> = process.env): AttachmentConfig {
-  const bucket = environment.COS_BUCKET?.trim();
-  const region = environment.COS_REGION?.trim();
-  if (!bucket || !region) {
-    throw new AttachmentError("ATTACHMENT_STORAGE_UNAVAILABLE", "附件存储尚未配置");
-  }
+  const bucket = environment.ATTACHMENT_BUCKET?.trim() || "local-private-attachments";
+  const region = environment.ATTACHMENT_REGION?.trim() || "local";
   return {
     bucket,
     region,

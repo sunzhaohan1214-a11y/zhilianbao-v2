@@ -1,5 +1,7 @@
 # GitHub Release Gates
 
+> 2026-09-04 覆盖规则：仓库保持公开，GitHub 仅承担版本管理、PR 审阅和代码中转；GitHub Actions required checks 已取消。合并门禁改为人工 Review 加 exact-SHA 本地验证摘要，详见 `LOCAL_FIRST_ZERO_EXTRA_COST.md`。
+
 `main` must be protected before production release. M3-008 does not silently change repository settings because that is an external governance action.
 
 Required branch policy:

@@ -8,64 +8,74 @@ export function resolveMapCenter(input: Pick<RenderMapInput, "center" | "points"
   return input.center ?? (first ? { latitude: first.latitude, longitude: first.longitude } : null);
 }
 
-type TMapApi = {
-  LatLng: new (latitude: number, longitude: number) => unknown;
-  Map: new (container: HTMLElement, options: Record<string, unknown>) => { destroy?: () => void; fitBounds?: (bounds: unknown) => void };
-  MultiMarker: new (options: Record<string, unknown>) => { setMap?: (map: null) => void };
-  MultiPolygon: new (options: Record<string, unknown>) => { setMap?: (map: null) => void };
-};
-declare global { interface Window { TMap?: TMapApi; __tencentMapLoading?: Promise<TMapApi> } }
+type Coordinate = [number, number];
 
-function loadTencentMap(key: string): Promise<TMapApi> {
-  if (window.TMap) return Promise.resolve(window.TMap);
-  if (window.__tencentMapLoading) return window.__tencentMapLoading;
-  window.__tencentMapLoading = new Promise<TMapApi>((resolve, reject) => {
-    const script = document.createElement("script"); script.async = true; script.defer = true;
-    script.src = `https://map.qq.com/api/gljs?v=1.exp&key=${encodeURIComponent(key)}`;
-    script.onload = () => window.TMap ? resolve(window.TMap) : reject(new Error("TMap unavailable"));
-    script.onerror = () => reject(new Error("Tencent map SDK load failed")); document.head.appendChild(script);
-  });
-  return window.__tencentMapLoading;
-}
-function geometries(root: unknown): Array<{ type: string; coordinates: unknown }> {
+function coordinateRings(root: unknown): Coordinate[][] {
   if (!root || typeof root !== "object") return [];
   const value = root as Record<string, unknown>;
-  if (value.type === "FeatureCollection" && Array.isArray(value.features)) return value.features.flatMap(geometries);
-  if (value.type === "Feature") return geometries(value.geometry);
-  return value.type === "Polygon" || value.type === "MultiPolygon" ? [{ type: value.type, coordinates: value.coordinates }] : [];
-}
-function polygonPaths(TMap: TMapApi, shape: BoundaryShape) {
-  const paths: Array<{ id: string; paths: unknown[]; styleId: string }> = [];
-  geometries(shape.geoJson).forEach((geometry, geometryIndex) => {
-    const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
-    if (!Array.isArray(polygons)) return;
-    polygons.forEach((polygon, polygonIndex) => {
-      if (!Array.isArray(polygon)) return;
-      const rings = polygon.map((ring) => Array.isArray(ring) ? ring.map((coordinate) => Array.isArray(coordinate) ? new TMap.LatLng(Number(coordinate[1]), Number(coordinate[0])) : null).filter(Boolean) : []);
-      paths.push({ id: `${shape.id}-${geometryIndex}-${polygonIndex}`, paths: rings, styleId: "boundary" });
-    });
-  });
-  return paths;
-}
-export class TencentMapRenderer implements MapRenderer {
-  private map: { destroy?: () => void } | null = null; private layers: Array<{ setMap?: (map: null) => void }> = [];
-  constructor(private readonly key: string) {}
-  async render(input: RenderMapInput) {
-    const center = resolveMapCenter(input);
-    if (!center) throw new Error("Map center unavailable");
-    const TMap = await loadTencentMap(this.key); this.destroy();
-    this.map = new TMap.Map(input.container, { center: new TMap.LatLng(center.latitude, center.longitude), zoom: input.boundaries.length ? 10 : 5, viewMode: "2D" });
-    if (input.boundaries.length) this.layers.push(new TMap.MultiPolygon({ map: this.map, styles: { boundary: { color: "rgba(22,119,255,0.14)", showBorder: true, borderColor: "#1677ff", borderWidth: 2 } }, geometries: input.boundaries.flatMap((shape) => polygonPaths(TMap, shape)) }));
-    if (input.points.length) {
-      const styles = Object.fromEntries(input.points.map((point) => {
-        const red = point.color === "red"; const label = red ? "★" : (point.label ?? "•");
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="32"><rect x="1" y="1" width="42" height="30" rx="15" fill="${red ? "#dc2626" : "#1677ff"}" stroke="white" stroke-width="2"/><text x="22" y="21" text-anchor="middle" fill="white" font-size="14" font-family="Arial">${label}</text></svg>`;
-        return [`point-${point.id}`, { width: 44, height: 32, anchor: { x: 22, y: 16 }, src: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}` }];
-      }));
-      this.layers.push(new TMap.MultiMarker({ map: this.map, styles, geometries: input.points.map((point) => ({ id: point.id, styleId: `point-${point.id}`, position: new TMap.LatLng(point.latitude, point.longitude), properties: { title: point.name } })) }));
-    }
+  if (value.type === "FeatureCollection" && Array.isArray(value.features)) return value.features.flatMap(coordinateRings);
+  if (value.type === "Feature") return coordinateRings(value.geometry);
+  if (value.type === "Polygon" && Array.isArray(value.coordinates)) return value.coordinates.filter(Array.isArray) as Coordinate[][];
+  if (value.type === "MultiPolygon" && Array.isArray(value.coordinates)) {
+    return value.coordinates.flatMap((polygon) => Array.isArray(polygon) ? polygon.filter(Array.isArray) as Coordinate[][] : []);
   }
-  destroy() { this.layers.forEach((layer) => layer.setMap?.(null)); this.layers = []; this.map?.destroy?.(); this.map = null; }
+  return [];
+}
+
+export class LocalMapRenderer implements MapRenderer {
+  private container: HTMLElement | null = null;
+
+  async render(input: RenderMapInput) {
+    this.destroy();
+    this.container = input.container;
+    const rings = input.boundaries.flatMap((boundary) => coordinateRings(boundary.geoJson));
+    const coordinates = [
+      ...rings.flat(),
+      ...input.points.map((point) => [point.longitude, point.latitude] as Coordinate),
+    ].filter(([longitude, latitude]) => Number.isFinite(longitude) && Number.isFinite(latitude));
+    if (coordinates.length === 0) throw new Error("Map coordinates unavailable");
+
+    const longitudes = coordinates.map(([longitude]) => longitude);
+    const latitudes = coordinates.map(([, latitude]) => latitude);
+    const minLongitude = Math.min(...longitudes); const maxLongitude = Math.max(...longitudes);
+    const minLatitude = Math.min(...latitudes); const maxLatitude = Math.max(...latitudes);
+    const longitudeSpan = Math.max(maxLongitude - minLongitude, 0.01);
+    const latitudeSpan = Math.max(maxLatitude - minLatitude, 0.01);
+    const project = ([longitude, latitude]: Coordinate) => ({
+      x: 32 + ((longitude - minLongitude) / longitudeSpan) * 736,
+      y: 32 + ((maxLatitude - latitude) / latitudeSpan) * 416,
+    });
+
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNamespace, "svg");
+    svg.setAttribute("viewBox", "0 0 800 480");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "基于本地 GeoJSON 绘制的区域与点位示意图");
+    svg.classList.add("h-full", "w-full");
+
+    const background = document.createElementNS(svgNamespace, "rect");
+    background.setAttribute("width", "800"); background.setAttribute("height", "480");
+    background.setAttribute("fill", "#f1f5f9"); svg.appendChild(background);
+
+    for (const ring of rings) {
+      const polygon = document.createElementNS(svgNamespace, "polygon");
+      polygon.setAttribute("points", ring.map((coordinate) => { const point = project(coordinate); return `${point.x},${point.y}`; }).join(" "));
+      polygon.setAttribute("fill", "rgba(66,109,122,0.14)"); polygon.setAttribute("stroke", "#426d7a"); polygon.setAttribute("stroke-width", "2");
+      svg.appendChild(polygon);
+    }
+
+    for (const point of input.points) {
+      const projected = project([point.longitude, point.latitude]);
+      const group = document.createElementNS(svgNamespace, "g");
+      const marker = document.createElementNS(svgNamespace, "circle");
+      marker.setAttribute("cx", String(projected.x)); marker.setAttribute("cy", String(projected.y)); marker.setAttribute("r", "8");
+      marker.setAttribute("fill", point.color === "red" ? "#dc2626" : "#426d7a"); marker.setAttribute("stroke", "white"); marker.setAttribute("stroke-width", "2");
+      const title = document.createElementNS(svgNamespace, "title"); title.textContent = point.name; group.append(marker, title); svg.appendChild(group);
+    }
+    input.container.replaceChildren(svg);
+  }
+
+  destroy() { this.container?.replaceChildren(); this.container = null; }
 }
 
 export class FakeMapRenderer implements MapRenderer { calls: RenderMapInput[] = []; async render(input: RenderMapInput) { this.calls.push(input); } destroy() { this.calls = []; } }
