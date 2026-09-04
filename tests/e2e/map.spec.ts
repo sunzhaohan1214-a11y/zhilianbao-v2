@@ -5,7 +5,9 @@ async function login(page: Page, user: { phone: string; password: string }) { aw
 test.beforeEach(async () => { await seedAuthFixtures(); });
 
 test("ordinary internal uses list-first enterprise/member maps with safe no-key degradation and no GPS", async ({ page }) => {
-  const pageErrors: string[] = []; page.on("pageerror", (error) => pageErrors.push(error.message));
+  const pageErrors: string[] = []; const controlWarnings: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => { if (/uncontrolled input to be controlled|controlled input to be uncontrolled/i.test(message.text())) controlWarnings.push(message.text()); });
   await page.addInitScript(() => { Object.defineProperty(navigator, "geolocation", { configurable: true, value: { getCurrentPosition() { throw new Error("GPS_PERMISSION_REQUESTED"); }, watchPosition() { throw new Error("GPS_PERMISSION_REQUESTED"); } } }); });
   await login(page, e2eUsers.normal); await page.goto("/resources/enterprises"); await expect(page.getByRole("heading", { name: "企业名录" })).toBeVisible();
   await page.getByRole("link", { name: "地图", exact: true }).click(); await expect(page.getByRole("heading", { name: "企业地图" })).toBeVisible(); await expect(page.getByText("尚未导入并激活边界，企业列表仍可使用。")).toBeVisible(); const areaLink = page.getByRole("link", { name: /安宜镇/ }); await expect(areaLink).toContainText("1");
@@ -13,6 +15,7 @@ test("ordinary internal uses list-first enterprise/member maps with safe no-key 
   await page.goto("/resources/enterprises"); await expect(page.getByRole("heading", { name: "企业名录" })).toBeVisible();
   await page.goto("/resources/members"); await expect(page.getByRole("heading", { name: "团员" })).toBeVisible(); await page.getByRole("link", { name: "地图", exact: true }).click(); await expect(page.getByRole("heading", { name: "团员地图" })).toBeVisible(); await expect(page.getByText("展示派出单位地域分布，不是团员实时位置。")).toBeVisible(); await page.getByLabel("派出单位").selectOption(enterpriseE2e.dispatchOrganizationId); await page.getByRole("button", { name: "搜索" }).click(); await expect(page).toHaveURL(new RegExp(`dispatchOrganizationId=${enterpriseE2e.dispatchOrganizationId}`)); await expect(page.getByLabel("派出单位")).toHaveValue(enterpriseE2e.dispatchOrganizationId); await expect(page.locator("article").getByText("E2E 派出单位", { exact: true })).toBeVisible(); await expect(page.getByText("3 人", { exact: true })).toBeVisible();
   expect(pageErrors).not.toContain("GPS_PERMISSION_REQUESTED");
+  expect(controlWarnings).toEqual([]);
   const canonical = await page.evaluate(async ({ areaId }) => Promise.all([
     fetch("/api/v2/enterprises/map-summary").then((response) => response.status),
     fetch(`/api/v2/enterprises/map-points?areaId=${areaId}&page=1&pageSize=100`).then((response) => response.status),
