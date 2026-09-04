@@ -23,7 +23,7 @@
 - Tailwind CSS 4
 - Vitest、Playwright
 - npm + `package-lock.json`
-- Next.js standalone Docker 镜像
+- Next.js standalone 本地预构建 OCI 镜像
 
 ## 本地启动
 
@@ -66,12 +66,13 @@ npx playwright install chromium
 
 ## Docker
 
+当前阶段不部署。仓库没有默认 `Dockerfile` 或 `Dockerfile.cloudbase`，防止 GitHub、CloudBase 或其他远端构建器自动编译源码；只保留可在未来本地验证的腾讯云兼容容器结构：
+
 ```bash
-docker build -t zhilianbao-v2:m3-008 .
-docker run --rm -p 3000:3000 zhilianbao-v2:m3-008
+docker build --file Dockerfile.local --tag zhilianbao-v2:local .
 ```
 
-容器内服务监听 `0.0.0.0:3000`。
+`Dockerfile.local` 固定 Node、Next.js standalone、`0.0.0.0:3000`、Web/Worker/扫描进程入口和本地 ClamAV 结构。当前电脑未安装 Docker，因此容器构建为 `NOT_RUN`；这不影响 Node + 本地 MySQL 的平台开发与验收。未来部署前必须先在本地完成镜像验证，不能从 GitHub 源码触发远端应用编译。
 
 ## 附件服务配置
 

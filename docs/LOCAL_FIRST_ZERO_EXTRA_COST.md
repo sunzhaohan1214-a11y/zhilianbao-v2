@@ -57,6 +57,7 @@ npm run verify:local:full
 - 已移除外部 OCR，报销继续使用人工录入和人工确认。
 - 已移除真实云备份 Provider，备份/恢复就绪度为 `NOT_CONFIGURED`；在套餐内方案通过恢复验证前 `RELEASE_READY=NO`。
 - GitHub 到 CloudBase 的最终交付通道尚未证明能够直接部署本地预构建产物；若实际流程会在 GitHub Actions、CloudBase 或其他云端重新编译，必须停止，不得把该流程当成合规部署路径。
+- 仓库已删除可被远端自动发现的默认 `Dockerfile` / `Dockerfile.cloudbase`。`Dockerfile.local` 只保留腾讯云兼容运行结构，当前阶段不执行部署或制品中转；未来也只能先在本地构建和验证。
 - GitHub 仓库保持公开；严禁提交 Secret、真实业务数据、V1 原包、真实附件和敏感运行证据。
 
 ## 变更控制
