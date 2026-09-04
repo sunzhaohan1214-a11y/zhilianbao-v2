@@ -23,7 +23,8 @@ export class MigrationRepository {
     const key = { sourceSystem_sourceEntity_sourceId: { sourceSystem: input.sourceSystem, sourceEntity: input.sourceEntity, sourceId: input.sourceId } };
     const existing = await tx.legacyMigrationMap.findUnique({ where: key });
     if (!existing) {
-      const { batchId, allowFingerprintAdvance: _, ...mapping } = input;
+      const { batchId, allowFingerprintAdvance, ...mapping } = input;
+      void allowFingerprintAdvance;
       return tx.legacyMigrationMap.create({ data: { ...mapping, firstMigrationBatchId: batchId, lastMigrationBatchId: batchId } });
     }
     if (existing.targetEntity !== input.targetEntity || existing.targetId !== input.targetId) throw new MigrationError("MIGRATION_TARGET_CONFLICT", "同一 V1 源记录不能改指向另一个 V2 目标");

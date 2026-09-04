@@ -6,6 +6,7 @@ import { DemandRecommendationService } from "@/modules/demand";
 import { DemandAlumniHelpActivatedNotificationHandler, DemandAlumniResponseNotificationHandler, DemandRecommendationNotificationHandler } from "@/modules/outbox/handlers/demand-recommendation-notification-handler";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
+import { e2eOrigin } from "./test-origin";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
@@ -13,14 +14,14 @@ test.setTimeout(180_000);
 async function login(browser: Browser, user: { phone: string; password: string }) {
   const context = await browser.newContext();
   const page = await context.newPage();
-  const response = await page.request.post("/api/v2/auth/login", { headers: { origin: "http://127.0.0.1:3000" }, data: { phone: user.phone, password: user.password } });
+  const response = await page.request.post("/api/v2/auth/login", { headers: { origin: e2eOrigin }, data: { phone: user.phone, password: user.password } });
   expect(response.status()).toBe(200);
   await page.goto("/");
   return { context, page };
 }
 
 async function post(page: Page, path: string, body: unknown, headers: Record<string, string> = {}) {
-  const response = await page.request.post(path, { headers: { origin: "http://127.0.0.1:3000", ...headers }, data: body });
+  const response = await page.request.post(path, { headers: { origin: e2eOrigin, ...headers }, data: body });
   return { status: response.status(), payload: await response.json() };
 }
 

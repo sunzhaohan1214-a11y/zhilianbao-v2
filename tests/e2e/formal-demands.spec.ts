@@ -9,6 +9,7 @@ import { FormalDemandService } from "@/modules/demand";
 import { DemandParticipationNotificationHandler } from "@/modules/outbox/handlers/demand-participation-notification-handler";
 import { OutboxHandlerRegistry } from "@/modules/outbox/outbox-handler-registry";
 import { enterpriseE2e, e2eUsers, seedAuthFixtures } from "./auth-fixtures";
+import { e2eOrigin } from "./test-origin";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
@@ -17,7 +18,7 @@ async function login(browser: Browser, user: { phone: string; password: string }
   const context = await browser.newContext();
   const page = await context.newPage();
   const response = await page.request.post("/api/v2/auth/login", {
-    headers: { origin: "http://127.0.0.1:3000" },
+    headers: { origin: e2eOrigin },
     data: { phone: user.phone, password: user.password },
   });
   expect(response.status()).toBe(200);

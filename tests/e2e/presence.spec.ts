@@ -62,7 +62,7 @@ test("MEMBER_CURRENT reports Presence, sees current list, and never requests GPS
 
 test("platform alumni can report while ordinary users cannot browse other-person history", async ({ page }) => {
   await login(page, e2eUsers.alumni.phone, e2eUsers.alumni.password);
-  const interval = futureShanghaiPresenceInterval(new Date(), 8);
+  const interval = futureShanghaiPresenceInterval(new Date(), 30);
   const created = await apiPost(page, "/api/v2/presence", {
     arrivalAt: interval.arrivalAtIso, expectedDepartureAt: interval.expectedDepartureAtIso, note: "E2E 往届报备",
   });
